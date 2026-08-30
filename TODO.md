@@ -24,6 +24,8 @@ Completed Tasks
      triggering move via the model's new `Board.setBatch` (one history entry for
      multiple cells), so undo-to-point removes a move's auto-X marks along with it. See
      `model.js`'s class comment and the new `Board.setBatch` tests in `test/model.test.js`.
+     **Known bug — see Current Objective below: this check doesn't run on the
+     hint-application path, only on manual marking.**
   4. Auto-check mistake pop-up anchored to the board panel (`#mistake-popup` /
      `.mistake-popup` in `index.html` / `styles.css`) with Dismiss and Learn More; Learn
      More reuses the existing on-demand-check flow (`runOnDemandCheck` in `app.js`, backed
@@ -44,9 +46,45 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* None currently active. Item 7 (above) is done pending the manual Cloud Function deploy
-  step. Items 8–10 below are deferred until their own design pass, per the original spec —
-  don't start them without that.
+* **UI consolidation pass + auto-X bug fix.** Playing the item 7 UI surfaced real
+  usability problems, especially bad in portrait (buttons pushed offscreen), plus one
+  regression bug in the already-shipped item 7.3 auto-X logic:
+
+  1. **Single "Help" dropdown, replacing the separate button panels.** One trigger button
+     replaces the current "Hints & help" panel (`Get a hint`) and "Mistakes" panel
+     (`Check my work`, `Remove bad marks`), reclaiming the vertical space both panels take.
+     Menu items, in order:
+     - **How to play** — opens an info screen/overlay with instructions, consistent with
+       the "How to play" pattern used in your other apps (not a toggle of the existing
+       bottom panel — that panel's current instructional content should move into this
+       screen instead, then the bottom panel can go away or be repurposed for the
+       explanation panel in item 2 below).
+     - **Get a hint**
+     - **Check my work**
+     - **Remove bad marks**
+     - **Clear all** — this is the *existing* Reset button/behavior, just relocated into
+       the dropdown instead of its own always-visible button. Keep (or add, if not already
+       present) a confirmation step before it fires, since it clears history and isn't
+       recoverable via undo.
+  2. **Persistent bottom-anchored explanation panel.** Hint reasoning and "Learn more"
+     mistake explanations currently render somewhere below the fold with no indication
+     they're there — a real bug independent of the redesign. Replace with a single
+     explanation panel fixed within the visible viewport (not below it), always in the same
+     location, showing: the current hint's reasoning when "Get a hint" is used, and the
+     mistake explanation when "Learn more" is used from the auto-check pop-up. One shared
+     surface for both — no scrolling required to see either.
+  3. **Bug: hint-triggered line completion doesn't auto-X.** Manually filling a line's
+     last required cell correctly triggers auto-X (item 7.3) via `autoXCellsFor` in
+     `app.js`. Applying a hint that completes a line the same way does not —
+     `applyDeduction` in `solver.js` isn't invoking the same post-change check that manual
+     marking goes through. Fix so both paths run the same completion check.
+
+  Items 1–2 are a layout/consolidation pass (mostly `index.html` / `app.js` /
+  `styles.css`); item 3 is a targeted bug fix in the hint-application path. No data model
+  or solver changes expected.
+
+  (Cloud Function deploy for item 7.6 is still a manual step pending the project owner's
+  Firebase credentials — see Technical Notes below. Unrelated to this objective.)
 
   **Existing Firebase project config** (already created; used by `src/firebase.js` for the
   Cloud Function client, and later for Auth/Firestore in item 9):
@@ -60,7 +98,9 @@ Current Objective (Focus Area)
     appId: "1:537841607435:web:ec0c35f40f7053ba9db80e"
   };
   ```
-  Note: this config's `apiKey` is a normal public Firebase web-app identifier, not a secret — safe to check in. The LLM provider's API key is the one that must stay server-side inside the Cloud Function only.
+  Note: this config's `apiKey` is a normal public Firebase web-app identifier, not a secret
+  — safe to check in. The LLM provider's API key is the one that must stay server-side
+  inside the Cloud Function only.
 
 Next Steps (Do Not Start Yet)
 
