@@ -22,20 +22,19 @@ Completed Tasks
   3. Solver-based auto-X on line completion — `app.js`'s `autoXCellsFor`, using
      `isLineSatisfied`'s exact run-comparison (not a fill-count check). Batched into the
      triggering move via the model's new `Board.setBatch` (one history entry for
-     multiple cells), so undo-to-point removes a move's auto-X marks along with it. See
-     `model.js`'s class comment and the new `Board.setBatch` tests in `test/model.test.js`.
-     (Originally only ran on manual marking, not the hint-application path — fixed as part
-     of the UI consolidation pass below, see its sub-item 3.)
+     multiple cells), so undo-to-point removes a move's auto-X marks along with it.
+     (Originally only ran on manual marking, not the hint-application path — fixed in the
+     UI consolidation pass below.) **Line-locking is being added on top of this — see
+     Current Objective below — auto-X itself is unchanged.**
   4. Auto-check mistake pop-up anchored to the board panel (`#mistake-popup` /
      `.mistake-popup` in `index.html` / `styles.css`) with Dismiss and Learn More; Learn
      More reuses the existing on-demand-check flow (`runOnDemandCheck` in `app.js`, backed
      by `mistakes.js`) rather than a new explanation path.
   5. Puzzle-complete modal (`#complete-modal`) showing time taken, hints used, and mistakes
      made — all derived from `board.history` at completion time (`computeCompletionStats`
-     in `app.js`): hint-originated moves are tagged `source: 'hint'` (now by `app.js`'s
-     `applyHintDeduction`, see the UI consolidation pass below), and any historical
-     cell-write that disagreed with the solution counts as a caught mistake. No new
-     persistence or live counters needed.
+     in `app.js`): hint-originated moves are tagged `source: 'hint'` (by `app.js`'s
+     `applyHintDeduction`), and any historical cell-write that disagreed with the solution
+     counts as a caught mistake. No new persistence or live counters needed.
   6. Real LLM-backed hint phrasing — `src/hintPhrasing.js` now calls a Firebase Cloud
      Function (`functions/index.js`, callable `phraseHint`) via `src/firebase.js`, falling
      back to the old deterministic template if the call fails for any reason (offline, not
@@ -44,32 +43,22 @@ Completed Tasks
      `functions:secrets:set ANTHROPIC_API_KEY` / `firebase deploy --only functions` steps,
      which need the project owner's Firebase credentials and aren't something this
      environment can run unattended.
-* **UI consolidation pass + auto-X bug fix.** All three sub-items landed:
-  1. **Single "Help" dropdown** (`#help-menu-btn` / `#help-menu-list` in `index.html`,
-     wired in `app.js`'s "Help dropdown" section) replaces the old always-visible
-     "Hints & help" / "Mistakes" side-panel blocks — those pushed content offscreen in
-     portrait. Menu items: How to play, Get a hint, Check my work, Remove bad marks, and
-     Clear all (the old Reset button, relocated; now behind a `window.confirm` since it
-     clears history with no undo). "Dig deeper" stays a conditional follow-up button next
-     to the explanation panel rather than a menu item, since it only appears after a
-     "no forced move" hint result.
-  2. **Persistent bottom-anchored explanation panel** (`#explain-panel` in `index.html`,
-     `setExplain()` in `app.js`) — `position: fixed` to the viewport bottom, `body` reserves
-     matching `padding-bottom` so it never covers the board or footer. One shared surface
-     for hint reasoning (Get a hint) and mistake explanations (Check my work / Learn more),
-     replacing the old `#hint-text` / `#mistake-text` elements that could render below the
-     fold with no indication they were there.
-  3. **Auto-X now runs on the hint path too.** `autoXCellsFor` (single-cell, pre-board-write
-     lookahead) generalized into `app.js`'s `withAutoX(changes)`, which takes a batch of
-     pending `{row,col,state}` writes — covers both a single manual mark and a multi-cell
-     hint deduction (a hint can fill several cells across several lines at once) — and
-     checks every row/col touched by a new FILLED cell for satisfaction. `applyHintDeduction`
-     (new, `app.js`) applies a deduction's result cells through `withAutoX` before calling
-     `board.setBatch`, same as `paintCell` does for manual marks, so both paths batch into
-     one history entry and undo-to-point removes a hint's auto-X marks along with it.
-     `solver.js`'s `applyDeduction` is untouched (still used by `solveToFixpoint`, which
-     doesn't need the auto-X convenience) — the fix stayed UI-side, matching CLAUDE.md's
-     "solver only produces facts" rule.
+* **UI consolidation pass + auto-X-on-hint fix.** All three sub-items landed:
+  1. Single "Help" dropdown (`#help-menu-btn` / `#help-menu-list`) replaces the old
+     always-visible "Hints & help" / "Mistakes" side panels — those pushed content offscreen
+     in portrait. Menu items: How to play, Get a hint, Check my work, Remove bad marks,
+     Clear all (the old Reset button, relocated behind a `window.confirm`). "Dig deeper"
+     stays a conditional follow-up button next to the explanation panel, not a menu item.
+     **Bug found post-ship: Clear all does nothing when clicked — see Current Objective.**
+  2. Persistent bottom-anchored explanation panel (`#explain-panel`, `setExplain()` in
+     `app.js`) — `position: fixed` to the viewport bottom, `body` reserves matching
+     `padding-bottom`. One shared surface for hint reasoning and mistake explanations.
+     **Bug found post-ship: a stray "TODO" placeholder and unwanted scroll-into-view
+     behavior around this panel and the page header — see Current Objective.**
+  3. Auto-X now runs on the hint path too, via `app.js`'s `withAutoX(changes)` /
+     `applyHintDeduction` — both manual marks and hint deductions batch into one history
+     entry so undo-to-point works for either. `solver.js`'s `applyDeduction` is untouched
+     (still used by `solveToFixpoint`), per CLAUDE.md's "solver only produces facts" rule.
 
   **Existing Firebase project config** (already created; used by `src/firebase.js` for the
   Cloud Function client, and later for Auth/Firestore in item 9):
@@ -89,15 +78,70 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* None picked yet. The UI consolidation pass above is done and tested (430/430,
-  `npm test`) and verified in-browser (dropdown, How to play modal, hint auto-X across
-  crossing columns, mistake pop-up → Learn more → persistent panel, portrait layout with
-  no offscreen controls). Next up is picking one of the deferred items below, or the
-  Cloud Function deploy step in Technical Notes.
+* **Post-ship bug fixes: Clear All, stray scroll/TODO text, line locking, and red
+  (contradiction) numbers.** Found by playing the UI consolidation pass build:
+
+  1. **Bug: "Clear all" does nothing.** The dropdown menu item isn't wired to the existing
+     reset/confirm logic — trace why the click handler isn't firing (listener not attached
+     to the new menu item, or attached before the item existed in the DOM) and fix so it
+     behaves like the old Reset button did (with its `window.confirm` guard intact).
+
+  2. **Bug: stray "TODO" text + unwanted auto-scrolling.** There's leftover literal "TODO"
+     placeholder content still in the page, and the game auto-scrolls to the top (logo) or
+     bottom (likely toward that same stray element) at points during play — this is a
+     `scrollIntoView()` / `.focus()`-triggered-scroll bug, not a layout-shift bug. The
+     persistent bottom explanation panel itself is fine as-is and shouldn't change. Fix:
+     find and remove the unintended scroll-into-view/focus calls (likely tied to whatever
+     renders that stray TODO element), and delete the leftover TODO placeholder entirely.
+
+  3. **Add line locking on top of auto-X.** Once a row/column's filled cells exactly match
+     its clue (the existing solver satisfaction check — same one that currently drives
+     clue-graying), auto-X still fires as it does today (`autoXCellsFor`/`withAutoX` fills
+     the line's remaining unknown cells with X) — that behavior is unchanged. What's new:
+     once that line is fully marked (fills + auto-X'd X's covering every cell), the line
+     **locks** — no further changes to any cell in that line are allowed, with one
+     exception: clicking an existing **filled** cell in that line still clears it back to
+     unknown. Clearing a fill un-satisfies the line, which should also **revert that line's
+     auto-X'd cells back to unknown** (they were only valid while the line was complete)
+     and make the line editable again. So the sequence per line is: fill → auto-X fires →
+     line locks; unfill a cell → auto-X'd cells revert → line unlocks.
+
+  4. **Add red clue numbers for genuine contradictions.** Separate from locking/overfill:
+     a line can become *unsatisfiable* before it's ever full — e.g. a clue of `[2, 3]`
+     where a run of 4 gets placed instead of 3, or where three runs (`2, 1, 3`) exist
+     against a two-number clue. This needs a real satisfiability check — given the line's
+     current fixed cells (filled/empty/unknown), does *any* arrangement still exist that
+     matches the clue? If none exists, that line's clue numbers turn red. This is **not**
+     the same logic as the existing overlap-technique hint code — implement it as a
+     standard line-fitting DP (`O(cells × clue-numbers)`), not brute-force enumeration,
+     since longer lines would make brute force too slow. Unlike locking, **red is
+     feedback only — it does not block the move that caused it**; the player can place the
+     invalid cell, see it flagged red, and fix it themselves. A locked (exactly-satisfied)
+     line and a red (contradictory) line are mutually exclusive by construction — a
+     contradictory line can't reach exact satisfaction while still contradictory, so no
+     special-casing should be needed between the two states, but call this out for review
+     once both are implemented in case an edge case surfaces.
+
+  No data model changes expected beyond what `Board`/`setBatch` already support; this is
+  solver-adjacent logic (the new satisfiability check) plus UI wiring (locking, red state,
+  the two bug fixes).
 
 Next Steps (Do Not Start Yet)
 
-* Item 8 — Photo → puzzle generation: image processing (grayscale/threshold, adjustable grid size), clue derivation, and puzzle-uniqueness checking (the solver can validate uniqueness once generation exists).
+* Item 8 — Photo → puzzle generation. Two distinct upload paths, worth keeping separate
+  rather than solving as one problem:
+  - **Pre-pixelated/blocky image → direct mapping.** An image that's already in blocky/
+    pixel-art form (e.g. a sprite or something deliberately made blocky) maps directly:
+    detect (or let the user specify) the grid dimensions, read each block's color/darkness,
+    no thresholding judgment calls needed. Much simpler — a reasonable first pass.
+  - **Arbitrary photo → thresholded/downsampled grid.** A normal photo needs real image
+    processing: grayscale/threshold, adjustable grid size, downsampling — inherently
+    lossy/interpretive since there's no existing grid to read.
+  - Both paths converge on the same output (a grid + derived clues) and both need
+    puzzle-uniqueness checking (the solver can validate this once generation exists) —
+    still open: is grid size user-adjustable at generation time or fixed per image; for the
+    arbitrary-photo path, slider vs. automatic threshold/contrast tuning; reject, flag, or
+    allow non-unique-solution puzzles.
 * Item 9 — Firestore schema + shared library UI: puzzle storage, browsing, and a friends/share-by-code model. Schema and permissions are undesigned. Now also scoped to include **persistent user stats bucketed by exact grid size** (puzzles solved, avg completion time, avg hints used) — ties to Firebase Auth, which this item needs regardless. Open questions: does a scanned/snapshot-origin puzzle (no reliable move history) count toward stats; are stats visible only to the player or also to friends.
 * Item 10 — Scan-existing-puzzle flow: reuse item 8's grid pipeline + OCR for clue numbers, plus a user-correction step, feeding into the existing hint/solver system.
 
