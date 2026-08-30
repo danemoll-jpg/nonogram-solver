@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nonogram</title>
+  <meta name="description" content="A nonogram (picross) app with a strategic hint engine that explains the next logical move." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧩</text></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <h1 class="header__title"><span aria-hidden="true">🧩</span> Nonogram</h1>
+      <p class="header__subtitle">Pick a puzzle, fill it in, and ask for a hint when you're stuck — it'll explain the reasoning, not just the answer.</p>
+    </header>
+
+    <main class="layout">
+      <section class="board-panel">
+        <div class="toolbar">
+          <label class="toolbar__field">
+            Puzzle
+            <select id="puzzle-select"></select>
+          </label>
+          <button id="btn-new" class="btn" type="button">Reset</button>
+          <label class="toolbar__toggle">
+            <input type="checkbox" id="toggle-autocheck" />
+            Auto-check
+          </label>
+        </div>
+
+        <div id="board-root" class="board-root"></div>
+
+        <p id="status-line" class="status-line" aria-live="polite"></p>
+      </section>
+
+      <aside class="side-panel">
+        <div class="panel-block">
+          <h2 class="panel-block__title">Hints &amp; help</h2>
+          <button id="btn-hint" class="btn btn--primary" type="button">Get a hint</button>
+          <div id="hint-text" class="hint-text"></div>
+          <button id="btn-contradiction" class="btn btn--ghost hidden" type="button">Dig deeper (may take a moment)</button>
+        </div>
+
+        <div class="panel-block">
+          <h2 class="panel-block__title">Mistakes</h2>
+          <button id="btn-check" class="btn" type="button">Check my work</button>
+          <button id="btn-remove-bad" class="btn btn--ghost" type="button">Remove bad marks</button>
+          <div id="mistake-text" class="hint-text"></div>
+        </div>
+
+        <div class="panel-block">
+          <h2 class="panel-block__title">How to mark cells</h2>
+          <ul class="help-list">
+            <li>Click / tap: fill a cell</li>
+            <li>Right-click (or long-press): mark "definitely empty" (✕)</li>
+            <li>Click-and-drag: paint the same mark across cells</li>
+            <li>A clue number grays out once its line is satisfied</li>
+          </ul>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <p>Photo → puzzle generation, the shared library, and scanning an existing puzzle are on the roadmap — see README.md.</p>
+    </footer>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

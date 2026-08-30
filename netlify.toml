@@ -1,0 +1,4 @@
+# No build step — this is a plain static site (HTML/CSS/JS, no framework, no bundler), so
+# Netlify just needs to serve the repo root as-is.
+[build]
+  publish = "."
