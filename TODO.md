@@ -24,17 +24,18 @@ Completed Tasks
      triggering move via the model's new `Board.setBatch` (one history entry for
      multiple cells), so undo-to-point removes a move's auto-X marks along with it. See
      `model.js`'s class comment and the new `Board.setBatch` tests in `test/model.test.js`.
-     **Known bug — see Current Objective below: this check doesn't run on the
-     hint-application path, only on manual marking.**
+     (Originally only ran on manual marking, not the hint-application path — fixed as part
+     of the UI consolidation pass below, see its sub-item 3.)
   4. Auto-check mistake pop-up anchored to the board panel (`#mistake-popup` /
      `.mistake-popup` in `index.html` / `styles.css`) with Dismiss and Learn More; Learn
      More reuses the existing on-demand-check flow (`runOnDemandCheck` in `app.js`, backed
      by `mistakes.js`) rather than a new explanation path.
   5. Puzzle-complete modal (`#complete-modal`) showing time taken, hints used, and mistakes
      made — all derived from `board.history` at completion time (`computeCompletionStats`
-     in `app.js`): hint-originated moves are tagged `source: 'hint'` by `applyDeduction`
-     (`solver.js`), and any historical cell-write that disagreed with the solution counts as
-     a caught mistake. No new persistence or live counters needed.
+     in `app.js`): hint-originated moves are tagged `source: 'hint'` (now by `app.js`'s
+     `applyHintDeduction`, see the UI consolidation pass below), and any historical
+     cell-write that disagreed with the solution counts as a caught mistake. No new
+     persistence or live counters needed.
   6. Real LLM-backed hint phrasing — `src/hintPhrasing.js` now calls a Firebase Cloud
      Function (`functions/index.js`, callable `phraseHint`) via `src/firebase.js`, falling
      back to the old deterministic template if the call fails for any reason (offline, not
@@ -43,48 +44,32 @@ Completed Tasks
      `functions:secrets:set ANTHROPIC_API_KEY` / `firebase deploy --only functions` steps,
      which need the project owner's Firebase credentials and aren't something this
      environment can run unattended.
-
-Current Objective (Focus Area)
-
-* **UI consolidation pass + auto-X bug fix.** Playing the item 7 UI surfaced real
-  usability problems, especially bad in portrait (buttons pushed offscreen), plus one
-  regression bug in the already-shipped item 7.3 auto-X logic:
-
-  1. **Single "Help" dropdown, replacing the separate button panels.** One trigger button
-     replaces the current "Hints & help" panel (`Get a hint`) and "Mistakes" panel
-     (`Check my work`, `Remove bad marks`), reclaiming the vertical space both panels take.
-     Menu items, in order:
-     - **How to play** — opens an info screen/overlay with instructions, consistent with
-       the "How to play" pattern used in your other apps (not a toggle of the existing
-       bottom panel — that panel's current instructional content should move into this
-       screen instead, then the bottom panel can go away or be repurposed for the
-       explanation panel in item 2 below).
-     - **Get a hint**
-     - **Check my work**
-     - **Remove bad marks**
-     - **Clear all** — this is the *existing* Reset button/behavior, just relocated into
-       the dropdown instead of its own always-visible button. Keep (or add, if not already
-       present) a confirmation step before it fires, since it clears history and isn't
-       recoverable via undo.
-  2. **Persistent bottom-anchored explanation panel.** Hint reasoning and "Learn more"
-     mistake explanations currently render somewhere below the fold with no indication
-     they're there — a real bug independent of the redesign. Replace with a single
-     explanation panel fixed within the visible viewport (not below it), always in the same
-     location, showing: the current hint's reasoning when "Get a hint" is used, and the
-     mistake explanation when "Learn more" is used from the auto-check pop-up. One shared
-     surface for both — no scrolling required to see either.
-  3. **Bug: hint-triggered line completion doesn't auto-X.** Manually filling a line's
-     last required cell correctly triggers auto-X (item 7.3) via `autoXCellsFor` in
-     `app.js`. Applying a hint that completes a line the same way does not —
-     `applyDeduction` in `solver.js` isn't invoking the same post-change check that manual
-     marking goes through. Fix so both paths run the same completion check.
-
-  Items 1–2 are a layout/consolidation pass (mostly `index.html` / `app.js` /
-  `styles.css`); item 3 is a targeted bug fix in the hint-application path. No data model
-  or solver changes expected.
-
-  (Cloud Function deploy for item 7.6 is still a manual step pending the project owner's
-  Firebase credentials — see Technical Notes below. Unrelated to this objective.)
+* **UI consolidation pass + auto-X bug fix.** All three sub-items landed:
+  1. **Single "Help" dropdown** (`#help-menu-btn` / `#help-menu-list` in `index.html`,
+     wired in `app.js`'s "Help dropdown" section) replaces the old always-visible
+     "Hints & help" / "Mistakes" side-panel blocks — those pushed content offscreen in
+     portrait. Menu items: How to play, Get a hint, Check my work, Remove bad marks, and
+     Clear all (the old Reset button, relocated; now behind a `window.confirm` since it
+     clears history with no undo). "Dig deeper" stays a conditional follow-up button next
+     to the explanation panel rather than a menu item, since it only appears after a
+     "no forced move" hint result.
+  2. **Persistent bottom-anchored explanation panel** (`#explain-panel` in `index.html`,
+     `setExplain()` in `app.js`) — `position: fixed` to the viewport bottom, `body` reserves
+     matching `padding-bottom` so it never covers the board or footer. One shared surface
+     for hint reasoning (Get a hint) and mistake explanations (Check my work / Learn more),
+     replacing the old `#hint-text` / `#mistake-text` elements that could render below the
+     fold with no indication they were there.
+  3. **Auto-X now runs on the hint path too.** `autoXCellsFor` (single-cell, pre-board-write
+     lookahead) generalized into `app.js`'s `withAutoX(changes)`, which takes a batch of
+     pending `{row,col,state}` writes — covers both a single manual mark and a multi-cell
+     hint deduction (a hint can fill several cells across several lines at once) — and
+     checks every row/col touched by a new FILLED cell for satisfaction. `applyHintDeduction`
+     (new, `app.js`) applies a deduction's result cells through `withAutoX` before calling
+     `board.setBatch`, same as `paintCell` does for manual marks, so both paths batch into
+     one history entry and undo-to-point removes a hint's auto-X marks along with it.
+     `solver.js`'s `applyDeduction` is untouched (still used by `solveToFixpoint`, which
+     doesn't need the auto-X convenience) — the fix stayed UI-side, matching CLAUDE.md's
+     "solver only produces facts" rule.
 
   **Existing Firebase project config** (already created; used by `src/firebase.js` for the
   Cloud Function client, and later for Auth/Firestore in item 9):
@@ -101,6 +86,14 @@ Current Objective (Focus Area)
   Note: this config's `apiKey` is a normal public Firebase web-app identifier, not a secret
   — safe to check in. The LLM provider's API key is the one that must stay server-side
   inside the Cloud Function only.
+
+Current Objective (Focus Area)
+
+* None picked yet. The UI consolidation pass above is done and tested (430/430,
+  `npm test`) and verified in-browser (dropdown, How to play modal, hint auto-X across
+  crossing columns, mistake pop-up → Learn more → persistent panel, portrait layout with
+  no offscreen controls). Next up is picking one of the deferred items below, or the
+  Cloud Function deploy step in Technical Notes.
 
 Next Steps (Do Not Start Yet)
 

@@ -4,7 +4,7 @@
 // dispatches user actions to those modules.
 
 import { Board, UNKNOWN, FILLED, EMPTY, isLineSatisfied } from './src/model.js';
-import { getNextHint, applyDeduction } from './src/solver.js';
+import { getNextHint } from './src/solver.js';
 import { findContradictionHint } from './src/contradiction.js';
 import { phraseDeduction } from './src/hintPhrasing.js';
 import { autoCheckMark, checkForMistakes, removeBadMarks } from './src/mistakes.js';
@@ -26,26 +26,44 @@ const els = {
   puzzleSelect: document.getElementById('puzzle-select'),
   boardRoot: document.getElementById('board-root'),
   statusLine: document.getElementById('status-line'),
-  btnNew: document.getElementById('btn-new'),
   modeFill: document.getElementById('mode-fill'),
   modeX: document.getElementById('mode-x'),
   toggleAutocheck: document.getElementById('toggle-autocheck'),
-  btnHint: document.getElementById('btn-hint'),
-  hintText: document.getElementById('hint-text'),
+  helpMenuBtn: document.getElementById('help-menu-btn'),
+  helpMenuList: document.getElementById('help-menu-list'),
+  menuHowToPlay: document.getElementById('menu-how-to-play'),
+  menuHint: document.getElementById('menu-hint'),
+  menuCheck: document.getElementById('menu-check'),
+  menuRemoveBad: document.getElementById('menu-remove-bad'),
+  menuClearAll: document.getElementById('menu-clear-all'),
+  explainBody: document.getElementById('explain-panel-body'),
   btnContradiction: document.getElementById('btn-contradiction'),
-  btnCheck: document.getElementById('btn-check'),
-  btnRemoveBad: document.getElementById('btn-remove-bad'),
-  mistakeText: document.getElementById('mistake-text'),
   mistakePopup: document.getElementById('mistake-popup'),
   mistakePopupText: document.getElementById('mistake-popup-text'),
   mistakePopupDismiss: document.getElementById('mistake-popup-dismiss'),
   mistakePopupLearn: document.getElementById('mistake-popup-learn'),
+  howToPlayModal: document.getElementById('howtoplay-modal'),
+  btnHowToPlayClose: document.getElementById('btn-howtoplay-close'),
   completeModal: document.getElementById('complete-modal'),
   btnCompleteClose: document.getElementById('btn-complete-close'),
   statTime: document.getElementById('stat-time'),
   statHints: document.getElementById('stat-hints'),
   statMistakes: document.getElementById('stat-mistakes'),
 };
+
+const EXPLAIN_IDLE_HTML =
+  '<p class="explain-panel__idle">Use the <strong>Help</strong> menu above to get a hint or check your work — the explanation shows up here.</p>';
+
+function setExplain(content) {
+  els.explainBody.innerHTML = '';
+  if (content == null || content === '') {
+    els.explainBody.innerHTML = EXPLAIN_IDLE_HTML;
+  } else if (typeof content === 'string') {
+    els.explainBody.textContent = content;
+  } else {
+    els.explainBody.appendChild(content);
+  }
+}
 
 // ---- puzzle lifecycle ----
 
@@ -66,8 +84,7 @@ function loadPuzzle(id) {
   highlightedCells = [];
   puzzleStartTime = Date.now();
   puzzleCompleteShown = false;
-  els.hintText.textContent = '';
-  els.mistakeText.textContent = '';
+  setExplain(null);
   els.btnContradiction.classList.add('hidden');
   hideMistakePopup();
   els.completeModal.classList.add('hidden');
@@ -207,9 +224,9 @@ function formatDuration(ms) {
 }
 
 // Hints-used and mistakes-made are both derived from move history rather than tracked with
-// separate live counters — applyDeduction tags hint-originated moves with source:'hint'
-// (see solver.js), and any cell ever written to a state that disagrees with the solution
-// counts as a caught mistake, whether or not the player ever ran Check my work.
+// separate live counters — applyHintDeduction tags hint-originated moves with source:'hint',
+// and any cell ever written to a state that disagrees with the solution counts as a caught
+// mistake, whether or not the player ever ran Check my work.
 function computeCompletionStats() {
   let hintsUsed = 0;
   let mistakes = 0;
@@ -275,34 +292,61 @@ function targetStateFor(current) {
   return current === EMPTY ? UNKNOWN : EMPTY;
 }
 
-// If placing `newState` at (r,c) would leave a row or column's placed fills exactly
+// If a pending batch of changes would leave some row or column's placed fills exactly
 // matching its clue, every other still-unknown cell in that line can never be filled
 // without breaking the clue — so it's forced empty. Uses isLineSatisfied's proper run
 // comparison (not a plain fill-count check), because a count-only check would wrongly
 // trigger on an arrangement that happens to have the right number of filled cells but the
 // wrong run pattern (see model.js). Only FILLED placements can newly satisfy a line — an
 // EMPTY/UNKNOWN placement never adds a fill, so it can't complete one.
-function autoXCellsFor(r, c, newState) {
-  if (newState !== FILLED) return [];
-  const cells = [];
+//
+// Takes the pending (not-yet-applied) changes so it works for both a single manual mark
+// (paintCell) and a multi-cell hint deduction (applyHintDeduction) — a hint can fill
+// several cells across several columns in one go, so every touched row/col is checked, not
+// just one. Returns `changes` plus any triggered auto-X cells, ready for one Board.setBatch
+// call — batching them together is what makes undo-to-point remove a move's auto-X marks
+// along with it (see model.js's Board.setBatch doc). Fixes the bug where a hint that
+// completes a line didn't auto-X, because the hint path used to skip this check entirely.
+function withAutoX(changes) {
+  const touchedRows = new Set();
+  const touchedCols = new Set();
+  for (const { row, col, state } of changes) {
+    if (state !== FILLED) continue;
+    touchedRows.add(row);
+    touchedCols.add(col);
+  }
+  if (touchedRows.size === 0 && touchedCols.size === 0) return changes;
 
-  const row = board.getRow(r);
-  row[c] = newState;
-  if (isLineSatisfied(row, puzzle.rowClues[r])) {
-    for (let cc = 0; cc < puzzle.cols; cc++) {
-      if (row[cc] === UNKNOWN) cells.push({ row: r, col: cc, state: EMPTY });
+  const pending = new Map();
+  for (const { row, col, state } of changes) pending.set(`${row},${col}`, state);
+  const valueAt = (r, c) => (pending.has(`${r},${c}`) ? pending.get(`${r},${c}`) : board.get(r, c));
+
+  const extra = [];
+  for (const r of touchedRows) {
+    const row = Array.from({ length: puzzle.cols }, (_, c) => valueAt(r, c));
+    if (isLineSatisfied(row, puzzle.rowClues[r])) {
+      for (let c = 0; c < puzzle.cols; c++) {
+        if (row[c] === UNKNOWN) extra.push({ row: r, col: c, state: EMPTY });
+      }
     }
   }
-
-  const col = board.getCol(c);
-  col[r] = newState;
-  if (isLineSatisfied(col, puzzle.colClues[c])) {
-    for (let rr = 0; rr < puzzle.rows; rr++) {
-      if (col[rr] === UNKNOWN) cells.push({ row: rr, col: c, state: EMPTY });
+  for (const c of touchedCols) {
+    const col = Array.from({ length: puzzle.rows }, (_, r) => valueAt(r, c));
+    if (isLineSatisfied(col, puzzle.colClues[c])) {
+      for (let r = 0; r < puzzle.rows; r++) {
+        if (col[r] === UNKNOWN) extra.push({ row: r, col: c, state: EMPTY });
+      }
     }
   }
+  return [...changes, ...extra];
+}
 
-  return cells;
+// Apply a deduction's result cells to the board, run through the same auto-X check as
+// manual marking (see withAutoX) — this is what item 7's hint path was missing.
+function applyHintDeduction(deduction, opts) {
+  if (!deduction || deduction.resultState == null) return;
+  const changes = deduction.resultCells.map(({ row, col }) => ({ row, col, state: deduction.resultState }));
+  board.setBatch(withAutoX(changes), opts);
 }
 
 function attachPointerHandlers(grid) {
@@ -317,8 +361,7 @@ function attachPointerHandlers(grid) {
     const r = Number(el.dataset.row);
     const c = Number(el.dataset.col);
     if (board.get(r, c) === state) return;
-    const autoX = autoXCellsFor(r, c, state);
-    const applied = board.setBatch([{ row: r, col: c, state }, ...autoX]);
+    const applied = board.setBatch(withAutoX([{ row: r, col: c, state }]));
     if (applied.length === 0) return;
     for (const cell of applied) {
       const cellEl = cellEls.get(`${cell.row},${cell.col}`);
@@ -338,7 +381,7 @@ function attachPointerHandlers(grid) {
     if (!el) return;
     e.preventDefault();
     clearHighlights();
-    els.hintText.textContent = '';
+    setExplain(null);
     hideMistakePopup();
 
     const r = Number(el.dataset.row);
@@ -379,65 +422,73 @@ function onCellChanged(r, c) {
 
 // ---- hint / help controls ----
 
-els.btnHint.addEventListener('click', async () => {
+async function runGetHint() {
   clearHighlights();
   els.btnContradiction.classList.add('hidden');
   const hint = getNextHint(board, puzzle);
   if (!hint) {
-    els.hintText.textContent =
+    setExplain(
       "No forced move right now — from logic alone, more than one possibility remains for every open cell. " +
-      "Keep solving by trial, or dig deeper for a slower, contradiction-based deduction.";
+      "Keep solving by trial, or dig deeper for a slower, contradiction-based deduction."
+    );
     els.btnContradiction.classList.remove('hidden');
     return;
   }
-  applyDeduction(board, hint, { source: 'hint' });
+  applyHintDeduction(hint, { source: 'hint' });
   highlightDeduction(hint);
   syncAllCellVisuals();
-  els.hintText.textContent = await phraseDeduction(hint);
+  setExplain(await phraseDeduction(hint));
+}
+
+els.menuHint.addEventListener('click', () => {
+  closeHelpMenu();
+  runGetHint();
 });
 
 els.btnContradiction.addEventListener('click', async () => {
-  els.hintText.textContent = 'Searching…';
+  setExplain('Searching…');
   await new Promise((resolve) => setTimeout(resolve, 0)); // let "Searching…" paint first
   const hint = findContradictionHint(board, puzzle);
   if (!hint) {
-    els.hintText.textContent =
-      "Even a deeper search can't find a forced move from here — this may need an outright guess.";
+    setExplain("Even a deeper search can't find a forced move from here — this may need an outright guess.");
     return;
   }
-  applyDeduction(board, hint, { source: 'hint' });
+  applyHintDeduction(hint, { source: 'hint' });
   highlightDeduction(hint);
   syncAllCellVisuals();
-  els.hintText.textContent = await phraseDeduction(hint);
+  setExplain(await phraseDeduction(hint));
   els.btnContradiction.classList.add('hidden');
 });
 
 // ---- mistake-handling controls ----
 
-// Shared by the "Check my work" button and the mistake pop-up's "Learn more" — reuses
+// Shared by the "Check my work" menu item and the mistake pop-up's "Learn more" — reuses
 // mistakes.js's on-demand check rather than a separate explanation path (item 7.4).
 // fromPopup:true skips the "auto-check is on" short-circuit, since Learn More should always
 // produce the real explanation even when auto-check is what surfaced the mistake.
 function runOnDemandCheck({ fromPopup = false } = {}) {
-  els.mistakeText.innerHTML = '';
   if (!puzzle.solution) {
-    els.mistakeText.textContent = "This puzzle has no known solution to check against yet.";
+    setExplain('This puzzle has no known solution to check against yet.');
     return;
   }
   if (autoCheckEnabled && !fromPopup) {
-    els.mistakeText.textContent = 'Auto-check is on — mistakes are flagged the moment you make them.';
+    setExplain('Auto-check is on — mistakes are flagged the moment you make them.');
     return;
   }
 
   const result = checkForMistakes(board, puzzle.solution);
   if (result.origin === 'history') {
     if (result.moveIndex === null) {
-      els.mistakeText.textContent = 'No mistakes found in your moves so far.';
+      setExplain('No mistakes found in your moves so far.');
       return;
     }
-    els.mistakeText.textContent =
+    const container = document.createElement('div');
+    const text = document.createElement('p');
+    text.style.margin = '0';
+    text.textContent =
       `Move #${result.moveIndex + 1} (row ${result.cell.row + 1}, col ${result.cell.col + 1}) ` +
       `was marked ${result.markedAs}, but should be ${result.shouldBe}.`;
+    container.appendChild(text);
     highlightedCells = [{ ...result.cell, kind: 'result' }];
     applyHighlightClasses();
     const undoBtn = document.createElement('button');
@@ -447,37 +498,86 @@ function runOnDemandCheck({ fromPopup = false } = {}) {
     undoBtn.addEventListener('click', () => {
       board.undoToMove(result.moveIndex);
       clearHighlights();
-      els.mistakeText.textContent = '';
+      setExplain(null);
       syncAllCellVisuals();
     });
-    els.mistakeText.appendChild(document.createElement('br'));
-    els.mistakeText.appendChild(undoBtn);
+    container.appendChild(undoBtn);
+    setExplain(container);
   } else {
     if (result.wrongCells.length === 0) {
-      els.mistakeText.textContent = 'No mistakes found.';
+      setExplain('No mistakes found.');
       return;
     }
-    els.mistakeText.textContent =
+    setExplain(
       `${result.wrongCells.length} cell(s) don't match the puzzle — highlighted on the board. ` +
-      `This puzzle came from a scan with no move history, so there's no single point to undo to.`;
+      `This puzzle came from a scan with no move history, so there's no single point to undo to.`
+    );
     highlightedCells = result.wrongCells.map((c) => ({ ...c, kind: 'result' }));
     applyHighlightClasses();
   }
 }
 
-els.btnCheck.addEventListener('click', () => runOnDemandCheck());
+els.menuCheck.addEventListener('click', () => {
+  closeHelpMenu();
+  runOnDemandCheck();
+});
 
-els.btnRemoveBad.addEventListener('click', () => {
+els.menuRemoveBad.addEventListener('click', () => {
+  closeHelpMenu();
   if (!puzzle.solution) return;
   removeBadMarks(board, puzzle.solution);
   clearHighlights();
-  els.mistakeText.textContent = '';
+  setExplain(null);
   syncAllCellVisuals();
+});
+
+// "Clear all" is the old always-visible Reset button, relocated into the Help menu — since
+// it wipes the board and move history with no undo, it asks for confirmation first.
+els.menuClearAll.addEventListener('click', () => {
+  closeHelpMenu();
+  if (!window.confirm("Clear this puzzle and start over? This can't be undone.")) return;
+  loadPuzzle(puzzle.id);
+});
+
+// ---- Help dropdown (item: UI consolidation pass) ----
+
+function closeHelpMenu() {
+  els.helpMenuList.classList.add('hidden');
+  els.helpMenuBtn.setAttribute('aria-expanded', 'false');
+}
+
+function openHelpMenu() {
+  els.helpMenuList.classList.remove('hidden');
+  els.helpMenuBtn.setAttribute('aria-expanded', 'true');
+}
+
+els.helpMenuBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (els.helpMenuList.classList.contains('hidden')) openHelpMenu();
+  else closeHelpMenu();
+});
+
+document.addEventListener('click', (e) => {
+  if (els.helpMenuList.classList.contains('hidden')) return;
+  if (e.target === els.helpMenuBtn || els.helpMenuList.contains(e.target)) return;
+  closeHelpMenu();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeHelpMenu();
+});
+
+els.menuHowToPlay.addEventListener('click', () => {
+  closeHelpMenu();
+  els.howToPlayModal.classList.remove('hidden');
+});
+
+els.btnHowToPlayClose.addEventListener('click', () => {
+  els.howToPlayModal.classList.add('hidden');
 });
 
 // ---- toolbar ----
 
-els.btnNew.addEventListener('click', () => loadPuzzle(puzzle.id));
 els.puzzleSelect.addEventListener('change', (e) => loadPuzzle(e.target.value));
 els.toggleAutocheck.addEventListener('change', (e) => {
   autoCheckEnabled = e.target.checked;

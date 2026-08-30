@@ -29,12 +29,15 @@ body {
     radial-gradient(ellipse at top, rgba(230, 183, 63, 0.08), transparent 60%),
     linear-gradient(180deg, var(--felt-dark), var(--felt-darker));
   background-attachment: fixed;
+  /* Reserve room for the fixed explain panel (see .explain-panel) so it never covers the
+     footer or the bottom of a tall board — kept in sync with that panel's own min-height. */
+  padding-bottom: 5.5rem;
 }
 
 .page {
   max-width: 72rem;
   margin: 0 auto;
-  padding: 2.5rem 1.5rem 4rem;
+  padding: 2.5rem 1.5rem 2rem;
 }
 
 .header {
@@ -58,36 +61,20 @@ body {
   line-height: 1.5;
 }
 
+/* Single-column layout (item: UI consolidation pass) — the old side-panel with its three
+   always-visible button blocks pushed content offscreen in portrait; both its actions and
+   its explanatory content now live in the Help dropdown and the persistent explain panel. */
 .layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 20rem;
-  gap: 1.5rem;
-  align-items: start;
+  display: block;
 }
 
-@media (max-width: 55rem) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
-}
-
-.board-panel,
-.side-panel > .panel-block {
+.board-panel {
   background: var(--panel-bg);
   border: 2px solid rgba(230, 183, 63, 0.18);
   border-radius: 1rem;
   padding: 1.25rem;
   box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.25);
-}
-
-.board-panel {
   position: relative;
-}
-
-.side-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
 }
 
 .toolbar {
@@ -149,6 +136,61 @@ body {
 .mode-btn[aria-pressed="true"] {
   background: var(--gold);
   color: #241a04;
+}
+
+/* Single "Help" dropdown (item: UI consolidation pass) — replaces the old always-visible
+   "Hints & help" / "Mistakes" button panels. */
+.help-menu {
+  position: relative;
+  margin-left: auto;
+}
+
+.toolbar__toggle + .help-menu {
+  margin-left: 0;
+}
+
+.help-menu__list {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 20;
+  list-style: none;
+  margin: 0;
+  padding: 0.4rem;
+  min-width: 12rem;
+  background: var(--panel-bg-raised);
+  border: 1px solid rgba(230, 183, 63, 0.35);
+  border-radius: 0.6rem;
+  box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.4);
+}
+
+.help-menu__item {
+  appearance: none;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 0.55rem 0.6rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.help-menu__item:hover,
+.help-menu__item:focus-visible {
+  background: rgba(230, 183, 63, 0.16);
+}
+
+.help-menu__item--danger {
+  color: var(--danger);
+}
+
+.help-menu__divider {
+  height: 1px;
+  margin: 0.35rem 0.2rem;
+  background: rgba(230, 183, 63, 0.2);
 }
 
 .btn {
@@ -353,6 +395,38 @@ body {
   font-size: 1.4rem;
 }
 
+.modal-card--wide {
+  max-width: 34rem;
+  text-align: left;
+}
+
+.modal-card--wide .modal-card__title {
+  text-align: center;
+}
+
+.modal-card__body {
+  max-height: min(28rem, 60vh);
+  overflow-y: auto;
+  margin-bottom: 1.25rem;
+}
+
+.modal-card__body h3 {
+  margin: 1.1rem 0 0.4rem;
+  color: var(--gold);
+  font-size: 0.95rem;
+}
+
+.modal-card__body h3:first-child {
+  margin-top: 0;
+}
+
+.modal-card__body p {
+  margin: 0 0 0.5rem;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
 .modal-stats {
   margin: 0 0 1.25rem;
   display: flex;
@@ -378,18 +452,42 @@ body {
   color: var(--text);
 }
 
-.panel-block__title {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-  color: var(--gold);
+/* Persistent bottom-anchored explanation panel — one shared surface for hint reasoning
+   (Get a hint) and mistake explanations (Check my work / Learn more), fixed within the
+   viewport so it's always visible with no scrolling. See body's padding-bottom, kept in
+   sync with this panel's min-height so it never covers the board or footer. */
+.explain-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  min-height: 4.5rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  background: var(--panel-bg-raised);
+  border-top: 2px solid rgba(230, 183, 63, 0.35);
+  box-shadow: 0 -0.5rem 1.5rem rgba(0, 0, 0, 0.3);
+  padding: 0.9rem max(1rem, calc(50% - 36rem + 1rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  justify-content: center;
 }
 
-.hint-text {
-  margin-top: 0.75rem;
+.explain-panel__body {
   font-size: 0.9rem;
   line-height: 1.5;
+  color: var(--text);
+}
+
+.explain-panel__idle {
+  margin: 0;
   color: var(--text-dim);
-  min-height: 1.2em;
+}
+
+.explain-panel__body .btn {
+  margin-top: 0.6rem;
 }
 
 .help-list {
@@ -409,11 +507,21 @@ body {
 
 @media (max-width: 30rem) {
   .page {
-    padding: 2rem 1rem 3rem;
+    padding: 2rem 1rem 1.5rem;
   }
 
   .nono-cell {
     width: 1.5rem;
     height: 1.5rem;
+  }
+
+  /* Explanation text wraps more on narrow screens — give the panel a bit more headroom
+     so short hints still fit without scrolling, and keep body padding in sync. */
+  body {
+    padding-bottom: 6.5rem;
+  }
+
+  .explain-panel {
+    min-height: 5.5rem;
   }
 }
