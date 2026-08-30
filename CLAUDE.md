@@ -4,14 +4,17 @@
 - Plain HTML/CSS/JavaScript — no framework, no bundler, no build step. ES modules loaded
   directly via `<script type="module">`, matching the sibling `game-hub` project's pattern.
 - No TypeScript currently; the whole solver and UI are vanilla JS.
-- No backend yet. Firebase (Auth/Firestore/Storage) is planned for accounts, puzzle
-  storage, and the shared library (build-order item 9), but not wired up.
+- Firebase project exists (`nonogram-pro-e8a31`) for Auth/Firestore/Storage and Cloud
+  Functions. Nothing beyond the initial project setup is wired up yet — see `TODO.md`'s
+  Current Objective for the first thing being built on it (a Cloud Function for
+  LLM-backed hint phrasing).
 - Deploy target: Netlify, static-site mode (`netlify.toml`, `publish = "."`).
 
 ## Code Style & Architecture
 - Keep the solver's output as plain data ("deductions"), never player-facing text — the
   solver only produces facts; `src/hintPhrasing.js` is the only place that turns a
-  deduction into text (see its comments for the LLM-backend seam that isn't wired up yet).
+  deduction into text. This currently uses a deterministic template; see `TODO.md` for the
+  in-progress swap to a real LLM call via Firebase Cloud Function.
 - Each module in `src/` does one job (data model, line solving, hint orchestration,
   contradiction search, mistake handling, phrasing) — don't collapse them together.
 - Favor small pure functions over classes; `Board` is the one stateful class, and it exists
@@ -29,7 +32,11 @@
 - Lint: none configured
 
 ## Where things stand
-See `README.md` for the full build-order status against the design spec. Short version:
-items 1–7 (solver engine, hint/mistake/contradiction logic, full playable UI) are done and
-tested; items 8–10 (photo→puzzle generation, Firestore shared library, scan-existing-puzzle)
-are deferred pending their own design pass.
+**Always check `TODO.md` for the current objective before starting work** — it's kept more
+up to date than this file's summary below.
+
+Short version: items 1–6 (solver engine, hint/mistake/contradiction logic, and a first
+playable UI) are done and tested. Item 7, a puzzle UI refinement pass plus real LLM-backed
+hint phrasing via a Firebase Cloud Function, is the active objective — see `TODO.md` for
+the full breakdown. Items 8–10 (photo→puzzle generation, Firestore shared library,
+scan-existing-puzzle) remain deferred pending their own design pass.
