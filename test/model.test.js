@@ -1,5 +1,5 @@
 import { describe, test, assert, assertEqual } from './harness.js';
-import { Board, cluesFromLine, deriveClues, isLineSatisfied, FILLED, EMPTY, UNKNOWN } from '../src/model.js';
+import { Board, cluesFromLine, deriveClues, isLineSatisfied, isLineLocked, FILLED, EMPTY, UNKNOWN } from '../src/model.js';
 
 describe('cluesFromLine / deriveClues', () => {
   test('empty line has an empty clue', () => {
@@ -30,6 +30,37 @@ describe('isLineSatisfied', () => {
   test('false when the run pattern does not match', () => {
     const line = [FILLED, EMPTY, FILLED];
     assertEqual(isLineSatisfied(line, [2]), false);
+  });
+});
+
+describe('isLineLocked', () => {
+  test('false while unknowns remain, even if already satisfied', () => {
+    const line = [FILLED, FILLED, UNKNOWN, EMPTY, FILLED];
+    assertEqual(isLineSatisfied(line, [2, 1]), true); // satisfied...
+    assertEqual(isLineLocked(line, [2, 1]), false); // ...but not locked: one UNKNOWN left
+  });
+
+  test('true once satisfied and fully marked', () => {
+    const line = [FILLED, FILLED, EMPTY, EMPTY, FILLED];
+    assertEqual(isLineLocked(line, [2, 1]), true);
+  });
+
+  test('an empty-clue line of all UNKNOWNs is not locked (regression: would otherwise ' +
+    'lock before the player ever gets to X it out, since isLineSatisfied alone reads an ' +
+    'all-UNKNOWN line against an empty clue as already satisfied)', () => {
+    const line = [UNKNOWN, UNKNOWN, UNKNOWN];
+    assertEqual(isLineSatisfied(line, []), true);
+    assertEqual(isLineLocked(line, []), false);
+  });
+
+  test('an empty-clue line locks once fully marked EMPTY', () => {
+    const line = [EMPTY, EMPTY, EMPTY];
+    assertEqual(isLineLocked(line, []), true);
+  });
+
+  test('false when fully marked but the pattern does not match the clue', () => {
+    const line = [FILLED, FILLED, FILLED, EMPTY, EMPTY];
+    assertEqual(isLineLocked(line, [2]), false);
   });
 });
 

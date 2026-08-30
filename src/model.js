@@ -168,3 +168,13 @@ export function isLineSatisfied(line, clue) {
   if (runs.length !== clue.length) return false;
   return runs.every((r, i) => r === clue[i]);
 }
+
+// A line "locks" once it's both satisfied AND fully marked (every cell FILLED or EMPTY,
+// nothing left UNKNOWN) — i.e. auto-X has already run and there's nothing left to decide.
+// isLineSatisfied alone isn't enough: a line with an empty clue ([]) reads as "satisfied"
+// from its very first UNKNOWN-filled render (cluesFromLine treats UNKNOWN as EMPTY), which
+// would wrongly lock it before the player ever gets to X it out. Requiring full marking
+// closes that gap without changing isLineSatisfied's existing clue-graying behavior.
+export function isLineLocked(line, clue) {
+  return isLineSatisfied(line, clue) && line.every((c) => c !== UNKNOWN);
+}

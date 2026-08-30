@@ -3,9 +3,10 @@
 // (solving, hints, mistake-checking) lives in src/*; this file only renders the board and
 // dispatches user actions to those modules.
 
-import { Board, UNKNOWN, FILLED, EMPTY, isLineSatisfied } from './src/model.js';
+import { Board, UNKNOWN, FILLED, EMPTY, isLineSatisfied, isLineLocked } from './src/model.js';
 import { getNextHint } from './src/solver.js';
 import { findContradictionHint } from './src/contradiction.js';
+import { isLineConsistent } from './src/lineSolver.js';
 import { phraseDeduction } from './src/hintPhrasing.js';
 import { autoCheckMark, checkForMistakes, removeBadMarks } from './src/mistakes.js';
 import { SAMPLE_PUZZLES } from './src/puzzles.js';
@@ -17,6 +18,15 @@ let activeMode = 'fill'; // 'fill' | 'x' — which mark a click/drag applies (it
 let highlightedCells = []; // { row, col, kind: 'reasoning' | 'result' }
 let puzzleStartTime = 0;
 let puzzleCompleteShown = false;
+
+// Cells currently EMPTY *because* auto-X put them there when their line completed — as
+// opposed to a cell the player deliberately marked empty themselves. Line-locking needs
+// this distinction: unfilling a cell that un-satisfies a line should only revert that
+// line's auto-X'd cells back to UNKNOWN (they were only ever valid while the line read as
+// complete), not any manual "Mark empty" marks the player made along the way. Keyed by
+// "row,col"; kept in app.js rather than on Board since it's UI-only bookkeeping, not part
+// of the solver-facing data model (see withAutoXTracked / revertUnsatisfiedLines below).
+let autoXCells = new Set();
 
 const cellEls = new Map(); // "r,c" -> element
 const rowClueEls = [];
@@ -49,6 +59,10 @@ const els = {
   statTime: document.getElementById('stat-time'),
   statHints: document.getElementById('stat-hints'),
   statMistakes: document.getElementById('stat-mistakes'),
+  confirmModal: document.getElementById('confirm-modal'),
+  confirmMessage: document.getElementById('confirm-message'),
+  btnConfirmCancel: document.getElementById('btn-confirm-cancel'),
+  btnConfirmOk: document.getElementById('btn-confirm-ok'),
 };
 
 const EXPLAIN_IDLE_HTML =
@@ -82,6 +96,7 @@ function loadPuzzle(id) {
   els.puzzleSelect.value = puzzle.id;
   board = new Board(puzzle.rows, puzzle.cols);
   highlightedCells = [];
+  autoXCells = new Set();
   puzzleStartTime = Date.now();
   puzzleCompleteShown = false;
   setExplain(null);
@@ -151,20 +166,40 @@ function clueHtml(clue) {
   return nums.map((n) => `<span>${n}</span>`).join('');
 }
 
+// Locked/contradiction status is derived live from the board every render, same as
+// isLineSatisfied already was for clue-graying — no separate flag to keep in sync. See
+// isLineLocked's doc (model.js) for why "satisfied" alone isn't the lock condition, and
+// isLineConsistent (lineSolver.js) for the contradiction check (a real DP-based
+// satisfiability test, not the overlap-technique hint logic).
+function rowLockedNow(r) {
+  return isLineLocked(board.getRow(r), puzzle.rowClues[r]);
+}
+function colLockedNow(c) {
+  return isLineLocked(board.getCol(c), puzzle.colClues[c]);
+}
+
 function syncAllCellVisuals() {
+  const rowLocked = Array.from({ length: puzzle.rows }, (_, r) => rowLockedNow(r));
+  const colLocked = Array.from({ length: puzzle.cols }, (_, c) => colLockedNow(c));
+
   for (let r = 0; r < puzzle.rows; r++) {
     for (let c = 0; c < puzzle.cols; c++) {
       const el = cellEls.get(`${r},${c}`);
       const state = board.get(r, c);
       el.classList.toggle('filled', state === FILLED);
       el.classList.toggle('empty', state === EMPTY);
+      el.classList.toggle('locked', rowLocked[r] || colLocked[c]);
     }
   }
   for (let r = 0; r < puzzle.rows; r++) {
-    rowClueEls[r].classList.toggle('satisfied', isLineSatisfied(board.getRow(r), puzzle.rowClues[r]));
+    const row = board.getRow(r);
+    rowClueEls[r].classList.toggle('satisfied', isLineSatisfied(row, puzzle.rowClues[r]));
+    rowClueEls[r].classList.toggle('contradiction', !isLineConsistent(row, puzzle.rowClues[r]));
   }
   for (let c = 0; c < puzzle.cols; c++) {
-    colClueEls[c].classList.toggle('satisfied', isLineSatisfied(board.getCol(c), puzzle.colClues[c]));
+    const col = board.getCol(c);
+    colClueEls[c].classList.toggle('satisfied', isLineSatisfied(col, puzzle.colClues[c]));
+    colClueEls[c].classList.toggle('contradiction', !isLineConsistent(col, puzzle.colClues[c]));
   }
   applyHighlightClasses();
 
@@ -254,6 +289,36 @@ els.btnCompleteClose.addEventListener('click', () => {
   els.completeModal.classList.add('hidden');
 });
 
+// ---- confirm dialog (item: fix "Clear all" doing nothing) ----
+//
+// window.confirm() looks like the obvious fit for a destructive-action guard, but several
+// real browser contexts auto-dismiss it — returning false with no dialog ever shown to the
+// player — rather than throwing or warning: repeat calls in the same page load (Chrome's
+// "prevent this page from creating additional dialogs"), most in-app/embedded webviews, and
+// automated browser tooling (which is how this was caught) all do this. A confirm() guard
+// that can silently return false makes the action it's guarding look broken, not merely
+// "not yet confirmed" — which was exactly the "Clear all does nothing" symptom. This
+// in-page dialog replaces it so the guard is never silently unreliable.
+let confirmResolve = null;
+
+function showConfirm(message) {
+  els.confirmMessage.textContent = message;
+  els.confirmModal.classList.remove('hidden');
+  return new Promise((resolve) => {
+    confirmResolve = resolve;
+  });
+}
+
+function resolveConfirm(result) {
+  els.confirmModal.classList.add('hidden');
+  const resolve = confirmResolve;
+  confirmResolve = null;
+  resolve?.(result);
+}
+
+els.btnConfirmCancel.addEventListener('click', () => resolveConfirm(false));
+els.btnConfirmOk.addEventListener('click', () => resolveConfirm(true));
+
 // ---- mistake pop-up (item 7.4) ----
 
 function hideMistakePopup() {
@@ -303,11 +368,10 @@ function targetStateFor(current) {
 // Takes the pending (not-yet-applied) changes so it works for both a single manual mark
 // (paintCell) and a multi-cell hint deduction (applyHintDeduction) — a hint can fill
 // several cells across several columns in one go, so every touched row/col is checked, not
-// just one. Returns `changes` plus any triggered auto-X cells, ready for one Board.setBatch
-// call — batching them together is what makes undo-to-point remove a move's auto-X marks
-// along with it (see model.js's Board.setBatch doc). Fixes the bug where a hint that
-// completes a line didn't auto-X, because the hint path used to skip this check entirely.
-function withAutoX(changes) {
+// just one. Returns just the extra auto-X cells (not `changes` itself) so callers can tell
+// them apart from the direct changes — applyWithAutoX below uses that split to keep
+// autoXCells (see top of file) accurate.
+function computeAutoXExtras(changes) {
   const touchedRows = new Set();
   const touchedCols = new Set();
   for (const { row, col, state } of changes) {
@@ -315,7 +379,7 @@ function withAutoX(changes) {
     touchedRows.add(row);
     touchedCols.add(col);
   }
-  if (touchedRows.size === 0 && touchedCols.size === 0) return changes;
+  if (touchedRows.size === 0 && touchedCols.size === 0) return [];
 
   const pending = new Map();
   for (const { row, col, state } of changes) pending.set(`${row},${col}`, state);
@@ -338,15 +402,70 @@ function withAutoX(changes) {
       }
     }
   }
-  return [...changes, ...extra];
+  return extra;
+}
+
+// Applies `changes` plus whatever auto-X they trigger (see computeAutoXExtras) as one
+// batched move — batching is what makes undo-to-point remove a move's auto-X marks along
+// with it (see model.js's Board.setBatch doc). Also keeps autoXCells in sync: a cell added
+// by auto-X is recorded as such; a cell this batch sets to FILLED or back to UNKNOWN can no
+// longer be "auto-X empty" (whether or not it was previously tracked), so it's dropped.
+// Used by both paintCell and applyHintDeduction — fixes the old bug where a hint that
+// completed a line didn't auto-X, because the hint path used to skip this check entirely.
+function applyWithAutoX(changes, opts) {
+  const extra = computeAutoXExtras(changes);
+  const autoXKeys = new Set(extra.map((e) => `${e.row},${e.col}`));
+  const applied = board.setBatch([...changes, ...extra], opts);
+  for (const cell of applied) {
+    const key = `${cell.row},${cell.col}`;
+    if (autoXKeys.has(key)) autoXCells.add(key);
+    else if (cell.next !== EMPTY) autoXCells.delete(key);
+  }
+  return applied;
 }
 
 // Apply a deduction's result cells to the board, run through the same auto-X check as
-// manual marking (see withAutoX) — this is what item 7's hint path was missing.
+// manual marking (see applyWithAutoX).
 function applyHintDeduction(deduction, opts) {
   if (!deduction || deduction.resultState == null) return;
   const changes = deduction.resultCells.map(({ row, col }) => ({ row, col, state: deduction.resultState }));
-  board.setBatch(withAutoX(changes), opts);
+  applyWithAutoX(changes, opts);
+}
+
+// Clearing a FILLED cell back to UNKNOWN is the one move a locked line still allows (see
+// isLineLocked in model.js and the .locked CSS rule). If that removal drops the cell's row
+// or column out of satisfaction, that line's auto-X'd cells are no longer valid — they were
+// only ever forced by the line reading as complete — so they revert to UNKNOWN too, batched
+// into the same move as the primary cell. Deliberate manual "Mark empty" marks in that line
+// are untouched, since only cells tracked in autoXCells (see top of file) are reverted.
+function computeUnfillChanges(r, c) {
+  const changes = [{ row: r, col: c, state: UNKNOWN }];
+
+  const row = board.getRow(r);
+  const wasRowSatisfied = isLineSatisfied(row, puzzle.rowClues[r]);
+  row[c] = UNKNOWN;
+  if (wasRowSatisfied && !isLineSatisfied(row, puzzle.rowClues[r])) {
+    for (let cc = 0; cc < puzzle.cols; cc++) {
+      if (autoXCells.has(`${r},${cc}`)) changes.push({ row: r, col: cc, state: UNKNOWN });
+    }
+  }
+
+  const col = board.getCol(c);
+  const wasColSatisfied = isLineSatisfied(col, puzzle.colClues[c]);
+  col[r] = UNKNOWN;
+  if (wasColSatisfied && !isLineSatisfied(col, puzzle.colClues[c])) {
+    for (let rr = 0; rr < puzzle.rows; rr++) {
+      if (autoXCells.has(`${rr},${c}`)) changes.push({ row: rr, col: c, state: UNKNOWN });
+    }
+  }
+
+  return changes;
+}
+
+function applyUnfill(r, c, opts) {
+  const applied = board.setBatch(computeUnfillChanges(r, c), opts);
+  for (const cell of applied) autoXCells.delete(`${cell.row},${cell.col}`);
+  return applied;
 }
 
 function attachPointerHandlers(grid) {
@@ -357,11 +476,22 @@ function attachPointerHandlers(grid) {
   // One user press/drag-step is one move: the pressed cell's mark plus any auto-X cells it
   // triggers are batched into a single history entry (see Board.setBatch) so undo-to-point
   // never leaves a line half-auto-marked.
+  //
+  // Line locking (item: line locking on top of auto-X): once a row or column is locked
+  // (isLineLocked — fully marked and satisfied), no new mark is accepted anywhere in it,
+  // with one exception — clearing an existing FILLED cell back to UNKNOWN. That's always
+  // let through, since it's the only way a locked line becomes editable again (see
+  // computeUnfillChanges).
   function paintCell(el, state) {
     const r = Number(el.dataset.row);
     const c = Number(el.dataset.col);
-    if (board.get(r, c) === state) return;
-    const applied = board.setBatch(withAutoX([{ row: r, col: c, state }]));
+    const current = board.get(r, c);
+    if (current === state) return;
+
+    const isUnfill = current === FILLED && state === UNKNOWN;
+    if (!isUnfill && (rowLockedNow(r) || colLockedNow(c))) return;
+
+    const applied = isUnfill ? applyUnfill(r, c) : applyWithAutoX([{ row: r, col: c, state }]);
     if (applied.length === 0) return;
     for (const cell of applied) {
       const cellEl = cellEls.get(`${cell.row},${cell.col}`);
@@ -532,10 +662,11 @@ els.menuRemoveBad.addEventListener('click', () => {
 });
 
 // "Clear all" is the old always-visible Reset button, relocated into the Help menu — since
-// it wipes the board and move history with no undo, it asks for confirmation first.
-els.menuClearAll.addEventListener('click', () => {
+// it wipes the board and move history with no undo, it asks for confirmation first (via
+// showConfirm, not window.confirm — see that function's comment for why).
+els.menuClearAll.addEventListener('click', async () => {
   closeHelpMenu();
-  if (!window.confirm("Clear this puzzle and start over? This can't be undone.")) return;
+  if (!(await showConfirm("Clear this puzzle and start over? This can't be undone."))) return;
   loadPuzzle(puzzle.id);
 });
 

@@ -59,10 +59,6 @@
         </div>
       </section>
     </main>
-
-    <footer class="footer">
-      <p>Photo → puzzle generation, the shared library, and scanning an existing puzzle are on the roadmap — see README.md.</p>
-    </footer>
   </div>
 
   <!-- Persistent bottom-anchored explanation panel: hint reasoning (Get a hint) and
@@ -117,6 +113,20 @@
         <div class="modal-stats__row"><dt>Mistakes made</dt><dd id="stat-mistakes"></dd></div>
       </dl>
       <button id="btn-complete-close" class="btn btn--primary" type="button">Nice!</button>
+    </div>
+  </div>
+
+  <!-- In-app confirm dialog (item: fix "Clear all" doing nothing) — used instead of
+       window.confirm, which some browser contexts silently auto-dismiss (returning false
+       with no dialog ever shown), making a confirm-gated action look like it's broken. -->
+  <div id="confirm-modal" class="modal-overlay hidden">
+    <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+      <h2 id="confirm-title" class="modal-card__title">Are you sure?</h2>
+      <p id="confirm-message" class="modal-card__message"></p>
+      <div class="modal-card__actions">
+        <button id="btn-confirm-cancel" class="btn btn--ghost" type="button">Cancel</button>
+        <button id="btn-confirm-ok" class="btn btn--primary" type="button">Confirm</button>
+      </div>
     </div>
   </div>
 

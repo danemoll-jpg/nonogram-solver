@@ -5,7 +5,7 @@
 
 import { describe, test, assert, assertEqual } from './harness.js';
 import { UNKNOWN, FILLED, EMPTY, cluesFromLine } from '../src/model.js';
-import { generalLineSolve, overlapForcedCells, edgeCompletionDeductions } from '../src/lineSolver.js';
+import { generalLineSolve, overlapForcedCells, edgeCompletionDeductions, isLineConsistent } from '../src/lineSolver.js';
 
 function randomBoolLine(n, density) {
   return Array.from({ length: n }, () => Math.random() < density);
@@ -97,6 +97,33 @@ describe('overlap technique (hand-checked cases)', () => {
     // length 10, clue [4,4]: left pack 0-3,5-8; right pack 1-4,6-9 -> overlaps 1-3, 6-8
     const forced = overlapForcedCells(10, [4, 4]).map((f) => f.index).sort((a, b) => a - b);
     assertEqual(forced, [1, 2, 3, 6, 7, 8]);
+  });
+});
+
+// Item: red clue numbers for genuine contradictions (app.js uses isLineConsistent directly
+// as its satisfiability check — never touching brute force). These cases mirror the two
+// examples called out in TODO.md.
+describe('isLineConsistent (contradiction detection)', () => {
+  test('a run of 4 where the clue only allows runs of up to 3 is inconsistent', () => {
+    // clue [2, 3] in a line of 8: ..####.. is a run of 4, which no arrangement of [2,3] can produce.
+    const line = [EMPTY, EMPTY, FILLED, FILLED, FILLED, FILLED, EMPTY, EMPTY];
+    assertEqual(isLineConsistent(line, [2, 3]), false);
+  });
+
+  test('three separated runs against a two-number clue is inconsistent', () => {
+    // #.#.# has three runs of 1, but the clue only describes two numbers.
+    const line = [FILLED, EMPTY, FILLED, EMPTY, FILLED];
+    assertEqual(isLineConsistent(line, [2, 1]), false);
+  });
+
+  test('still consistent while some cells remain unknown', () => {
+    const line = [FILLED, FILLED, UNKNOWN, UNKNOWN, UNKNOWN];
+    assertEqual(isLineConsistent(line, [2, 1]), true);
+  });
+
+  test('a fully-marked line matching its clue is consistent', () => {
+    const line = [FILLED, FILLED, EMPTY, EMPTY, FILLED];
+    assertEqual(isLineConsistent(line, [2, 1]), true);
   });
 });
 

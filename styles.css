@@ -30,7 +30,7 @@ body {
     linear-gradient(180deg, var(--felt-dark), var(--felt-darker));
   background-attachment: fixed;
   /* Reserve room for the fixed explain panel (see .explain-panel) so it never covers the
-     footer or the bottom of a tall board — kept in sync with that panel's own min-height. */
+     bottom of a tall board — kept in sync with that panel's own min-height. */
   padding-bottom: 5.5rem;
 }
 
@@ -286,6 +286,15 @@ body {
   color: rgba(242, 236, 221, 0.25);
 }
 
+/* Genuine contradiction (item: red clue numbers) — a real satisfiability check found no
+   arrangement left that fits the clue, e.g. a run grew too long or split into too many
+   pieces. By construction this can't co-occur with .satisfied (a contradictory line can
+   never also read as exactly matching its clue), but .contradiction is declared after
+   .satisfied so it wins on equal specificity if that ever proves wrong. */
+.nono-clue.contradiction {
+  color: var(--danger);
+}
+
 .nono-cell {
   width: 1.9rem;
   height: 1.9rem;
@@ -311,6 +320,16 @@ body {
 
 .nono-cell.filled {
   background: var(--gold);
+}
+
+/* Line locking (item: line locking on top of auto-X) — once a row/col is fully marked and
+   satisfied, its cells stop accepting new marks. A locked cell is never itself UNKNOWN
+   (locking one of its lines requires that whole line to already be fully marked), so this
+   only ever shows on an auto-X'd ✕; a locked FILLED cell keeps the normal pointer cursor
+   because it's still clickable — clearing it is the one move allowed on a locked line, and
+   is what unlocks it again. */
+.nono-cell.locked:not(.filled) {
+  cursor: not-allowed;
 }
 
 .nono-cell.empty::after {
@@ -452,10 +471,27 @@ body {
   color: var(--text);
 }
 
+.modal-card__message {
+  margin: 0 0 1.25rem;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.modal-card__actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.6rem;
+}
+
+.modal-card__actions .btn {
+  margin-top: 0;
+}
+
 /* Persistent bottom-anchored explanation panel — one shared surface for hint reasoning
    (Get a hint) and mistake explanations (Check my work / Learn more), fixed within the
    viewport so it's always visible with no scrolling. See body's padding-bottom, kept in
-   sync with this panel's min-height so it never covers the board or footer. */
+   sync with this panel's min-height so it never covers the board. */
 .explain-panel {
   position: fixed;
   left: 0;
@@ -496,13 +532,6 @@ body {
   color: var(--text-dim);
   font-size: 0.85rem;
   line-height: 1.6;
-}
-
-.footer {
-  margin-top: 3rem;
-  text-align: center;
-  color: var(--text-dim);
-  font-size: 0.85rem;
 }
 
 @media (max-width: 30rem) {
