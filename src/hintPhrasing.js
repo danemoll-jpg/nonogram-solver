@@ -1,20 +1,31 @@
-// Item 4: hint phrasing layer. Takes a structured deduction object (from solver.js,
+// Item 4/6: hint phrasing layer. Takes a structured deduction object (from solver.js,
 // contradiction.js, or mistakes.js) and produces the natural-language text shown to the
 // player. The solver never produces this text itself — it only produces facts.
 //
-// This file is a stand-in for the real design: an LLM call that phrases the deduction
-// (varied, conversational, "the way an experienced human solver would explain it"). No
-// backend/API key is wired up in this environment, so `phraseDeduction` below is a
-// deterministic template-based renderer with a few varied phrasings per technique — good
-// enough to use today, and it's the one function to swap out later.
-//
-// To add real LLM phrasing: replace the body of `phraseDeduction` with a call to your
-// backend (e.g. a Firebase Cloud Function) that sends the deduction JSON to an LLM and
-// returns its text — everything upstream (solver, UI) is unaffected because they only
-// depend on this function's signature: (deduction) -> string. `setPhraser` lets the UI
-// swap in that async implementation without editing this module.
+// `phraseDeduction` calls a Firebase Cloud Function (`phraseHint`, see functions/index.js)
+// which holds the LLM API key server-side and phrases the deduction (varied, conversational,
+// "the way an experienced human solver would explain it"). If that call fails for any
+// reason — offline, the Function isn't deployed yet, a transient error — it falls back to
+// `defaultPhraser`, a deterministic template renderer, so a hint is never just silently
+// missing. Everything upstream (solver, UI) only depends on this function's signature:
+// (deduction) -> Promise<string>. `setPhraser` lets tests/dev swap in a different
+// implementation (e.g. force the template renderer) without editing this module.
 
-let activePhraser = defaultPhraser;
+import { getPhraseHintCallable } from './firebase.js';
+
+async function llmPhraser(deduction) {
+  try {
+    const phraseHint = await getPhraseHintCallable();
+    const result = await phraseHint({ deduction });
+    const text = result?.data?.text;
+    if (typeof text === 'string' && text.trim()) return text.trim();
+  } catch (err) {
+    console.warn('LLM hint phrasing unavailable, falling back to template phrasing:', err);
+  }
+  return defaultPhraser(deduction);
+}
+
+let activePhraser = llmPhraser;
 
 export function setPhraser(fn) {
   activePhraser = fn;

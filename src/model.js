@@ -72,6 +72,14 @@ export function puzzleFromSolution({ id, name, solution, source = 'authored' }) 
 // history. History is what makes "undo to move #N" possible; a board reconstructed from
 // a photo/scan snapshot has no history (see hasHistory) and mistake-checking degrades
 // gracefully for it (flag wrong cells as a set, no undo-to-point).
+//
+// Each history entry is one *move*: { cells: [{ row, col, prev, next }, ...], source }.
+// Most moves are a single cell (one click). A move can also batch several cells that
+// happened as one causally-linked action — e.g. a manual fill plus the auto-X marks it
+// triggers on a just-completed line (see app.js's paintCell) — so undo-to-point removes
+// them together instead of leaving a line half-auto-marked. `source` ('player' | 'hint')
+// lets the UI derive a "hints used" count straight from history without a separate
+// counter (see app.js's completion stats).
 export class Board {
   constructor(rows, cols) {
     this.rows = rows;
@@ -91,7 +99,7 @@ export class Board {
   clone() {
     const b = new Board(this.rows, this.cols);
     b.grid = cloneGrid(this.grid);
-    b.history = this.history.map((m) => ({ ...m }));
+    b.history = this.history.map((m) => ({ ...m, cells: m.cells.map((c) => ({ ...c })) }));
     b.hasHistory = this.hasHistory;
     return b;
   }
@@ -100,17 +108,34 @@ export class Board {
     return this.grid[r][c];
   }
 
-  // Set a cell. Returns false (no-op) if it was already that state.
+  // Set a single cell. Returns false (no-op) if it was already that state.
   // recordHistory:false is for scratch boards (hint preview, contradiction search) that
-  // must not pollute the real move history.
-  set(r, c, state, { recordHistory = true } = {}) {
+  // must not pollute the real move history. `source` tags the move (see class comment).
+  set(r, c, state, { recordHistory = true, source = 'player' } = {}) {
     const prev = this.grid[r][c];
     if (prev === state) return false;
     this.grid[r][c] = state;
     if (recordHistory && this.hasHistory) {
-      this.history.push({ row: r, col: c, prev, next: state });
+      this.history.push({ cells: [{ row: r, col: c, prev, next: state }], source });
     }
     return true;
+  }
+
+  // Set several cells as one atomic move (see class comment). No-op cells (already at the
+  // target state) are skipped; if nothing actually changed, no history entry is pushed.
+  // Returns the list of cells that did change, as { row, col, prev, next }.
+  setBatch(changes, { recordHistory = true, source = 'player' } = {}) {
+    const applied = [];
+    for (const { row, col, state } of changes) {
+      const prev = this.grid[row][col];
+      if (prev === state) continue;
+      this.grid[row][col] = state;
+      applied.push({ row, col, prev, next: state });
+    }
+    if (applied.length > 0 && recordHistory && this.hasHistory) {
+      this.history.push({ cells: applied, source });
+    }
+    return applied;
   }
 
   getRow(r) { return getRow(this.grid, r); }
@@ -125,7 +150,9 @@ export class Board {
   undoToMove(n) {
     const replay = this.history.slice(0, n);
     this.grid = createGrid(this.rows, this.cols);
-    for (const m of replay) this.grid[m.row][m.col] = m.next;
+    for (const move of replay) {
+      for (const cell of move.cells) this.grid[cell.row][cell.col] = cell.next;
+    }
     this.history = replay;
   }
 

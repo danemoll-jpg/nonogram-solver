@@ -13,10 +13,10 @@ Build order from the design spec, and what's done:
 | 1 | Data model | ✅ [src/model.js](src/model.js) |
 | 2 | Solver engine (4 line techniques + cross-line propagation) | ✅ [src/lineSolver.js](src/lineSolver.js), [src/solver.js](src/solver.js) |
 | 3 | Dev/test harness | ✅ folded into the full UI below — every hint highlights and explains itself, so there's no separate bare-bones view to maintain |
-| 4 | Hint phrasing layer | ✅ [src/hintPhrasing.js](src/hintPhrasing.js) — **template-based placeholder, not a real LLM call** (see below) |
+| 4 | Hint phrasing layer | ✅ [src/hintPhrasing.js](src/hintPhrasing.js) — LLM-backed via a Cloud Function, template fallback (see below) |
 | 5 | Mistake handling (auto-check, on-demand check, remove-bad-marks) | ✅ [src/mistakes.js](src/mistakes.js) |
 | 6 | Contradiction search (on-demand only) | ✅ [src/contradiction.js](src/contradiction.js) |
-| 7 | Full puzzle UI | ✅ [index.html](index.html) / [app.js](app.js) / [styles.css](styles.css) |
+| 7 | Full puzzle UI + refinement pass | ✅ [index.html](index.html) / [app.js](app.js) / [styles.css](styles.css) — mode toggle, 5×5 chunking, auto-X, mistake pop-up, complete-stats modal, real LLM hint phrasing (**Cloud Function written, not yet deployed** — see [functions/README.md](functions/README.md)) |
 | 8 | Photo → puzzle generation | ⬜ not started (needs its own design pass — grid-size/threshold controls, uniqueness-checking) |
 | 9 | Firestore schema + shared library | ⬜ not started (needs schema + sharing-model design) |
 | 10 | Scan-existing-puzzle flow | ⬜ not started (builds on #8 + OCR) |
@@ -54,11 +54,17 @@ src/
   mistakes.js       auto-check / on-demand check / remove-bad-marks — three independent
                     tools, not one setting.
   hintPhrasing.js   Turns a deduction into player-facing text. See "Hint phrasing" below.
+  firebase.js       Lazy Firebase client (CDN ESM import) used only by hintPhrasing.js to
+                    call the phraseHint Cloud Function — never touches the network at
+                    import time, so it's inert during tests.
   fullSolve.js      Solves a whole puzzle (line techniques + contradiction fallback) —
                     used by tests, and later useful for uniqueness-checking generated
                     puzzles and technique-based difficulty rating.
   puzzles.js        A handful of hand-authored sample puzzles standing in for the shared
                     library (item 9).
+functions/          Firebase Cloud Functions. `phraseHint` calls an LLM to phrase a
+                    deduction server-side, keeping the API key out of client code — see
+                    functions/README.md for deploy steps (not yet deployed).
 test/               Zero-dependency test suite, incl. a brute-force differential test that
                     checks the line solver's DP against exhaustive enumeration.
 index.html / app.js / styles.css   The playable UI.
@@ -99,14 +105,19 @@ through a partially-satisfied gap, caught by the brute-force differential test i
 candidate cell state, which is more obviously correct at a small performance cost that
 doesn't matter at nonogram sizes.
 
-### Hint phrasing is a placeholder, not a real LLM call
+### Hint phrasing calls an LLM via a Cloud Function, with a template fallback
 
-`hintPhrasing.js` deterministically templates a few varied phrasings per technique. The
-design spec calls for an actual LLM call (varied, conversational explanations); that needs
-a backend (e.g. a Firebase Cloud Function so the API key isn't exposed client-side), which
-isn't wired up here. `phraseDeduction(deduction)` is the seam: swap its implementation for
-a call to that backend and nothing upstream (solver, UI) needs to change — see the comment
-at the top of the file. `setPhraser()` lets that swap happen without editing this module.
+`phraseDeduction(deduction)` calls the `phraseHint` Firebase Cloud Function
+(`functions/index.js`) through `src/firebase.js`, sending it the structured deduction; the
+function calls the LLM API server-side (API key never touches client code) and returns
+phrased text. If that call fails for any reason — offline, the function isn't deployed yet,
+a transient error — `phraseDeduction` falls back to the original deterministic template
+renderer, so a hint is never silently missing. `setPhraser()` still lets tests or dev swap in
+a different implementation without editing this module.
+
+**The function is written but not deployed** — see [functions/README.md](functions/README.md)
+for the one-time `firebase login` / secret-setup / `firebase deploy` steps. Until deployed,
+the app plays exactly as before, using the template phrasings.
 
 ## Open questions carried forward from the design spec
 

@@ -80,6 +80,10 @@ body {
   box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.25);
 }
 
+.board-panel {
+  position: relative;
+}
+
 .side-panel {
   display: flex;
   flex-direction: column;
@@ -118,6 +122,33 @@ body {
   font-size: 0.9rem;
   color: var(--text-dim);
   margin-left: auto;
+}
+
+.mode-toggle {
+  display: inline-flex;
+  border: 1px solid rgba(230, 183, 63, 0.3);
+  border-radius: 0.6rem;
+  overflow: hidden;
+}
+
+.mode-btn {
+  appearance: none;
+  border: none;
+  background: var(--panel-bg-raised);
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+}
+
+.mode-btn + .mode-btn {
+  border-left: 1px solid rgba(230, 183, 63, 0.3);
+}
+
+.mode-btn[aria-pressed="true"] {
+  background: var(--gold);
+  color: #241a04;
 }
 
 .btn {
@@ -222,8 +253,18 @@ body {
   touch-action: none;
 }
 
-.nono-cell:nth-child(5n) {
-  box-shadow: inset -2px 0 0 var(--grid-line-strong);
+/* 5x5 chunk guides: computed in JS (app.js) from row/col index, not nth-child — the flat
+   grid also contains clue cells, so DOM child position doesn't line up with row/col index.
+   A trailing partial chunk at the puzzle's edge is left alone, per design (no special-casing
+   for sizes that aren't multiples of 5). border-right/border-bottom (rather than box-shadow,
+   which is a single property) so a cell that ends both a chunk-column and a chunk-row can
+   show both lines at once. */
+.nono-cell.chunk-col-end {
+  border-right: 2px solid var(--grid-line-strong);
+}
+
+.nono-cell.chunk-row-end {
+  border-bottom: 2px solid var(--grid-line-strong);
 }
 
 .nono-cell.filled {
@@ -249,6 +290,92 @@ body {
   color: var(--text-dim);
   min-height: 1.4em;
   margin: 0.75rem 0 0;
+}
+
+/* Auto-check mistake pop-up: anchored to the board panel itself (not the side panel) so it
+   shows up right where the player is looking, with no scrolling required. */
+.mistake-popup {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  width: min(22rem, calc(100% - 2rem));
+  background: var(--panel-bg-raised);
+  border: 2px solid var(--danger);
+  border-radius: 0.75rem;
+  padding: 0.9rem 1rem;
+  box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.4);
+}
+
+.mistake-popup__text {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.mistake-popup__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.mistake-popup__actions .btn {
+  margin-top: 0;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+.modal-card {
+  background: var(--panel-bg-raised);
+  border: 2px solid var(--gold);
+  border-radius: 1rem;
+  padding: 1.75rem 2rem;
+  max-width: 22rem;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.5);
+}
+
+.modal-card__title {
+  margin: 0 0 1rem;
+  color: var(--gold);
+  font-size: 1.4rem;
+}
+
+.modal-stats {
+  margin: 0 0 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.modal-stats__row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.95rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid rgba(230, 183, 63, 0.2);
+}
+
+.modal-stats__row dt {
+  color: var(--text-dim);
+}
+
+.modal-stats__row dd {
+  margin: 0;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .panel-block__title {

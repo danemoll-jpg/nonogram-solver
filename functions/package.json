@@ -1,0 +1,12 @@
+{
+  "name": "functions",
+  "description": "Cloud Functions for the nonogram app — currently just phraseHint (item 7.6): turns a solver deduction into player-facing hint text via an LLM call, keeping the API key server-side.",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-functions": "^6.0.1"
+  }
+}

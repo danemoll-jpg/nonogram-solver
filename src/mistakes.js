@@ -39,16 +39,20 @@ export function autoCheckMark(board, solution, row, col) {
 export function checkForMistakes(board, solution) {
   if (board.hasHistory) {
     for (let i = 0; i < board.history.length; i++) {
-      const move = board.history[i];
-      const correct = correctState(solution, move.row, move.col);
-      if (move.next !== correct && move.next !== UNKNOWN) {
-        return {
-          origin: 'history',
-          moveIndex: i,
-          cell: { row: move.row, col: move.col },
-          markedAs: move.next,
-          shouldBe: correct,
-        };
+      // A move may batch several cells (e.g. a fill plus the auto-X marks it triggered) —
+      // check each in order and report the first wrong one, but still point undo-to-point
+      // at the whole move so a bad move's auto-X marks get undone along with it.
+      for (const cell of board.history[i].cells) {
+        const correct = correctState(solution, cell.row, cell.col);
+        if (cell.next !== correct && cell.next !== UNKNOWN) {
+          return {
+            origin: 'history',
+            moveIndex: i,
+            cell: { row: cell.row, col: cell.col },
+            markedAs: cell.next,
+            shouldBe: correct,
+          };
+        }
       }
     }
     return { origin: 'history', moveIndex: null, cell: null }; // no mistakes found

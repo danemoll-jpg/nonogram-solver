@@ -13,7 +13,10 @@ import { SAMPLE_PUZZLES } from './src/puzzles.js';
 let puzzle = null;
 let board = null;
 let autoCheckEnabled = false;
+let activeMode = 'fill'; // 'fill' | 'x' — which mark a click/drag applies (item 7.1)
 let highlightedCells = []; // { row, col, kind: 'reasoning' | 'result' }
+let puzzleStartTime = 0;
+let puzzleCompleteShown = false;
 
 const cellEls = new Map(); // "r,c" -> element
 const rowClueEls = [];
@@ -24,6 +27,8 @@ const els = {
   boardRoot: document.getElementById('board-root'),
   statusLine: document.getElementById('status-line'),
   btnNew: document.getElementById('btn-new'),
+  modeFill: document.getElementById('mode-fill'),
+  modeX: document.getElementById('mode-x'),
   toggleAutocheck: document.getElementById('toggle-autocheck'),
   btnHint: document.getElementById('btn-hint'),
   hintText: document.getElementById('hint-text'),
@@ -31,6 +36,15 @@ const els = {
   btnCheck: document.getElementById('btn-check'),
   btnRemoveBad: document.getElementById('btn-remove-bad'),
   mistakeText: document.getElementById('mistake-text'),
+  mistakePopup: document.getElementById('mistake-popup'),
+  mistakePopupText: document.getElementById('mistake-popup-text'),
+  mistakePopupDismiss: document.getElementById('mistake-popup-dismiss'),
+  mistakePopupLearn: document.getElementById('mistake-popup-learn'),
+  completeModal: document.getElementById('complete-modal'),
+  btnCompleteClose: document.getElementById('btn-complete-close'),
+  statTime: document.getElementById('stat-time'),
+  statHints: document.getElementById('stat-hints'),
+  statMistakes: document.getElementById('stat-mistakes'),
 };
 
 // ---- puzzle lifecycle ----
@@ -50,9 +64,13 @@ function loadPuzzle(id) {
   els.puzzleSelect.value = puzzle.id;
   board = new Board(puzzle.rows, puzzle.cols);
   highlightedCells = [];
+  puzzleStartTime = Date.now();
+  puzzleCompleteShown = false;
   els.hintText.textContent = '';
   els.mistakeText.textContent = '';
   els.btnContradiction.classList.add('hidden');
+  hideMistakePopup();
+  els.completeModal.classList.add('hidden');
   renderBoard();
   updateStatus('');
 }
@@ -96,6 +114,11 @@ function renderBoard() {
       cell.className = 'nono-cell';
       cell.dataset.row = String(r);
       cell.dataset.col = String(c);
+      // 5x5 chunk guides — a thicker border every 5 rows/cols, computed from the actual
+      // row/col index (see styles.css: nth-child can't be used here because the grid's DOM
+      // children also include clue cells, so child position doesn't track column index).
+      if ((c + 1) % 5 === 0) cell.classList.add('chunk-col-end');
+      if ((r + 1) % 5 === 0) cell.classList.add('chunk-row-end');
       grid.appendChild(cell);
       cellEls.set(`${r},${c}`, cell);
     }
@@ -129,7 +152,12 @@ function syncAllCellVisuals() {
   applyHighlightClasses();
 
   if (board.isComplete()) {
-    updateStatus(boardMatchesSolution() ? '🎉 Solved!' : "All cells are marked, but something's off — try Check my work.");
+    if (boardMatchesSolution()) {
+      updateStatus('🎉 Solved!');
+      maybeShowCompletion();
+    } else {
+      updateStatus("All cells are marked, but something's off — try Check my work.");
+    }
   } else {
     updateStatus('');
   }
@@ -169,27 +197,135 @@ function updateStatus(msg) {
   els.statusLine.textContent = msg;
 }
 
-// ---- pointer interaction: click to fill, right-click/long-press for "empty", drag-paint ----
+// ---- puzzle-complete notification (item 7.5) ----
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// Hints-used and mistakes-made are both derived from move history rather than tracked with
+// separate live counters — applyDeduction tags hint-originated moves with source:'hint'
+// (see solver.js), and any cell ever written to a state that disagrees with the solution
+// counts as a caught mistake, whether or not the player ever ran Check my work.
+function computeCompletionStats() {
+  let hintsUsed = 0;
+  let mistakes = 0;
+  for (const move of board.history) {
+    if (move.source === 'hint') hintsUsed++;
+    for (const cell of move.cells) {
+      const correct = puzzle.solution[cell.row][cell.col] ? FILLED : EMPTY;
+      if (cell.next !== correct) mistakes++;
+    }
+  }
+  return { hintsUsed, mistakes };
+}
+
+function maybeShowCompletion() {
+  if (puzzleCompleteShown || !puzzle.solution) return;
+  puzzleCompleteShown = true;
+  const { hintsUsed, mistakes } = computeCompletionStats();
+  els.statTime.textContent = formatDuration(Date.now() - puzzleStartTime);
+  els.statHints.textContent = String(hintsUsed);
+  els.statMistakes.textContent = String(mistakes);
+  els.completeModal.classList.remove('hidden');
+}
+
+els.btnCompleteClose.addEventListener('click', () => {
+  els.completeModal.classList.add('hidden');
+});
+
+// ---- mistake pop-up (item 7.4) ----
+
+function hideMistakePopup() {
+  els.mistakePopup.classList.add('hidden');
+}
+
+async function showMistakePopup(mistake) {
+  els.mistakePopupText.textContent = await phraseDeduction(mistake);
+  els.mistakePopup.classList.remove('hidden');
+}
+
+els.mistakePopupDismiss.addEventListener('click', () => {
+  hideMistakePopup(); // mark is left as-is — dismiss doesn't touch the board
+});
+
+els.mistakePopupLearn.addEventListener('click', () => {
+  hideMistakePopup();
+  runOnDemandCheck({ fromPopup: true });
+});
+
+// ---- pointer interaction: a mode toggle picks Fill or Mark-empty, click applies it,
+// clicking an already-marked cell in that state clears it, drag paints a stroke using
+// whichever action the first cell in the drag performed (item 7.1). ----
+
+function setMode(mode) {
+  activeMode = mode;
+  els.modeFill.setAttribute('aria-pressed', String(mode === 'fill'));
+  els.modeX.setAttribute('aria-pressed', String(mode === 'x'));
+}
+
+els.modeFill.addEventListener('click', () => setMode('fill'));
+els.modeX.addEventListener('click', () => setMode('x'));
+
+function targetStateFor(current) {
+  if (activeMode === 'fill') return current === FILLED ? UNKNOWN : FILLED;
+  return current === EMPTY ? UNKNOWN : EMPTY;
+}
+
+// If placing `newState` at (r,c) would leave a row or column's placed fills exactly
+// matching its clue, every other still-unknown cell in that line can never be filled
+// without breaking the clue — so it's forced empty. Uses isLineSatisfied's proper run
+// comparison (not a plain fill-count check), because a count-only check would wrongly
+// trigger on an arrangement that happens to have the right number of filled cells but the
+// wrong run pattern (see model.js). Only FILLED placements can newly satisfy a line — an
+// EMPTY/UNKNOWN placement never adds a fill, so it can't complete one.
+function autoXCellsFor(r, c, newState) {
+  if (newState !== FILLED) return [];
+  const cells = [];
+
+  const row = board.getRow(r);
+  row[c] = newState;
+  if (isLineSatisfied(row, puzzle.rowClues[r])) {
+    for (let cc = 0; cc < puzzle.cols; cc++) {
+      if (row[cc] === UNKNOWN) cells.push({ row: r, col: cc, state: EMPTY });
+    }
+  }
+
+  const col = board.getCol(c);
+  col[r] = newState;
+  if (isLineSatisfied(col, puzzle.colClues[c])) {
+    for (let rr = 0; rr < puzzle.rows; rr++) {
+      if (col[rr] === UNKNOWN) cells.push({ row: rr, col: c, state: EMPTY });
+    }
+  }
+
+  return cells;
+}
 
 function attachPointerHandlers(grid) {
-  let dragging = null; // { mode, paintState, touched: Set<string> }
-  let longPressTimer = null;
+  let dragging = null; // { paintState, touched: Set<string> }
 
   grid.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  function toggleState(current, mode) {
-    if (mode === 'filled') return current === FILLED ? UNKNOWN : FILLED;
-    return current === EMPTY ? UNKNOWN : EMPTY;
-  }
-
+  // One user press/drag-step is one move: the pressed cell's mark plus any auto-X cells it
+  // triggers are batched into a single history entry (see Board.setBatch) so undo-to-point
+  // never leaves a line half-auto-marked.
   function paintCell(el, state) {
     const r = Number(el.dataset.row);
     const c = Number(el.dataset.col);
-    const changed = board.set(r, c, state);
-    if (!changed) return;
-    el.classList.toggle('filled', state === FILLED);
-    el.classList.toggle('empty', state === EMPTY);
-    onCellChanged(r, c);
+    if (board.get(r, c) === state) return;
+    const autoX = autoXCellsFor(r, c, state);
+    const applied = board.setBatch([{ row: r, col: c, state }, ...autoX]);
+    if (applied.length === 0) return;
+    for (const cell of applied) {
+      const cellEl = cellEls.get(`${cell.row},${cell.col}`);
+      cellEl.classList.toggle('filled', cell.next === FILLED);
+      cellEl.classList.toggle('empty', cell.next === EMPTY);
+    }
+    for (const cell of applied) onCellChanged(cell.row, cell.col);
   }
 
   function cellAt(x, y) {
@@ -203,28 +339,14 @@ function attachPointerHandlers(grid) {
     e.preventDefault();
     clearHighlights();
     els.hintText.textContent = '';
-    els.mistakeText.textContent = '';
+    hideMistakePopup();
 
-    const mode = e.pointerType === 'mouse' && e.button === 2 ? 'empty' : 'filled';
     const r = Number(el.dataset.row);
     const c = Number(el.dataset.col);
-    const newState = toggleState(board.get(r, c), mode);
-    dragging = { mode, paintState: newState, touched: new Set([`${r},${c}`]) };
+    const newState = targetStateFor(board.get(r, c));
+    dragging = { paintState: newState, touched: new Set([`${r},${c}`]) };
     paintCell(el, newState);
     syncAllCellVisuals();
-
-    // Touch/pen: a long-press switches this stroke to the "empty" mark instead of "fill".
-    if (e.pointerType !== 'mouse') {
-      longPressTimer = setTimeout(() => {
-        if (!dragging) return;
-        paintCell(el, UNKNOWN); // undo the initial fill guess
-        const emptyState = toggleState(UNKNOWN, 'empty');
-        dragging.mode = 'empty';
-        dragging.paintState = emptyState;
-        paintCell(el, emptyState);
-        syncAllCellVisuals();
-      }, 480);
-    }
   });
 
   grid.addEventListener('pointermove', (e) => {
@@ -233,14 +355,12 @@ function attachPointerHandlers(grid) {
     if (!el) return;
     const key = `${el.dataset.row},${el.dataset.col}`;
     if (dragging.touched.has(key)) return;
-    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
     dragging.touched.add(key);
     paintCell(el, dragging.paintState);
     syncAllCellVisuals();
   });
 
   function endDrag() {
-    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
     dragging = null;
   }
   grid.addEventListener('pointerup', endDrag);
@@ -252,7 +372,7 @@ function onCellChanged(r, c) {
     const mistake = autoCheckMark(board, puzzle.solution, r, c);
     if (mistake) {
       highlightDeduction(mistake);
-      phraseDeduction(mistake).then((text) => { els.mistakeText.textContent = text; });
+      showMistakePopup(mistake);
     }
   }
 }
@@ -270,7 +390,7 @@ els.btnHint.addEventListener('click', async () => {
     els.btnContradiction.classList.remove('hidden');
     return;
   }
-  applyDeduction(board, hint);
+  applyDeduction(board, hint, { source: 'hint' });
   highlightDeduction(hint);
   syncAllCellVisuals();
   els.hintText.textContent = await phraseDeduction(hint);
@@ -285,7 +405,7 @@ els.btnContradiction.addEventListener('click', async () => {
       "Even a deeper search can't find a forced move from here — this may need an outright guess.";
     return;
   }
-  applyDeduction(board, hint);
+  applyDeduction(board, hint, { source: 'hint' });
   highlightDeduction(hint);
   syncAllCellVisuals();
   els.hintText.textContent = await phraseDeduction(hint);
@@ -294,13 +414,17 @@ els.btnContradiction.addEventListener('click', async () => {
 
 // ---- mistake-handling controls ----
 
-els.btnCheck.addEventListener('click', () => {
+// Shared by the "Check my work" button and the mistake pop-up's "Learn more" — reuses
+// mistakes.js's on-demand check rather than a separate explanation path (item 7.4).
+// fromPopup:true skips the "auto-check is on" short-circuit, since Learn More should always
+// produce the real explanation even when auto-check is what surfaced the mistake.
+function runOnDemandCheck({ fromPopup = false } = {}) {
   els.mistakeText.innerHTML = '';
   if (!puzzle.solution) {
     els.mistakeText.textContent = "This puzzle has no known solution to check against yet.";
     return;
   }
-  if (autoCheckEnabled) {
+  if (autoCheckEnabled && !fromPopup) {
     els.mistakeText.textContent = 'Auto-check is on — mistakes are flagged the moment you make them.';
     return;
   }
@@ -339,7 +463,9 @@ els.btnCheck.addEventListener('click', () => {
     highlightedCells = result.wrongCells.map((c) => ({ ...c, kind: 'result' }));
     applyHighlightClasses();
   }
-});
+}
+
+els.btnCheck.addEventListener('click', () => runOnDemandCheck());
 
 els.btnRemoveBad.addEventListener('click', () => {
   if (!puzzle.solution) return;
@@ -359,5 +485,6 @@ els.toggleAutocheck.addEventListener('change', (e) => {
 
 // ---- boot ----
 
+setMode('fill');
 populatePuzzleSelect();
 loadPuzzle(SAMPLE_PUZZLES[0].id);

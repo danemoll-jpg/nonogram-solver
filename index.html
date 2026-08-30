@@ -23,6 +23,10 @@
             <select id="puzzle-select"></select>
           </label>
           <button id="btn-new" class="btn" type="button">Reset</button>
+          <div class="mode-toggle" role="group" aria-label="Marking mode">
+            <button id="mode-fill" class="mode-btn" type="button" aria-pressed="true">Fill</button>
+            <button id="mode-x" class="mode-btn" type="button" aria-pressed="false">✕ Mark empty</button>
+          </div>
           <label class="toolbar__toggle">
             <input type="checkbox" id="toggle-autocheck" />
             Auto-check
@@ -32,6 +36,14 @@
         <div id="board-root" class="board-root"></div>
 
         <p id="status-line" class="status-line" aria-live="polite"></p>
+
+        <div id="mistake-popup" class="mistake-popup hidden" role="alert">
+          <p id="mistake-popup-text" class="mistake-popup__text"></p>
+          <div class="mistake-popup__actions">
+            <button id="mistake-popup-dismiss" class="btn btn--ghost" type="button">Dismiss</button>
+            <button id="mistake-popup-learn" class="btn btn--primary" type="button">Learn more</button>
+          </div>
+        </div>
       </section>
 
       <aside class="side-panel">
@@ -52,10 +64,11 @@
         <div class="panel-block">
           <h2 class="panel-block__title">How to mark cells</h2>
           <ul class="help-list">
-            <li>Click / tap: fill a cell</li>
-            <li>Right-click (or long-press): mark "definitely empty" (✕)</li>
+            <li>Pick Fill or Mark-empty above, then click/tap a cell to apply it</li>
+            <li>Click a cell already in that state to clear it back to blank</li>
             <li>Click-and-drag: paint the same mark across cells</li>
             <li>A clue number grays out once its line is satisfied</li>
+            <li>Finishing a line's fills auto-marks its remaining cells with ✕</li>
           </ul>
         </div>
       </aside>
@@ -64,6 +77,18 @@
     <footer class="footer">
       <p>Photo → puzzle generation, the shared library, and scanning an existing puzzle are on the roadmap — see README.md.</p>
     </footer>
+  </div>
+
+  <div id="complete-modal" class="modal-overlay hidden">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="complete-title">
+      <h2 id="complete-title" class="modal-card__title">🎉 Solved!</h2>
+      <dl class="modal-stats">
+        <div class="modal-stats__row"><dt>Time</dt><dd id="stat-time"></dd></div>
+        <div class="modal-stats__row"><dt>Hints used</dt><dd id="stat-hints"></dd></div>
+        <div class="modal-stats__row"><dt>Mistakes made</dt><dd id="stat-mistakes"></dd></div>
+      </dl>
+      <button id="btn-complete-close" class="btn btn--primary" type="button">Nice!</button>
+    </div>
   </div>
 
   <script type="module" src="app.js"></script>

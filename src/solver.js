@@ -112,13 +112,16 @@ export function getNextHint(board, puzzle) {
   return null; // no forced move — the "stuck" state
 }
 
-// Mutates `board` to apply a deduction's result cells. Pass recordHistory:false for
-// scratch boards (contradiction-search hypotheses) that shouldn't touch real move history.
+// Mutates `board` to apply a deduction's result cells, as one atomic move (see model.js's
+// Board.setBatch) — a technique that forces several cells at once (e.g. overlap forcing
+// four cells in a row) is one hint, so it should undo as one move, not one per cell. Pass
+// recordHistory:false for scratch boards (contradiction-search hypotheses) that shouldn't
+// touch real move history; pass source:'hint' so the UI can derive a hints-used count from
+// history alone (see app.js).
 export function applyDeduction(board, deduction, opts = {}) {
   if (!deduction || deduction.resultState == null) return;
-  for (const { row, col } of deduction.resultCells) {
-    board.set(row, col, deduction.resultState, opts);
-  }
+  const changes = deduction.resultCells.map(({ row, col }) => ({ row, col, state: deduction.resultState }));
+  board.setBatch(changes, opts);
 }
 
 // Technique 4: cross-line propagation. Repeatedly solves every row/col that changed

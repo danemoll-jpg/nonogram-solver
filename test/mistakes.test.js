@@ -49,6 +49,29 @@ describe('checkForMistakes (in-app puzzle, has history)', () => {
   });
 });
 
+describe('checkForMistakes (batched moves, e.g. a fill plus its auto-X cells)', () => {
+  test('finds a wrong cell inside a multi-cell move, and undo removes the whole move', () => {
+    const board = new Board(2, 2);
+    board.set(0, 0, FILLED); // correct, move 0
+    // Simulate a manual fill batched together with an auto-X mark, the way app.js's
+    // paintCell does — one move, two cells, the second one wrong (solution says (1,1) is
+    // filled, not empty).
+    board.setBatch([
+      { row: 1, col: 0, state: EMPTY }, // correct
+      { row: 1, col: 1, state: EMPTY }, // WRONG — solution says filled
+    ]);
+    const result = checkForMistakes(board, solution);
+    assertEqual(result.origin, 'history');
+    assertEqual(result.moveIndex, 1); // the whole batched move, not a fractional index
+    assertEqual(result.cell, { row: 1, col: 1 });
+
+    board.undoToMove(result.moveIndex);
+    assertEqual(board.get(0, 0), FILLED);
+    assertEqual(board.get(1, 0), UNKNOWN); // undone along with the wrong cell in its move
+    assertEqual(board.get(1, 1), UNKNOWN);
+  });
+});
+
 describe('checkForMistakes (snapshot-origin, no history)', () => {
   test('flags the wrong cells as a set, with no ordering', () => {
     const board = Board.fromGrid(
