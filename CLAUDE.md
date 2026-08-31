@@ -5,12 +5,12 @@
   directly via `<script type="module">`, matching the sibling `game-hub` project's pattern.
 - No TypeScript currently; the whole solver and UI are vanilla JS.
 - Firebase project (`nonogram-pro-e8a31`) is in active use for Cloud Functions, Anonymous
-  Auth, and Firestore. Three callables are deployed: `phraseHint` (LLM hint phrasing) and
-  `createPairingCode`/`redeemPairingCode` (item 4's cross-device stats pairing) — see
-  `TODO.md` for deploy gotchas hit along the way (Blaze plan requirement, several IAM grants,
-  public-invoker access, and — newly, for item 4 — the default Compute Engine service account
-  needing an explicit **Cloud Datastore User** IAM role before Cloud Functions can read/write
-  Firestore) if redeploying or adding more Firestore-touching functions.
+  Auth, and Firestore. Three callables are deployed and confirmed working: `phraseHint`
+  (LLM hint phrasing) and `createPairingCode`/`redeemPairingCode` (cross-device stats
+  pairing) — see `TODO.md` for deploy gotchas hit along the way (Blaze plan requirement,
+  several IAM grants, public-invoker access, and the default Compute Engine service account
+  needing an explicit **Cloud Datastore User** IAM role before Cloud Functions can
+  read/write Firestore) if redeploying or adding more Firestore-touching functions.
 - Deploy target: Netlify, static-site mode (`netlify.toml`, `publish = "."`). The Netlify
   site is connected and auto-deploys from this repo's `main` branch — live at
   https://nonogrampro.netlify.app/.
@@ -45,17 +45,17 @@ Short version: items 1–7 (solver engine, hint/mistake/contradiction logic, and
 playable UI with LLM-backed hint phrasing), the UI consolidation pass, a post-ship
 bug-fix/mechanics pass, and the iPad-verification follow-up pass (puzzle-name hidden until
 completion, grid scales to fill the screen, sound-effect plumbing against placeholder audio,
-persistent mute toggle, cross-device stats + pairing via Anonymous Auth, and the bundled
-Node 20→22 runtime bump) are all done and coded — see `TODO.md`'s Completed Tasks for the
-full breakdown. `phraseHint`, `createPairingCode`, and `redeemPairingCode` are all deployed;
-Anonymous Auth is enabled; Firestore is provisioned with `firestore.rules` published.
-**Not yet confirmed working end-to-end**: the project owner hit an IAM permissions gap
-testing pairing live (see the Tech Stack note above) and applied the fix, but hasn't yet
-re-confirmed "Generate a code" actually returns a code. Two real-world follow-ups remain
-outside code: the project owner generating real audio files for `assets/sounds/` (the
-drag-sweep prototype resolved on a 'retrigger' playback approach — see `TODO.md` for what
-kind of asset that means to ask for), and re-confirming pairing works live. Nothing has been
-committed/pushed yet — check with the project owner before doing so. Item 10
-(scan-existing-puzzle) is next per the project owner, once the above is confirmed. Item 8
-(arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain deferred
-pending their own design pass; check with the project owner before picking either up.
+persistent mute toggle, cross-device stats + pairing via Anonymous Auth, and the Node 20→22
+runtime bump) are all done, deployed, and confirmed working live. A follow-up clue-number
+spacing bug (multi-number clues like `1, 1` misreading as `11`) is also fixed, and
+everything is committed/pushed — `main`/Netlify are current. See `TODO.md`'s Completed
+Tasks for the full breakdown.
+
+Current objective is **item 10, scan-existing-puzzle flow**: read an already-printed
+puzzle from a photo/scan (grid detection + clue OCR + a user-correction step), self-contained
+rather than waiting on item 8. Real audio files are now in place in `assets/sounds/` — no
+loose ends remain from the prior pass.
+
+Item 8 (arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain
+deferred pending their own design pass; check with the project owner before picking either
+up.
