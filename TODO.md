@@ -194,6 +194,22 @@ Completed Tasks
        the majority — true for the actual target use case (a mid-solve scan) but could drift
        toward the fill color on an almost-entirely-filled puzzle. The wizard's click-to-correct
        step is the safety net, same as it already is for OCR misreads.
+     - **iOS follow-up fix**: the project owner reported the scan wizard's scrollbar
+       "missing" on iOS. Root cause: the new fill-state grid above had its OWN
+       `max-height`/`overflow-y: auto`, nested inside `.modal-card__body`'s existing
+       `overflow-y: auto` — two independently vertical-scrollable regions nested inside each
+       other, which iOS Safari doesn't reliably scroll-chain (a touch starting over the inner
+       grid can get stuck there instead of handing off to the outer modal once the grid's own
+       scroll bottoms out). Fixed by dropping the inner region's vertical scroll entirely —
+       `.scan-fillstate-grid` now just grows to its natural height and lets the one outer
+       `.modal-card__body` region handle all vertical scrolling (kept `overflow-x: auto` on
+       the grid alone, for a very wide puzzle exceeding the modal's width — a single-axis
+       nested scroll doesn't compete with the outer vertical gesture the way a second
+       vertical one did). Added `-webkit-overflow-scrolling: touch` to both regions for
+       momentum scrolling. Verified via the Browser pane's mobile viewport emulation
+       (measured `scrollHeight`/`clientHeight` before/after — the grid no longer needs its
+       own vertical scroll, the outer body does); **not yet confirmed on a real iOS device**,
+       worth a real-device check next time the project owner is testing on iPad/iPhone.
 
 Current Objective (Focus Area)
 

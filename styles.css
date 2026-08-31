@@ -454,6 +454,7 @@ body {
 .modal-card__body {
   max-height: min(28rem, 60vh);
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch; /* smooth momentum scrolling on iOS Safari */
   margin-bottom: 1.25rem;
 }
 
@@ -787,18 +788,28 @@ body {
   margin: 0.75rem 0 0;
 }
 
-/* Fill-state review step (Current Objective — see TODO.md): a compact grid of clickable
-   cells previewing the detected fill/X state, reusing the real play board's own
-   .nono-cell-style filled/empty visuals (below) at a smaller fixed size — this grid can be as
-   large as the puzzle itself (e.g. 25x25), so it needs to stay compact and scrollable rather
-   than sized off --cell-size like the real board. --scan-fillstate-cols is set inline by
-   scanUI.js's renderFillStateGrid, from the confirmed column count. */
+/* Fill-state review step (see TODO.md): a compact grid of clickable cells previewing the
+   detected fill/X state, reusing the real play board's own .nono-cell-style filled/empty
+   visuals (below) at a smaller fixed size — this grid can be as large as the puzzle itself
+   (e.g. 25x25), so it needs to stay compact rather than sized off --cell-size like the real
+   board. --scan-fillstate-cols is set inline by scanUI.js's renderFillStateGrid, from the
+   confirmed column count.
+   Deliberately only overflow-x here, not a second overflow-y/max-height region nested inside
+   .modal-card__body's own overflow-y:auto (which is exactly what this had originally, and
+   was the real bug — see TODO.md/CLAUDE.md: two independently vertical-scrollable regions
+   nested inside each other made iOS Safari's touch-scroll feel like it had no scrollbar/
+   wouldn't scroll at all once a touch started over the grid, since iOS doesn't reliably
+   chain a stalled inner scroll to its outer ancestor). Vertical scrolling is handled by the
+   one outer .modal-card__body region only; overflow-x stays local here since a very wide
+   puzzle's grid can still exceed the modal's own width, and a horizontal-only nested scroll
+   doesn't compete with the outer container's vertical gesture the way a second vertical one
+   did. */
 .scan-fillstate-grid {
   display: grid;
   grid-template-columns: repeat(var(--scan-fillstate-cols, 10), 1.1rem);
   gap: 1px;
-  max-height: 24rem;
-  overflow: auto;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   background: rgba(230, 183, 63, 0.15);
   border: 1px solid rgba(230, 183, 63, 0.3);
   border-radius: 0.3rem;
