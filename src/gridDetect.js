@@ -129,16 +129,87 @@ function inkThreshold(values, { backgroundPercentile = 0.85, margin = 20 } = {})
   return sorted[idx] - margin;
 }
 
-// Suggests how many grid lines (not cells — cells = lines - 1) are present along one axis
-// of a rectangle, thresholding via inkThreshold on that rectangle's own slice of the profile
-// so it adapts to the photo's actual lighting (and, per inkThreshold's own comment, to more
-// than one line-darkness tier) rather than a fixed brightness cutoff. This is a suggestion
-// the scan wizard pre-fills for the user to confirm or correct, never applied blind — a
-// noisy photo can over/under-count.
+// The largest value within `radius` positions of each index (inclusive), a "what would this
+// neighborhood look like with no line in it" estimate — a real grid line is thin (a couple
+// of px) relative to any window wider than that, so the window's own max is almost always a
+// genuine non-line sample nearby, whatever that nearby content's own tone happens to be.
+function rollingMax(values, radius) {
+  const n = values.length;
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const lo = Math.max(0, i - radius);
+    const hi = Math.min(n - 1, i + radius);
+    let m = -Infinity;
+    for (let k = lo; k <= hi; k++) if (values[k] > m) m = values[k];
+    out[i] = m;
+  }
+  return out;
+}
+
+// Counts dark runs the same way countDarkRuns does, but against a LOCAL background estimate
+// (rollingMax, above) rather than one threshold for the whole slice — see countGridLines'
+// comment for why: a row/column profile's baseline can itself drift across its length (a
+// filled or X-marked puzzle cell shifts an entire span of rows/cols to a different average
+// tone, not just at the grid line crossing it), and no single global cutoff is simultaneously
+// "dark enough" to catch a faint line sitting on a bright span and "light enough" to not
+// swallow an entire dim span as one giant false run.
+function countDarkRunsLocal(profile, start, end, radius, margin) {
+  const slice = profile.slice(start, end);
+  const bg = rollingMax(slice, radius);
+  let count = 0;
+  let lastRunEnd = -Infinity;
+  let inRun = false;
+  for (let i = 0; i < slice.length; i++) {
+    const dark = slice[i] <= bg[i] - margin;
+    if (dark && !inRun) {
+      if (i - lastRunEnd > 2) count++;
+      inRun = true;
+    } else if (!dark && inRun) {
+      inRun = false;
+      lastRunEnd = i;
+    }
+  }
+  return count;
+}
+
+// Suggests how many grid lines (not cells — cells = lines - 1) are present along one axis of
+// a rectangle. This is a suggestion the scan wizard pre-fills for the user to confirm or
+// correct, never applied blind — a noisy photo (or, per the two comments above, a puzzle
+// with cells already filled/marked in) can over/under-count.
+//
+// Starts with a rough global inkThreshold pass (same idea as before) to get a first line-
+// count/pitch estimate, then refines with local passes (countDarkRunsLocal) sized off that
+// estimate — which is what actually copes with a drifting baseline. Iterates rather than
+// stopping after one local pass: when the rough pass badly undercounts (exactly the case a
+// filled/marked span causes — a whole span merges into one giant "run" instead of several
+// real lines), the pitch it implies is inflated, which makes the FIRST local pass's window
+// too wide to cleanly separate closely-spaced real lines. Each round's count is a better
+// pitch estimate for the next round's window — confirmed directly against a real screenshot
+// with filled/X-marked cells (see TODO.md): round 1 (rough pass) found 13 lines where 22
+// were real, giving a much-too-wide window; round 2 (informed by round 1's improved count of
+// 20) narrowed the window enough to reach the true 22. A round that stops finding more lines
+// means the window has converged (or the profile genuinely has no more to find), so it's
+// safe to stop rather than needing a fixed iteration count.
 export function countGridLines(profile, start, end) {
   const slice = profile.slice(start, end);
   const threshold = inkThreshold(slice);
-  return countDarkRuns(profile, start, end, threshold);
+  let lines = countDarkRuns(profile, start, end, threshold);
+  if (lines < 2) return lines;
+
+  const range = end - start;
+  for (let round = 0; round < 3; round++) {
+    const estimatedPitch = range / (lines - 1);
+    const radius = Math.max(3, Math.round(estimatedPitch * 0.4));
+    // A smaller margin than inkThreshold's own default (20): several genuine grid lines
+    // sitting on a filled/marked span only dipped 11-19 units below their own local
+    // background — real, but short of a 20-unit margin. 15 caught those without the false
+    // positives a much lower margin started to introduce on the same real image (tested
+    // down to 8, which over-counted on both axes).
+    const refined = countDarkRunsLocal(profile, start, end, radius, 15);
+    if (refined <= lines) break;
+    lines = refined;
+  }
+  return lines;
 }
 
 // ---- border snapping ---------------------------------------------------
@@ -406,6 +477,53 @@ function clusterLinesBySpan(bands, startKey, endKey, minOverlapRatio) {
   return clusters;
 }
 
+// clusterLinesBySpan groups lines ONLY by how similar their cross-axis span is — nothing
+// about it requires members to actually sit near each other along their own axis. That's
+// deliberately how it finds e.g. a grid's vertical lines regardless of exactly which x each
+// one is at, but it also means a stray vertical feature far off to one side (a scrollbar
+// track, a window edge — confirmed against a real screenshot, see TODO.md) gets pulled into
+// the SAME cluster as the real grid lines whenever it happens to span a similar y-range,
+// dragging the candidate rectangle's edge out to include it.
+//
+// This trims such a line off the ENDS of a cluster's sorted position list, not by splitting
+// wherever any gap looks large: a real screenshot with filled/marked cells can ALSO be
+// missing several genuine internal lines (the same underlying detection difficulty as
+// countGridLines' — see its own comment), which shows up as more than one oversized gap
+// scattered through the middle of an otherwise-real, otherwise-cohesive cluster. Splitting at
+// every such gap fragments that one real cluster into pieces too small to clear `minLines`
+// afterward, confirmed directly against a real screenshot (a rogue scrollbar-shaped fix
+// caused zero candidates at all this way, worse than the bug it was meant to fix). A rogue
+// UNRELATED feature, by contrast, is a small minority sitting apart from the main mass — in
+// practice that means isolated at one END of the sorted list, not buried in the middle where
+// it would need real lines on both sides. So: only trim from the two ends, and only while the
+// boundary gap is a clear outlier relative to the cluster's own typical spacing; leave every
+// internal gap alone regardless of size.
+function trimClusterEndOutliers(cluster, startKey, endKey, { outlierFactor = 1.8 } = {}) {
+  const sorted = [...cluster.lines].sort((a, b) => a.pos - b.pos);
+  if (sorted.length < 3) return cluster;
+  const gaps = [];
+  for (let i = 1; i < sorted.length; i++) gaps.push(sorted[i].pos - sorted[i - 1].pos);
+  const sortedGaps = [...gaps].sort((a, b) => a - b);
+  const medianGap = sortedGaps[Math.floor(sortedGaps.length / 2)];
+  if (!(medianGap > 0)) return cluster;
+  const threshold = medianGap * outlierFactor;
+
+  let lo = 0;
+  let hi = sorted.length - 1;
+  while (hi - lo >= 2 && sorted[hi].pos - sorted[hi - 1].pos > threshold) hi--;
+  while (hi - lo >= 2 && sorted[lo + 1].pos - sorted[lo].pos > threshold) lo++;
+  if (lo === 0 && hi === sorted.length - 1) return cluster;
+
+  const trimmed = sorted.slice(lo, hi + 1);
+  return {
+    lines: trimmed,
+    span: {
+      [startKey]: Math.min(...trimmed.map((l) => l[startKey])),
+      [endKey]: Math.max(...trimmed.map((l) => l[endKey])),
+    },
+  };
+}
+
 // How evenly spaced a sorted set of line positions is, as a score in (0, 1] (1 = perfectly
 // even). A real grid's lines sit at a constant pitch; unrelated dark runs that happened to
 // cluster together by cross-axis span usually don't.
@@ -468,8 +586,12 @@ export function findGridCandidates(gray, width, height, options = {}) {
   const hBands = mergeSegmentBands(horizontalSegments(darkMask, width, height, minLen), 'y', 'xStart', 'xEnd');
   const vBands = mergeSegmentBands(verticalSegments(darkMask, width, height, minLen), 'x', 'yStart', 'yEnd');
 
-  const hClusters = clusterLinesBySpan(hBands, 'xStart', 'xEnd', minLineOverlap).filter((c) => c.lines.length >= minLines);
-  const vClusters = clusterLinesBySpan(vBands, 'yStart', 'yEnd', minLineOverlap).filter((c) => c.lines.length >= minLines);
+  const hClusters = clusterLinesBySpan(hBands, 'xStart', 'xEnd', minLineOverlap)
+    .map((c) => trimClusterEndOutliers(c, 'xStart', 'xEnd'))
+    .filter((c) => c.lines.length >= minLines);
+  const vClusters = clusterLinesBySpan(vBands, 'yStart', 'yEnd', minLineOverlap)
+    .map((c) => trimClusterEndOutliers(c, 'yStart', 'yEnd'))
+    .filter((c) => c.lines.length >= minLines);
 
   const candidates = [];
   for (const hc of hClusters) {

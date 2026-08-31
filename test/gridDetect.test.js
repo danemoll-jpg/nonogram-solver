@@ -223,6 +223,27 @@ describe('findGridCandidates / detectBestGrid', () => {
     assertEqual(best.cols, 6);
   });
 
+  test('ignores a distant vertical line that happens to share the grid\'s y-extent (e.g. a scrollbar)', () => {
+    // Reproduces a real failure: clustering vertical lines only by shared y-span (not by
+    // how close together they are in x) let a scrollbar-like feature far to the right, but
+    // spanning a similar height to the grid, get pulled into the grid's own line cluster,
+    // dragging the detected rectangle's right edge far past the true border.
+    const width = 300, height = 200;
+    const gray = blankImage(width, height);
+    const gridRect = { left: 40, top: 30, right: 190, bottom: 170 };
+    drawGrid(gray, width, gridRect, 8, 8, 20);
+    // a lone vertical line, far to the right, spanning almost the same y-range as the grid
+    for (let y = 28; y <= 172; y++) {
+      gray[y * width + 280] = 30;
+      gray[y * width + 281] = 30;
+    }
+
+    const best = detectBestGrid(gray, width, height);
+    assert(best, 'expected a confident candidate');
+    assertEqual(best.cols, 8);
+    assert(best.rect.right < 250, `right edge should stay near the true grid border, got ${best.rect.right}`);
+  });
+
   test('picks the real grid over a nearby plain rectangle when both are present', () => {
     const width = 220, height = 220;
     const gray = blankImage(width, height);

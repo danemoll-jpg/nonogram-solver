@@ -385,27 +385,78 @@ Completed Tasks
      chase blind. **If further precision tuning is wanted, the most useful thing the
      project owner can provide is the actual image file** (not just a chat screenshot) so
      the real pixel values can be tested against directly instead of approximated.
-  7. **Confirmed with the project owner: mid-solve scanning is a real use case, not just
-     what was on hand for a first test.** This was a real puzzle they'd started elsewhere,
-     hit something that seemed off on, and used the scan feature against as a genuine
-     attempt to get help — not a synthetic/incidental test image. This matters because
-     item 10's pipeline currently only scans *clues*, never captures current fill state
-     (`scanPuzzle.js`'s `buildScannedPuzzle` derives a fresh solution from clues alone via
-     `fullSolve.js`) — so today, scanning a mid-solve puzzle successfully would still hand
-     back a **blank** board with the right clues, silently discarding whatever progress was
-     already made. Worth deciding deliberately (not by default) whether that's acceptable
-     for now (get unstuck on a stuck puzzle, restart marking it) or whether capturing
-     current fill state (green/X'd cells, not just clue text) belongs in scope too — that's
-     a materially bigger addition (color-aware cell-state detection per cell, not just
-     clue-strip OCR) and should get its own design pass rather than being absorbed
-     silently into this bug-fix round.
-  8. **Best next step for further precision on the detection bugs above: the actual image
-     file**, not another chat screenshot — this round's fixes were verified against
-     synthetic mockups built to *approximate* the reported failure (no readable file was
-     available), which is good enough to confirm root causes but not to tune exact
-     thresholds with confidence. If the project owner can save the screenshot as a file
-     (anywhere on disk, then share the path), a follow-up pass could test against the real
-     bytes directly instead of a guessed re-creation.
+  7. **Confirmed with the project owner: mid-solve scanning is THE core use case, not an
+     edge case.** The whole reason item 10 exists is to help when stuck on a real puzzle —
+     this screenshot was a genuine attempt to get unstuck after spotting a mistake, not an
+     incidental test image. Because of this, once the project owner shared the actual image
+     file (see below), detection tuning targeted this exact scenario directly rather than
+     treating filled/marked cells as noise to merely tolerate.
+     **Still true and worth a deliberate decision separately**: `scanPuzzle.js`'s
+     `buildScannedPuzzle` derives a fresh solution from clues alone (`fullSolve.js`) and
+     never captures current fill state, so scanning a mid-solve puzzle today still hands
+     back a **blank** board with the right clues — existing marks aren't carried over. That
+     may be perfectly fine (get unstuck, remark what's already figured out) but is a
+     separate, materially bigger addition (color-aware per-cell state detection, not just
+     clue-strip OCR) from the grid/line-detection accuracy work below, and deserves its own
+     design pass rather than silent scope creep here.
+  8. **Round 2: tested directly against the actual real screenshot file the project owner
+     provided, and found + fixed two more real bugs** (previous rounds only had synthetic
+     approximations to go on). Loaded the literal PNG into a browser canvas and ran
+     `gridDetect.js`'s functions against its real pixel data — a categorically better
+     signal than guessing at plausible colors.
+     - **Root cause: filled/X-marked cells shift entire spans of a row/column profile to a
+       different average tone** — a green-filled or X-marked cell isn't just "a bit darker
+       at the grid line," it drags the WHOLE row's average brightness to a different
+       baseline for as long as the fill continues, and `countGridLines`' single
+       whole-profile threshold (however it's computed) can't be simultaneously loose enough
+       to catch a faint line sitting on a bright span and tight enough not to swallow an
+       entire dim span as one giant false run. Confirmed directly: dumping the real row
+       profile showed long flat plateaus at varying tones (255, then 229, then 199, then
+       179...) each broken by small local dips — the dips (real lines) were still there,
+       just riding on a drifting baseline no single cutoff can handle.
+       **Fix**: `countGridLines` now does a rough global pass just to seed a pitch
+       estimate, then one or more local passes (`countDarkRunsLocal`, using a rolling-max
+       "what would this neighborhood look like without a line" background estimate)
+       sized off that pitch, iterating up to 3 rounds since each round's improved count
+       gives a better pitch/window-size estimate for the next. Verified against the real
+       image: rows went from the original 12 (from 13 lines) to 21 (22 lines), cols from
+       16 to 25 — both far closer to (and plausibly exactly at) the puzzle's true
+       dimensions than before.
+     - **Root cause: a scrollbar/UI-edge feature far from the grid, sharing a similar
+       vertical extent, got merged into the same "vertical line family" as the real grid
+       lines.** `clusterLinesBySpan` groups lines only by how similar their CROSS-axis span
+       is (needed so a grid's own vertical lines cluster together regardless of exactly
+       which x each sits at) — but nothing required cluster members to also sit near each
+       other along their OWN axis, so an unrelated tall feature 50-60px past the true grid
+       border got pulled in, dragging the detected rectangle's right edge out to x≈746
+       instead of the true ≈688. **First fix attempt (splitting a cluster wherever any
+       internal gap looked oversized) was itself wrong** — confirmed directly: the real
+       cluster ALSO had several oversized internal gaps from the missing-line problem
+       above, and splitting at every one of those fragmented the real grid's own cluster
+       into pieces too small to clear `minLines`, producing ZERO candidates (worse than the
+       bug being fixed). **Working fix**: `trimClusterEndOutliers` — only trims points from
+       the two ENDS of a cluster's sorted position list while the boundary gap is a clear
+       outlier, leaving every internal gap alone regardless of size. A genuinely unrelated
+       feature is a minority sitting apart from the main mass, which in practice means
+       isolated at one end (real lines flanking it on both sides is what an internal-gap
+       fix would need, and doesn't have). Verified: the rogue line is now correctly
+       trimmed, and the real grid cluster stays intact.
+     - **End-to-end result against the actual screenshot, through the real wizard UI (not
+       just the underlying functions): auto-detection now finds a rectangle that visually
+       matches the true grid border on inspection, with a row/col suggestion of 21x26** —
+       up from an unusable 5x9 before this investigation started. Not confirmed pixel-exact
+       against whatever the puzzle's true dimensions are (still short by an unknown amount,
+       possibly zero), but now within an easy manual correction rather than a full redo.
+     - **New tests**: a regression test for the scrollbar/rogue-line scenario
+       (`test/gridDetect.test.js`), confirming it's trimmed without fragmenting a real
+       cluster. `npm test`: 465 passed, 0 failed.
+     - **Still open**: whether 21x26 needs further manual correction to reach the puzzle's
+       true dimensions is unconfirmed (the actual source app's true grid size was never
+       independently verified against anything other than the project owner's own recall).
+       If the project owner tries this again and the count is still off, the concrete next
+       step is comparing the wizard's row/col suggestion against a manual count of the real
+       puzzle, and reporting how far off — that tells us whether `countDarkRunsLocal`'s
+       margin (currently 15) needs further adjustment, versus something else entirely.
 
 Next Steps (Do Not Start Yet)
 
