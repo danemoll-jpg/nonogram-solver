@@ -146,30 +146,91 @@ Completed Tasks
   generation was independently confirmed working live by the project owner; the prior
   pass's other changes are committed, pushed, and deployed.
 
+* **Clue-number spacing bug — fixed.** Root cause confirmed: `.nono-clue--row`'s gap
+  between numbers was a fixed `0.3rem`, but clue font-size scales with the responsive
+  `--cell-size` (18–64px, see `fitBoardToViewport` in `app.js`). At the top of that range a
+  fixed-rem gap is proportionally tiny next to the now-much-bigger digits, so a clue like
+  `1, 1` could visually read as `11` — confirmed in the live app by forcing `--cell-size` to
+  its 64px ceiling and reading the computed gap-to-font-size ratio (0.183, vs. 0.4 after the
+  fix). Fix: `styles.css`'s `.nono-clue--row`/`.nono-clue--col` gaps now use `em` instead of
+  `rem`, tying them to each clue element's own (already-scaling) font-size, so the ratio —
+  and the visual separation — holds at every `--cell-size` the board computes, not just the
+  one size this was originally tuned at. CSS-only, no Cloud Function deploy needed.
+
+* **Item 10 — Scan-existing-puzzle flow, v1 — built and working end-to-end (verified
+  against a synthetic test photo in the live app; not yet tried against a real
+  phone-camera photo — see caveat below).** New "Scan a puzzle" entry in the Help menu opens
+  a step-by-step wizard: upload/take a photo -> drag a box around just the grid squares ->
+  detect the grid -> OCR every row's/column's clue strip -> correct any misreads -> solve and
+  play. Feeds the result in as a `source: 'scan'` puzzle — the "no move history" and "never
+  counts toward stats" behavior were both already designed for and stubbed in from an earlier
+  pass (see `model.js`'s `Board` class comment, `mistakes.js`'s snapshot-origin
+  mistake-checking, and `stats.js`'s `recordCompletion` early-return); this round wired the
+  actual acquisition pipeline that produces one.
+  1. **Grid detection (`src/gridDetect.js`, pure functions, unit-tested).** Design tradeoff,
+     documented in that file: rather than pinpointing every individual internal grid line
+     from the photo (fragile against noise/lighting/skew), cell and clue-margin boundaries
+     are an *even subdivision* of one detected outer rectangle. Pixel analysis is used for
+     two narrower, more forgiving jobs instead — `snapRectToBorder` nudges the user's rough
+     drag-rectangle onto the puzzle's actual printed border (Otsu-thresholded row/col
+     intensity profiles, searched only within each rectangle's own cross-axis span so the
+     two opposite edges of a symmetric border don't get confused with each other — an early
+     bug caught by the unit tests), and `countGridLines` counts grid lines to *suggest* a
+     row/col count that the user still confirms in an editable field before OCR runs.
+     Row-clue and column-clue bands are computed geometrically from the confirmed grid
+     rectangle (everything left of / above it, sliced into `rows`/`cols` equal-pitch strips)
+     — no separate margin-line detection needed, since a printed nonogram's clue numbers
+     always line up cell-for-cell with the grid line they describe.
+  2. **OCR (`src/ocr.js`).** Tesseract.js loaded lazily from the CDN as an ES module
+     (`tesseract.js@5.1.1`, matching `src/firebase.js`'s no-bundler CDN-import pattern), one
+     shared worker reused across every strip in a scan session, digit/punctuation
+     whitelisted (`tessedit_char_whitelist`). **Hit and fixed:** the ESM build has no named
+     exports, only a default export bundling everything (`(await import(url)).default`) —
+     confirmed against the actual CDN file rather than assumed, since the mismatch only
+     surfaces at runtime (`createWorker is not a function`) otherwise. Each strip crop is
+     upscaled (short strips are only a cell-pitch tall in source pixels) and binarized with
+     the same Otsu thresholding as grid detection before recognition — a standard, meaningful
+     OCR accuracy improvement for printed digits.
+  3. **Puzzle building (`src/scanPuzzle.js`, pure functions, unit-tested — differential
+     test against every `SAMPLE_PUZZLES` entry's own clues).** A scanned puzzle has no known
+     solution the way an authored one does, but `mistakes.js`'s tools all require one — so
+     `buildScannedPuzzle` derives it by running the confirmed clues through
+     `fullSolve.js`'s existing `solvePuzzleFully`. A real published puzzle's clues have a
+     unique solution by construction, so a solve failure (`{ solved: false }`) is treated as
+     "OCR (or an uncorrected typo) still has an error" and sends the user back to the
+     correction step rather than starting an unplayable board. Noted in that module's
+     comment: this doesn't *prove* uniqueness (contradiction-search finds *a* valid
+     completion, not provably the only one) — acceptable for a photo of an already-published
+     puzzle, genuinely out of scope here (that's item 8's uniqueness-checking territory).
+  4. **Wizard UI (`src/scanUI.js`, the one module in this feature touching the
+     DOM/canvas).** Pointer-event rectangle dragging on a downscaled analysis canvas (max
+     800px) with OCR crops cut from a separate, higher-resolution canvas (max 1600px) for
+     legible digits; per-strip progress text during OCR; each correction row pairs an
+     editable text input with a thumbnail of the actual cropped strip so the user can verify
+     against the photo, not just trust the OCR text.
+  5. **`app.js` integration:** `loadPuzzle`/board-init logic factored into a shared
+     `startPuzzle(p)` (sets `board.hasHistory = puzzle.source !== 'scan'`), plus
+     `startScannedPuzzle(p)` which adds/reuses one puzzle-picker entry so switching back to a
+     scanned puzzle later in the session works the same as picking any other.
+  6. **Verification:** unit tests (`test/gridDetect.test.js`, `test/scanPuzzle.test.js`) plus
+     a live end-to-end run in the browser — a synthetically-drawn 5x5 grid image (matching
+     the `Heart (5x5)` sample puzzle's clues) was fed through the actual wizard: grid
+     detection correctly found 5x5 and snapped to the true border, OCR read 9 of 10 clue
+     strips correctly and misread `1  1` as `11` (a real OCR ambiguity — corrected by hand in
+     the wizard's own correction step, which is exactly what that step is for), and the
+     resulting puzzle solved to and played as the correct Heart pattern, completion modal and
+     all. **Caveat for the project owner:** this confirms the pipeline is wired correctly
+     end-to-end, but it's only been exercised against a clean synthetic image — a real
+     phone-camera photo (uneven lighting, slight skew, JPEG noise, a less print-perfect font)
+     hasn't been tried yet and may need threshold/tuning follow-up once it is.
+
 Current Objective (Focus Area)
 
-* **Clue-number spacing bug — CSS-only, bundle with item 10 below, no separate deploy
-  needed.** Multi-number clues (e.g. a row of `1, 1`) can render with too little gap
-  between the numbers, misreadable as a single number (`11`) instead of two separate clue
-  values — a real ambiguity bug, since `1,1` and `11` mean entirely different things in a
-  nonogram. Likely tied to the dynamic `--cell-size` responsive-board scaling compressing
-  spacing at smaller computed cell sizes. Fix: ensure clearly visible separation between
-  numbers in a multi-number clue at every `--cell-size` the board can compute, tested at
-  small sizes specifically. This is a static-site CSS/rendering fix — it doesn't touch
-  `functions/`, so it doesn't need a Firebase Cloud Function deploy, just a normal
-  commit/push (Netlify auto-deploys `main`). Bundle it into the same push as item 10's
-  work below rather than a standalone round.
-
-* **Item 10 — Scan-existing-puzzle flow.** Self-contained rather than dependent on item 8:
-  reading an already-printed/existing puzzle (real grid lines, printed clue numbers already
-  visible in the photo) is closer to the "already-structured image" case than the
-  "arbitrary photo, threshold and guess" case — so this item brings its own minimal
-  grid-detection with it instead of waiting on item 8's harder image-processing work.
-  Scope: detect the existing grid from a photo/scan, OCR the printed clue numbers, and a
-  user-correction step for anything misread — feeding the result into the existing
-  hint/solver system as a snapshot-origin puzzle (no move history, per the earlier
-  mistake-handling design; also per the earlier resolution, a puzzle imported this way never
-  counts toward stats — only a fresh from-scratch playthrough of a saved copy does).
+* None open right now — both halves of the previous objective (the clue-spacing fix and
+  item 10 v1) are done, committed together, and confirmed working in the live app (against a
+  synthetic test photo — see item 10's caveat above for what's still unverified). Next up is
+  either a real-photo tuning pass for item 10, or picking up item 8 or item 9 — **check with
+  the project owner before starting either**, per their own deferred status below.
 
 Next Steps (Do Not Start Yet)
 

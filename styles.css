@@ -283,12 +283,26 @@ body {
   justify-content: flex-end;
   align-items: center;
   padding-bottom: 0.35rem;
+  /* em, not rem: ties the gap to this element's own font-size, which itself scales with
+     --cell-size (see .nono-clue above) — see .nono-clue--row below for why a fixed rem gap
+     here was the clue-number-spacing bug. */
+  gap: 0.2em;
 }
 
 .nono-clue--row {
   flex-direction: row;
   justify-content: flex-end;
-  gap: 0.3rem;
+  /* Bug fix (clue-number spacing): this was a fixed 0.3rem, but the clue font-size scales
+     with --cell-size (18–64px, see fitBoardToViewport in app.js) while a fixed rem gap does
+     not. At larger computed cell sizes the gap shrank relative to the now-bigger digits,
+     letting a two-number clue like "1, 1" visually read as "11" — a real ambiguity, since
+     those mean different things in a nonogram. Using `em` ties the gap to this element's own
+     font-size so the numbers stay clearly separated at every cell size the board computes,
+     not just the one size this was originally tuned for.
+     Cross-checked at the responsive floor (18px cell, ~7.4px font) too: (see MIN_CELL_PX in
+     app.js) — proportional spacing holds there as well, it doesn't only fix the large-size
+     case. */
+  gap: 0.4em;
   padding-right: 0.5rem;
 }
 
@@ -639,4 +653,128 @@ body {
 
 .pairing-input-group .btn {
   margin-top: 0;
+}
+
+/* Scan-a-puzzle wizard (item 10) — see src/scanUI.js for the step-by-step logic this
+   supports: upload -> drag a box around the grid -> OCR -> correct -> play. */
+
+.scan-file-input {
+  color: var(--text);
+}
+
+.scan-canvas-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 0.75rem 0;
+}
+
+#scan-canvas {
+  max-width: 100%;
+  height: auto;
+  touch-action: none; /* the canvas owns drag gestures for marking the grid rectangle */
+  border: 1px solid rgba(230, 183, 63, 0.3);
+  border-radius: 0.4rem;
+  cursor: crosshair;
+}
+
+.scan-grid-confirm {
+  margin-top: 0.9rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.scan-grid-confirm__field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+}
+
+.scan-grid-confirm__field input {
+  width: 3.5rem;
+  background: var(--panel-bg);
+  color: var(--text);
+  border: 1px solid rgba(230, 183, 63, 0.3);
+  border-radius: 0.4rem;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.95rem;
+}
+
+.scan-grid-confirm__hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.scan-correct-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+@media (max-width: 32rem) {
+  .scan-correct-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.scan-clue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+
+.scan-clue-row {
+  display: grid;
+  grid-template-columns: 3.2rem 1fr;
+  grid-template-areas: 'label thumb' 'input input';
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  padding: 0.3rem;
+  border: 1px solid rgba(230, 183, 63, 0.15);
+  border-radius: 0.4rem;
+}
+
+.scan-clue-row__label {
+  grid-area: label;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.scan-clue-row__thumb {
+  grid-area: thumb;
+  max-width: 100%;
+  max-height: 2.4rem;
+  width: auto;
+  height: auto;
+  justify-self: start;
+  background: #fff; /* the crop is binarized black-on-white — a light frame keeps it legible on the dark felt background */
+  border-radius: 0.2rem;
+}
+
+.scan-clue-row__input {
+  grid-area: input;
+  width: 100%;
+  background: var(--panel-bg);
+  color: var(--text);
+  border: 1px solid rgba(230, 183, 63, 0.3);
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.9rem;
+}
+
+.scan-build-error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin: 0.75rem 0 0;
+}
+
+#scan-modal .btn--ghost {
+  margin-top: 1rem;
 }

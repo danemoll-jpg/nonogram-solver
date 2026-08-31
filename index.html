@@ -44,6 +44,7 @@
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-hint">Get a hint</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-check">Check my work</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-remove-bad">Remove bad marks</button></li>
+              <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-scan">Scan a puzzle</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-stats">Stats & pairing</button></li>
               <li class="help-menu__divider" role="none" aria-hidden="true"></li>
               <li role="none"><button class="help-menu__item help-menu__item--danger" role="menuitem" type="button" id="menu-clear-all">Clear all</button></li>
@@ -164,6 +165,70 @@
         <p id="pairing-status" class="stats-status" aria-live="polite"></p>
       </div>
       <button id="btn-stats-close" class="btn btn--primary" type="button">Close</button>
+    </div>
+  </div>
+
+  <!-- Scan an existing puzzle (item 10) — photo/scan -> grid detection -> clue OCR -> a
+       user-correction step, feeding the result in as a snapshot-origin (source: 'scan')
+       puzzle. See src/scanUI.js for the step wiring; src/gridDetect.js, src/scanPuzzle.js
+       and src/ocr.js are the non-DOM pipeline pieces it calls. -->
+  <div id="scan-modal" class="modal-overlay hidden">
+    <div class="modal-card modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="scan-title">
+      <h2 id="scan-title" class="modal-card__title">Scan a puzzle</h2>
+
+      <div class="modal-card__body">
+      <div class="scan-step" data-step="upload" id="scan-step-upload">
+        <p>Take or choose a photo of a printed nonogram — the grid lines and clue numbers
+          should be clearly visible and not too skewed.</p>
+        <input id="scan-file-input" class="scan-file-input" type="file" accept="image/*" capture="environment" />
+      </div>
+
+      <div class="scan-step hidden" data-step="grid" id="scan-step-grid">
+        <p>Drag a box around just the puzzle's grid squares — <strong>not</strong> the clue
+          numbers around the edges — then detect the grid.</p>
+        <div class="scan-canvas-wrap">
+          <canvas id="scan-canvas"></canvas>
+        </div>
+        <button id="scan-btn-detect" class="btn" type="button" disabled>Detect grid</button>
+        <div id="scan-grid-confirm" class="scan-grid-confirm hidden">
+          <label class="scan-grid-confirm__field">Rows <input id="scan-rows-input" type="number" min="1" max="30" /></label>
+          <label class="scan-grid-confirm__field">Columns <input id="scan-cols-input" type="number" min="1" max="30" /></label>
+          <p class="scan-grid-confirm__hint">Detected from the photo — check these match the real puzzle before continuing.</p>
+          <button id="scan-btn-scan-clues" class="btn btn--primary" type="button">Scan clue numbers</button>
+        </div>
+      </div>
+
+      <div class="scan-step hidden" data-step="ocr" id="scan-step-ocr">
+        <p id="scan-ocr-status" aria-live="polite">Reading clue numbers…</p>
+      </div>
+
+      <div class="scan-step hidden" data-step="correct" id="scan-step-correct">
+        <p>Check the numbers below against each cropped strip and fix anything misread —
+          separate multiple numbers with a space or comma, and leave a box blank for an
+          all-empty line.</p>
+        <div class="scan-correct-columns">
+          <div>
+            <h3>Row clues</h3>
+            <div id="scan-row-clue-list" class="scan-clue-list"></div>
+          </div>
+          <div>
+            <h3>Column clues</h3>
+            <div id="scan-col-clue-list" class="scan-clue-list"></div>
+          </div>
+        </div>
+        <p id="scan-build-error" class="scan-build-error hidden"></p>
+        <button id="scan-btn-build" class="btn btn--primary" type="button">Build puzzle</button>
+      </div>
+
+      <div class="scan-step hidden" data-step="done" id="scan-step-done">
+        <p>Puzzle ready — grid detected, clues read, and a solution found. This puzzle plays
+          normally, but (being a scan rather than a saved puzzle) it won't count toward your
+          stats and there's no move-by-move undo, only "Check my work".</p>
+        <button id="scan-btn-play" class="btn btn--primary" type="button">Play it</button>
+      </div>
+      </div>
+
+      <button id="scan-btn-cancel" class="btn btn--ghost" type="button">Cancel</button>
     </div>
   </div>
 

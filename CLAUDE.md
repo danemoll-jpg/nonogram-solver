@@ -14,6 +14,10 @@
 - Deploy target: Netlify, static-site mode (`netlify.toml`, `publish = "."`). The Netlify
   site is connected and auto-deploys from this repo's `main` branch — live at
   https://nonogrampro.netlify.app/.
+- Tesseract.js (OCR, item 10's scan-existing-puzzle flow) is also loaded lazily from the CDN
+  as an ES module (`src/ocr.js`), same no-bundler pattern as `src/firebase.js` — note its ESM
+  build has no named exports, only a default export bundling everything
+  (`(await import(url)).default`).
 
 ## Code Style & Architecture
 - Keep the solver's output as plain data ("deductions"), never player-facing text — the
@@ -43,19 +47,17 @@ up to date than this file's summary below.
 
 Short version: items 1–7 (solver engine, hint/mistake/contradiction logic, and a full
 playable UI with LLM-backed hint phrasing), the UI consolidation pass, a post-ship
-bug-fix/mechanics pass, and the iPad-verification follow-up pass (puzzle-name hidden until
+bug-fix/mechanics pass, the iPad-verification follow-up pass (puzzle-name hidden until
 completion, grid scales to fill the screen, sound-effect plumbing and real audio files,
 persistent mute toggle, cross-device stats + pairing via Anonymous Auth, and the Node 20→22
-runtime bump) are all done, deployed, and confirmed working live. See `TODO.md`'s Completed
-Tasks for the full breakdown.
+runtime bump), the clue-number spacing fix, and **item 10 (scan-existing-puzzle flow, v1)**
+are all done and confirmed working — the spacing fix and item 10 in the live app locally
+(item 10 against a synthetic test photo only; a real phone-camera photo hasn't been tried
+yet), the rest also deployed. See `TODO.md`'s Completed Tasks for the full breakdown,
+including item 10's design tradeoffs (`src/gridDetect.js`, `src/scanPuzzle.js`,
+`src/ocr.js`, `src/scanUI.js`) and its real-photo-testing caveat.
 
-Current objective has two parts, meant to ship together in one push: a still-open
-clue-number spacing bug (multi-number clues like `1, 1` can misread as `11`, likely tied to
-the dynamic `--cell-size` scaling — CSS-only, no Cloud Function deploy needed), and **item
-10, scan-existing-puzzle flow** (read an already-printed puzzle from a photo/scan — grid
-detection + clue OCR + a user-correction step — self-contained rather than waiting on item
-8). Bundle both into the same commit/push rather than deploying the spacing fix separately.
-
-Item 8 (arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain
-deferred pending their own design pass; check with the project owner before picking either
-up.
+No open Current Objective right now. Item 8 (arbitrary-photo puzzle generation) and item 9
+(Firestore shared library) remain deferred pending their own design pass — check with the
+project owner before picking either up, or before starting a real-photo tuning pass on
+item 10.

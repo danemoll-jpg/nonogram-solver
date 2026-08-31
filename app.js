@@ -12,6 +12,7 @@ import { autoCheckMark, checkForMistakes, removeBadMarks } from './src/mistakes.
 import { SAMPLE_PUZZLES } from './src/puzzles.js';
 import { playSound, isMuted, toggleMuted, onDragSweepCell, startDragSweep, stopDragSweep } from './src/sounds.js';
 import { recordCompletion, fetchAllStats, generatePairingCode, redeemPairingCode } from './src/stats.js';
+import { initScanWizard } from './src/scanUI.js';
 
 let puzzle = null;
 let board = null;
@@ -48,6 +49,7 @@ const els = {
   menuHint: document.getElementById('menu-hint'),
   menuCheck: document.getElementById('menu-check'),
   menuRemoveBad: document.getElementById('menu-remove-bad'),
+  menuScan: document.getElementById('menu-scan'),
   menuStats: document.getElementById('menu-stats'),
   menuClearAll: document.getElementById('menu-clear-all'),
   explainBody: document.getElementById('explain-panel-body'),
@@ -78,6 +80,26 @@ const els = {
   btnRedeemCode: document.getElementById('btn-redeem-code'),
   pairingStatus: document.getElementById('pairing-status'),
   btnStatsClose: document.getElementById('btn-stats-close'),
+  scanModal: document.getElementById('scan-modal'),
+  scanStepUpload: document.getElementById('scan-step-upload'),
+  scanStepGrid: document.getElementById('scan-step-grid'),
+  scanStepOcr: document.getElementById('scan-step-ocr'),
+  scanStepCorrect: document.getElementById('scan-step-correct'),
+  scanStepDone: document.getElementById('scan-step-done'),
+  scanFileInput: document.getElementById('scan-file-input'),
+  scanCanvas: document.getElementById('scan-canvas'),
+  scanBtnDetect: document.getElementById('scan-btn-detect'),
+  scanGridConfirm: document.getElementById('scan-grid-confirm'),
+  scanRowsInput: document.getElementById('scan-rows-input'),
+  scanColsInput: document.getElementById('scan-cols-input'),
+  scanBtnScanClues: document.getElementById('scan-btn-scan-clues'),
+  scanOcrStatus: document.getElementById('scan-ocr-status'),
+  scanRowClueList: document.getElementById('scan-row-clue-list'),
+  scanColClueList: document.getElementById('scan-col-clue-list'),
+  scanBuildError: document.getElementById('scan-build-error'),
+  scanBtnBuild: document.getElementById('scan-btn-build'),
+  scanBtnPlay: document.getElementById('scan-btn-play'),
+  scanBtnCancel: document.getElementById('scan-btn-cancel'),
 };
 
 const EXPLAIN_IDLE_HTML =
@@ -114,10 +136,30 @@ function populatePuzzleSelect() {
   });
 }
 
+// The most recently scanned puzzle this session (item 10), if any — kept separately from
+// SAMPLE_PUZZLES since a scanned puzzle isn't part of the curated library (item 9's
+// shared-library work is what would give it a permanent home; until then it only lives for
+// this session). Re-selecting its entry in the puzzle picker routes back through here.
+let scannedPuzzle = null;
+
 function loadPuzzle(id) {
-  puzzle = SAMPLE_PUZZLES.find((p) => p.id === id) ?? SAMPLE_PUZZLES[0];
+  const p =
+    scannedPuzzle && scannedPuzzle.id === id
+      ? scannedPuzzle
+      : SAMPLE_PUZZLES.find((p) => p.id === id) ?? SAMPLE_PUZZLES[0];
+  startPuzzle(p);
+}
+
+// Shared init for any puzzle, however it was loaded — normal picker selection or a freshly
+// scanned one (see startScannedPuzzle). A scan-origin puzzle gets no move history (see
+// model.js's Board class comment and mistakes.js's snapshot-origin mistake-checking) — the
+// "no move history" and "never counts toward stats" behavior both fall out of that one
+// puzzle.source check (recordCompletion skips it separately — see src/stats.js).
+function startPuzzle(p) {
+  puzzle = p;
   els.puzzleSelect.value = puzzle.id;
   board = new Board(puzzle.rows, puzzle.cols);
+  board.hasHistory = puzzle.source !== 'scan';
   highlightedCells = [];
   autoXCells = new Set();
   puzzleStartTime = Date.now();
@@ -128,6 +170,22 @@ function loadPuzzle(id) {
   els.completeModal.classList.add('hidden');
   renderBoard();
   updateStatus('');
+}
+
+// Called by the scan wizard (src/scanUI.js) once it has a solved, playable puzzle. Adds (or
+// reuses) one picker entry for it so switching back to it later in the session works the
+// same way picking any other puzzle does.
+function startScannedPuzzle(p) {
+  scannedPuzzle = p;
+  let opt = els.puzzleSelect.querySelector('option[data-scan]');
+  if (!opt) {
+    opt = document.createElement('option');
+    opt.dataset.scan = 'true';
+    els.puzzleSelect.insertBefore(opt, els.puzzleSelect.firstChild);
+  }
+  opt.value = p.id;
+  opt.textContent = `Scanned puzzle — ${p.rows}x${p.cols}`;
+  startPuzzle(p);
 }
 
 // ---- rendering ----
@@ -845,6 +903,12 @@ els.menuRemoveBad.addEventListener('click', () => {
   clearHighlights();
   setExplain(null);
   syncAllCellVisuals();
+});
+
+const scanWizard = initScanWizard({ els, onPuzzleReady: startScannedPuzzle });
+els.menuScan.addEventListener('click', () => {
+  closeHelpMenu();
+  scanWizard.open();
 });
 
 // "Clear all" is the old always-visible Reset button, relocated into the Help menu — since
