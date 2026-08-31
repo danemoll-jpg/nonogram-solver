@@ -106,6 +106,68 @@ const els = {
   scanBtnCancel: document.getElementById('scan-btn-cancel'),
 };
 
+// ---- background-scroll lock while any full-screen modal is open ----
+//
+// Real iOS bug report: opening the scan wizard (or any .modal-overlay) and trying to scroll
+// its content instead scrolled the PAGE BEHIND it. None of this app's modals ever locked
+// background scroll — .modal-overlay is `position: fixed` and covers the viewport, but a
+// fixed overlay with no scrollable content of its own doesn't stop iOS Safari from walking
+// up to the next scrollable ancestor (the page body) for a touch-drag that starts on it, so
+// the visible page kept scrolling underneath the modal. Desktop never showed this because a
+// mouse wheel only scrolls whatever's directly under the cursor, not "the nearest scrollable
+// ancestor" the way an iOS touch-pan gesture does — hence "works fine on PC".
+//
+// Fixed generically for every .modal-overlay (confirm/complete/how-to-play/stats/scan) via
+// one MutationObserver watching all of them, rather than hand-wiring a lock/unlock call into
+// each modal's own scattered show/hide call sites — safer against a future modal forgetting
+// to wire it in, and there's nothing modal-specific about the fix itself.
+//
+// `position: fixed` on <body> (not just `overflow: hidden`) is the more robust of the two
+// common approaches: plain `overflow: hidden` alone is known to still let iOS Safari
+// rubber-band-scroll the body in some versions, where actually removing it from the normal
+// scroll flow doesn't. Saves/restores the real scroll position across lock/unlock so closing
+// a modal doesn't jump the page back to the top.
+let bodyScrollLocked = false;
+let savedBodyScrollY = 0;
+
+function lockBodyScroll() {
+  savedBodyScrollY = window.scrollY;
+  document.body.style.position = 'fixed';
+  document.body.style.top = `-${savedBodyScrollY}px`;
+  document.body.style.left = '0';
+  document.body.style.right = '0';
+  document.body.style.overflow = 'hidden';
+}
+
+function unlockBodyScroll() {
+  document.body.style.position = '';
+  document.body.style.top = '';
+  document.body.style.left = '';
+  document.body.style.right = '';
+  document.body.style.overflow = '';
+  window.scrollTo(0, savedBodyScrollY);
+}
+
+function anyModalOpen() {
+  return [...document.querySelectorAll('.modal-overlay')].some((el) => !el.classList.contains('hidden'));
+}
+
+function syncBodyScrollLock() {
+  const shouldLock = anyModalOpen();
+  if (shouldLock && !bodyScrollLocked) {
+    lockBodyScroll();
+    bodyScrollLocked = true;
+  } else if (!shouldLock && bodyScrollLocked) {
+    unlockBodyScroll();
+    bodyScrollLocked = false;
+  }
+}
+
+const modalOverlayEls = document.querySelectorAll('.modal-overlay');
+const modalVisibilityObserver = new MutationObserver(syncBodyScrollLock);
+modalOverlayEls.forEach((el) => modalVisibilityObserver.observe(el, { attributes: true, attributeFilter: ['class'] }));
+syncBodyScrollLock(); // covers the (currently theoretical) case one starts already visible
+
 const EXPLAIN_IDLE_HTML =
   '<p class="explain-panel__idle">Use the <strong>Help</strong> menu above to get a hint or check your work — the explanation shows up here.</p>';
 

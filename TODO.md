@@ -208,8 +208,31 @@ Completed Tasks
        vertical one did). Added `-webkit-overflow-scrolling: touch` to both regions for
        momentum scrolling. Verified via the Browser pane's mobile viewport emulation
        (measured `scrollHeight`/`clientHeight` before/after — the grid no longer needs its
-       own vertical scroll, the outer body does); **not yet confirmed on a real iOS device**,
-       worth a real-device check next time the project owner is testing on iPad/iPhone.
+       own vertical scroll, the outer body does).
+     - **iOS follow-up #2**: that fix alone wasn't enough — the project owner reported still
+       being stuck on the wizard's very FIRST step (before "Looks good" is even reachable),
+       with any scroll attempt moving the PAGE BEHIND the modal instead. Root cause was more
+       fundamental and app-wide, not specific to the scan wizard: **no modal in this app ever
+       locked background scroll**. `.modal-overlay` is `position: fixed; inset: 0` and covers
+       the viewport, but a fixed overlay with no scrollable content of its own doesn't stop
+       iOS Safari from walking up to the next scrollable ancestor — the page `<body>` — for a
+       touch-drag that starts on it, so the page kept scrolling underneath every modal. Never
+       showed up on desktop because a mouse wheel only scrolls whatever's directly under the
+       cursor, not "the nearest scrollable ancestor" the way an iOS touch-pan does — hence
+       "works fine on PC" despite being broken everywhere on iOS. Fixed generically in
+       `app.js` (`lockBodyScroll`/`unlockBodyScroll`/`syncBodyScrollLock`) via ONE
+       `MutationObserver` watching every `.modal-overlay` element's class attribute — locks
+       `<body>` (via `position: fixed` with the real scroll position saved/restored, not just
+       `overflow: hidden` alone, since plain `overflow: hidden` is known to still let iOS
+       Safari rubber-band-scroll the body on some versions) whenever any modal is open, for
+       ALL five modals (confirm/complete/how-to-play/stats/scan), not just the one reported —
+       there was nothing modal-specific about the bug, and hand-wiring a lock call into each
+       modal's own scattered show/hide call sites would leave the same bug for whichever one
+       got missed. Verified in the Browser pane (scroll position saved on lock, restored
+       exactly on unlock, for both the scan wizard and the how-to-play modal). **Neither this
+       nor the previous iOS fix has been confirmed on a real iOS device yet** — worth a
+       real-device check (ideally the exact repro: open "Scan a puzzle", try to scroll before
+       reaching "Looks good") next time the project owner is on iPad/iPhone.
 
 Current Objective (Focus Area)
 
