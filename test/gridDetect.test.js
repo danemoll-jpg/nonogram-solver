@@ -158,6 +158,23 @@ describe('findGridCandidates / detectBestGrid', () => {
     assertEqual(detectBestGrid(gray, width, height), null);
   });
 
+  test('finds a modest, roughly-square grid inside a much taller frame (e.g. a phone screenshot)', () => {
+    // The image itself is tall (800x1200, like a phone screenshot), but the grid embedded
+    // in it is square and only a fraction of either dimension -- a line-length floor based
+    // on each axis's own full extent (rather than the shorter of the two) would demand a
+    // taller grid than this one actually is, rejecting every real vertical line and
+    // leaving no candidate at all. Regression test for exactly that bug.
+    const width = 800, height = 1200;
+    const gray = blankImage(width, height);
+    const gridRect = { left: 300, top: 500, right: 450, bottom: 650 };
+    drawGrid(gray, width, gridRect, 5, 5, 20);
+
+    const best = detectBestGrid(gray, width, height);
+    assert(best, 'expected a confident candidate');
+    assertEqual(best.rows, 5);
+    assertEqual(best.cols, 5);
+  });
+
   test('picks the real grid over a nearby plain rectangle when both are present', () => {
     const width = 220, height = 220;
     const gray = blankImage(width, height);

@@ -368,8 +368,16 @@ export function findGridCandidates(gray, width, height, options = {}) {
   const { minLineLenRatio = 0.15, minLines = 4, minLineOverlap = 0.75, minBoxOverlap = 0.5 } = options;
 
   const threshold = otsuThreshold(gray);
-  const minLenH = Math.max(1, Math.round(width * minLineLenRatio));
-  const minLenV = Math.max(1, Math.round(height * minLineLenRatio));
+  // Both floors are the same fraction of the SHORTER image dimension, not "this axis's own
+  // dimension" — a nonogram grid is roughly square, but the photo/screenshot it's embedded
+  // in usually isn't (a tall phone screenshot, say). Using each axis's own full extent as
+  // its own threshold would demand a taller grid than actually exists just because the
+  // image itself is tall, silently rejecting every real vertical line and leaving zero
+  // candidates — caught by this file's own tests (see gridDetect.test.js's "small grid
+  // inside a much taller frame" case).
+  const minLen = Math.max(1, Math.round(Math.min(width, height) * minLineLenRatio));
+  const minLenH = minLen;
+  const minLenV = minLen;
 
   const hBands = mergeSegmentBands(horizontalSegments(gray, width, height, threshold, minLenH), 'y', 'xStart', 'xEnd');
   const vBands = mergeSegmentBands(verticalSegments(gray, width, height, threshold, minLenV), 'x', 'yStart', 'yEnd');
