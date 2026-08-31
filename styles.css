@@ -138,6 +138,14 @@ body {
   color: #241a04;
 }
 
+/* Persistent mute toggle (item 3) — its own control, separate from the Help dropdown, so
+   it's reachable in one tap regardless of what else is open. */
+.mute-toggle {
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.45rem 0.7rem;
+}
+
 /* Single "Help" dropdown (item: UI consolidation pass) — replaces the old always-visible
    "Hints & help" / "Mistakes" button panels. */
 .help-menu {
@@ -262,7 +270,9 @@ body {
 
 .nono-clue {
   color: var(--text-dim);
-  font-size: 0.78rem;
+  /* Scales with the board (see --cell-size, set by app.js's fitBoardToViewport) at the same
+     ratio the original fixed 0.78rem had to the original fixed 1.9rem cell. */
+  font-size: calc(var(--cell-size, 1.9rem) * 0.41);
   font-weight: 700;
   line-height: 1.15;
   padding: 0.15rem;
@@ -296,8 +306,12 @@ body {
 }
 
 .nono-cell {
-  width: 1.9rem;
-  height: 1.9rem;
+  /* --cell-size is computed and kept in sync by app.js's fitBoardToViewport (item: grid
+     scales to fill available screen space) — it accounts for the header/toolbar and the
+     fixed bottom explain panel so the scaled board never overlaps either. The 1.9rem
+     fallback only matters before first layout/JS runs. */
+  width: var(--cell-size, 1.9rem);
+  height: var(--cell-size, 1.9rem);
   cursor: pointer;
   background: var(--cell-unknown);
   position: relative;
@@ -335,7 +349,7 @@ body {
 .nono-cell.empty::after {
   content: "✕";
   color: rgba(242, 236, 221, 0.35);
-  font-size: 1rem;
+  font-size: calc(var(--cell-size, 1.9rem) * 0.53);
 }
 
 .nono-cell.reasoning {
@@ -539,10 +553,10 @@ body {
     padding: 2rem 1rem 1.5rem;
   }
 
-  .nono-cell {
-    width: 1.5rem;
-    height: 1.5rem;
-  }
+  /* Cell sizing on narrow screens is handled dynamically by app.js's fitBoardToViewport
+     (item: grid scales to fill available screen space) via --cell-size, not a fixed
+     override here — a hardcoded width at this breakpoint would fight the JS-computed size
+     and stop the board from actually filling the available space on small screens. */
 
   /* Explanation text wraps more on narrow screens — give the panel a bit more headroom
      so short hints still fit without scrolling, and keep body padding in sync. */
@@ -553,4 +567,76 @@ body {
   .explain-panel {
     min-height: 5.5rem;
   }
+}
+
+/* ---- Stats & pairing modal (item 4) ---- */
+
+.stats-status {
+  margin: 0 0 0.75rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.25rem;
+  font-size: 0.85rem;
+}
+
+.stats-table th,
+.stats-table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid rgba(230, 183, 63, 0.2);
+}
+
+.stats-table th {
+  color: var(--gold);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.pairing-block {
+  margin-bottom: 1rem;
+}
+
+.pairing-code {
+  margin: 0.6rem 0 0;
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  color: var(--gold);
+  text-align: center;
+}
+
+.pairing-input-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.pairing-input-group {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.pairing-input-group input {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-bg);
+  color: var(--text);
+  border: 1px solid rgba(230, 183, 63, 0.3);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.95rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.pairing-input-group .btn {
+  margin-top: 0;
 }

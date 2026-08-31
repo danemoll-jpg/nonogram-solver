@@ -54,17 +54,23 @@ src/
   mistakes.js       auto-check / on-demand check / remove-bad-marks — three independent
                     tools, not one setting.
   hintPhrasing.js   Turns a deduction into player-facing text. See "Hint phrasing" below.
-  firebase.js       Lazy Firebase client (CDN ESM import) used only by hintPhrasing.js to
-                    call the phraseHint Cloud Function — never touches the network at
-                    import time, so it's inert during tests.
+  firebase.js       Lazy Firebase client (CDN ESM import) for Cloud Functions, Anonymous
+                    Auth, and Firestore — never touches the network at import time, so it's
+                    inert during tests.
+  sounds.js         Sound-effect playback + the persistent mute toggle. Built against
+                    placeholder/silent audio (assets/sounds/) — see that dir's README.
+  stats.js          Cross-device stats + pairing (Anonymous Auth + Firestore + two Cloud
+                    Functions) — bucketed by grid size, no accounts/passwords.
   fullSolve.js      Solves a whole puzzle (line techniques + contradiction fallback) —
                     used by tests, and later useful for uniqueness-checking generated
                     puzzles and technique-based difficulty rating.
   puzzles.js        A handful of hand-authored sample puzzles standing in for the shared
                     library (item 9).
-functions/          Firebase Cloud Functions. `phraseHint` calls an LLM to phrase a
-                    deduction server-side, keeping the API key out of client code — see
-                    functions/README.md for deploy steps (not yet deployed).
+functions/          Firebase Cloud Functions: `phraseHint` (LLM hint phrasing, keeping the
+                    API key out of client code) and `createPairingCode`/`redeemPairingCode`
+                    (cross-device stats pairing) — see functions/README.md for deploy steps.
+firestore.rules     Security rules for the stats/pairing Firestore usage above.
+assets/sounds/      Placeholder (silent) sound effects — see that dir's README.
 test/               Zero-dependency test suite, incl. a brute-force differential test that
                     checks the line solver's DP against exhaustive enumeration.
 index.html / app.js / styles.css   The playable UI.

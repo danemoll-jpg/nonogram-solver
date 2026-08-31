@@ -10,6 +10,8 @@ import { isLineConsistent } from './src/lineSolver.js';
 import { phraseDeduction } from './src/hintPhrasing.js';
 import { autoCheckMark, checkForMistakes, removeBadMarks } from './src/mistakes.js';
 import { SAMPLE_PUZZLES } from './src/puzzles.js';
+import { playSound, isMuted, toggleMuted, onDragSweepCell, startDragSweep, stopDragSweep } from './src/sounds.js';
+import { recordCompletion, fetchAllStats, generatePairingCode, redeemPairingCode } from './src/stats.js';
 
 let puzzle = null;
 let board = null;
@@ -39,12 +41,14 @@ const els = {
   modeFill: document.getElementById('mode-fill'),
   modeX: document.getElementById('mode-x'),
   toggleAutocheck: document.getElementById('toggle-autocheck'),
+  muteToggle: document.getElementById('mute-toggle'),
   helpMenuBtn: document.getElementById('help-menu-btn'),
   helpMenuList: document.getElementById('help-menu-list'),
   menuHowToPlay: document.getElementById('menu-how-to-play'),
   menuHint: document.getElementById('menu-hint'),
   menuCheck: document.getElementById('menu-check'),
   menuRemoveBad: document.getElementById('menu-remove-bad'),
+  menuStats: document.getElementById('menu-stats'),
   menuClearAll: document.getElementById('menu-clear-all'),
   explainBody: document.getElementById('explain-panel-body'),
   btnContradiction: document.getElementById('btn-contradiction'),
@@ -56,6 +60,7 @@ const els = {
   btnHowToPlayClose: document.getElementById('btn-howtoplay-close'),
   completeModal: document.getElementById('complete-modal'),
   btnCompleteClose: document.getElementById('btn-complete-close'),
+  statName: document.getElementById('stat-name'),
   statTime: document.getElementById('stat-time'),
   statHints: document.getElementById('stat-hints'),
   statMistakes: document.getElementById('stat-mistakes'),
@@ -63,6 +68,16 @@ const els = {
   confirmMessage: document.getElementById('confirm-message'),
   btnConfirmCancel: document.getElementById('btn-confirm-cancel'),
   btnConfirmOk: document.getElementById('btn-confirm-ok'),
+  statsModal: document.getElementById('stats-modal'),
+  statsStatus: document.getElementById('stats-status'),
+  statsTable: document.getElementById('stats-table'),
+  statsTableBody: document.getElementById('stats-table-body'),
+  btnGenerateCode: document.getElementById('btn-generate-code'),
+  pairingCodeDisplay: document.getElementById('pairing-code-display'),
+  pairingCodeInput: document.getElementById('pairing-code-input'),
+  btnRedeemCode: document.getElementById('btn-redeem-code'),
+  pairingStatus: document.getElementById('pairing-status'),
+  btnStatsClose: document.getElementById('btn-stats-close'),
 };
 
 const EXPLAIN_IDLE_HTML =
@@ -77,18 +92,26 @@ function setExplain(content) {
   } else {
     els.explainBody.appendChild(content);
   }
+  // The explain panel's height can change with its content (e.g. a "Back up to..." button
+  // appearing) — re-fit the board since that panel eats into fitBoardToViewport's available
+  // height budget.
+  fitBoardToViewport();
 }
 
 // ---- puzzle lifecycle ----
 
+// Puzzle names are hidden until completion (item: hide the puzzle's name until completion)
+// so picking a puzzle doesn't already give away what image it is — the picker shows a
+// generic "Puzzle N — RxC" label instead of puzzle.name. The real name is revealed in the
+// completion modal (see maybeShowCompletion) once there's no picture left to spoil.
 function populatePuzzleSelect() {
   els.puzzleSelect.innerHTML = '';
-  for (const p of SAMPLE_PUZZLES) {
+  SAMPLE_PUZZLES.forEach((p, i) => {
     const opt = document.createElement('option');
     opt.value = p.id;
-    opt.textContent = `${p.name} — ${p.rows}x${p.cols}`;
+    opt.textContent = `Puzzle ${i + 1} — ${p.rows}x${p.cols}`;
     els.puzzleSelect.appendChild(opt);
-  }
+  });
 }
 
 function loadPuzzle(id) {
@@ -117,10 +140,9 @@ function renderBoard() {
 
   const grid = document.createElement('div');
   grid.className = 'nono-grid';
-  const maxRowClueLen = Math.max(1, ...puzzle.rowClues.map((c) => c.length));
-  const maxColClueLen = Math.max(1, ...puzzle.colClues.map((c) => c.length));
-  grid.style.gridTemplateColumns = `${maxRowClueLen * 1.1 + 0.3}rem repeat(${puzzle.cols}, 1.9rem)`;
-  grid.style.gridTemplateRows = `${maxColClueLen * 1.1 + 0.3}rem repeat(${puzzle.rows}, 1.9rem)`;
+  // Sizing itself (gridTemplateColumns/Rows, --cell-size) happens in fitBoardToViewport
+  // once this grid is attached below — see that function for why it needs live layout
+  // rather than fixed rem units.
 
   const corner = document.createElement('div');
   corner.className = 'nono-corner';
@@ -157,6 +179,7 @@ function renderBoard() {
   }
 
   els.boardRoot.appendChild(grid);
+  fitBoardToViewport();
   attachPointerHandlers(grid);
   syncAllCellVisuals();
 }
@@ -164,6 +187,75 @@ function renderBoard() {
 function clueHtml(clue) {
   const nums = clue.length ? clue : [0];
   return nums.map((n) => `<span>${n}</span>`).join('');
+}
+
+// ---- responsive board sizing (item: grid should scale to fill available screen space) ----
+//
+// Cell size is computed from live layout rather than fixed breakpoints: it measures the
+// actual space available around the board (accounting for the header/toolbar above and the
+// fixed-position bottom explain panel, whatever their current heights happen to be) and
+// picks the largest square cell size that fits both dimensions of the puzzle's grid — so it
+// keeps working if either surrounding area's height ever changes, in portrait or landscape,
+// without needing separate hardcoded cases for either. See --cell-size in styles.css for
+// where the result actually gets applied (grid template sizing here, cell/clue/mark sizing
+// there, all driven off the one CSS variable).
+const MIN_CELL_PX = 18; // below this, clue numbers and the ✕ mark stop being legible
+const MAX_CELL_PX = 64; // caps how large cells get on a big screen with a tiny puzzle
+// Clue-column-width-to-cell-size ratio, carried over from the original fixed sizing
+// (maxClueLen * 1.1rem + 0.3rem against a fixed 1.9rem cell) so clue legibility is unchanged.
+const CLUE_PER_DIGIT = 1.1 / 1.9;
+const CLUE_BASE = 0.3 / 1.9;
+
+function fitBoardToViewport() {
+  if (!puzzle) return;
+  const grid = els.boardRoot.querySelector('.nono-grid');
+  if (!grid) return;
+
+  const maxRowClueLen = Math.max(1, ...puzzle.rowClues.map((c) => c.length));
+  const maxColClueLen = Math.max(1, ...puzzle.colClues.map((c) => c.length));
+  const widthUnits = puzzle.cols + maxRowClueLen * CLUE_PER_DIGIT + CLUE_BASE;
+  const heightUnits = puzzle.rows + maxColClueLen * CLUE_PER_DIGIT + CLUE_BASE;
+
+  const rootRect = els.boardRoot.getBoundingClientRect();
+  const rootStyle = getComputedStyle(els.boardRoot);
+  const availableWidth = rootRect.width - parseFloat(rootStyle.paddingLeft) - parseFloat(rootStyle.paddingRight);
+
+  // Available height = viewport space below the board-root's own top (which already
+  // reflects everything stacked above it — page padding, header, toolbar, board-panel
+  // padding) minus everything stacked below it (status line, board-panel's bottom
+  // padding/border) minus the fixed explain panel's actual current height, minus a small
+  // buffer so the board never visually touches either edge.
+  const boardPanel = els.boardRoot.closest('.board-panel');
+  const panelStyle = getComputedStyle(boardPanel);
+  const statusLineRect = els.statusLine.getBoundingClientRect();
+  const statusLineStyle = getComputedStyle(els.statusLine);
+  const belowBoardRoot =
+    statusLineRect.height +
+    parseFloat(statusLineStyle.marginTop) +
+    parseFloat(panelStyle.paddingBottom) +
+    parseFloat(panelStyle.borderBottomWidth);
+  const explainPanelHeight = document.getElementById('explain-panel').offsetHeight;
+  const BUFFER_PX = 16;
+  const availableHeight = window.innerHeight - rootRect.top - belowBoardRoot - explainPanelHeight - BUFFER_PX;
+
+  const cellPx = Math.max(
+    MIN_CELL_PX,
+    Math.min(MAX_CELL_PX, Math.floor(Math.min(availableWidth / widthUnits, availableHeight / heightUnits)))
+  );
+
+  document.documentElement.style.setProperty('--cell-size', `${cellPx}px`);
+  const clueColWidth = (maxRowClueLen * CLUE_PER_DIGIT + CLUE_BASE) * cellPx;
+  const clueRowHeight = (maxColClueLen * CLUE_PER_DIGIT + CLUE_BASE) * cellPx;
+  grid.style.gridTemplateColumns = `${clueColWidth}px repeat(${puzzle.cols}, ${cellPx}px)`;
+  grid.style.gridTemplateRows = `${clueRowHeight}px repeat(${puzzle.rows}, ${cellPx}px)`;
+}
+
+function debounce(fn, ms) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
 }
 
 // Locked/contradiction status is derived live from the board every render, same as
@@ -278,11 +370,17 @@ function computeCompletionStats() {
 function maybeShowCompletion() {
   if (puzzleCompleteShown || !puzzle.solution) return;
   puzzleCompleteShown = true;
+  playSound('completeFanfare');
+  const timeMs = Date.now() - puzzleStartTime;
   const { hintsUsed, mistakes } = computeCompletionStats();
-  els.statTime.textContent = formatDuration(Date.now() - puzzleStartTime);
+  els.statName.textContent = puzzle.name; // reveal — see populatePuzzleSelect's comment
+  els.statTime.textContent = formatDuration(timeMs);
   els.statHints.textContent = String(hintsUsed);
   els.statMistakes.textContent = String(mistakes);
   els.completeModal.classList.remove('hidden');
+  // Fire-and-forget: a stats-write failure (offline, not deployed yet) must never affect the
+  // completion UI the player already sees. recordCompletion itself skips scan-origin puzzles.
+  recordCompletion(puzzle, { timeMs, hintsUsed, mistakes }).catch(() => {});
 }
 
 els.btnCompleteClose.addEventListener('click', () => {
@@ -425,11 +523,13 @@ function applyWithAutoX(changes, opts) {
 }
 
 // Apply a deduction's result cells to the board, run through the same auto-X check as
-// manual marking (see applyWithAutoX).
+// manual marking (see applyWithAutoX) and the same move-sound logic (see
+// applyMoveWithSound) — a multi-cell hint gets batch-complete-chime same as a multi-cell
+// auto-X, and a hint that completes a line gets 'lock' same as a manual move would.
 function applyHintDeduction(deduction, opts) {
   if (!deduction || deduction.resultState == null) return;
   const changes = deduction.resultCells.map(({ row, col }) => ({ row, col, state: deduction.resultState }));
-  applyWithAutoX(changes, opts);
+  applyMoveWithSound(changes, opts);
 }
 
 // Clearing a FILLED cell back to UNKNOWN is the one move a locked line still allows (see
@@ -468,6 +568,84 @@ function applyUnfill(r, c, opts) {
   return applied;
 }
 
+// ---- move sound effects (item 3) ----
+//
+// Lock/unlock and contradiction are emergent line-level properties, not something the
+// change list itself says directly — so they're detected by snapshotting every row/col's
+// locked/contradiction state immediately before and after applying a move, rather than
+// threaded through as extra bookkeeping in computeAutoXExtras etc. Cheap at these puzzle
+// sizes (a handful of isLineLocked/isLineConsistent calls per move) and keeps the sound
+// logic entirely separate from the solver-facing mutation logic above.
+function allLockedSnapshot() {
+  return {
+    rows: Array.from({ length: puzzle.rows }, (_, r) => rowLockedNow(r)),
+    cols: Array.from({ length: puzzle.cols }, (_, c) => colLockedNow(c)),
+  };
+}
+
+function allContradictionSnapshot() {
+  return {
+    rows: Array.from({ length: puzzle.rows }, (_, r) => !isLineConsistent(board.getRow(r), puzzle.rowClues[r])),
+    cols: Array.from({ length: puzzle.cols }, (_, c) => !isLineConsistent(board.getCol(c), puzzle.colClues[c])),
+  };
+}
+
+function anyNewlyTrue(before, after) {
+  return (
+    before.rows.some((v, i) => !v && after.rows[i]) || before.cols.some((v, i) => !v && after.cols[i])
+  );
+}
+
+function anyNewlyFalse(before, after) {
+  return (
+    before.rows.some((v, i) => v && !after.rows[i]) || before.cols.some((v, i) => v && !after.cols[i])
+  );
+}
+
+// Applies a fill/empty batch (manual mark or hint deduction) and plays exactly one sound for
+// it, in priority order:
+//   1. a line newly locking — 'lock' (this always also covers auto-X completing a line,
+//      since isLineLocked = isLineSatisfied + fully marked, which is exactly what
+//      computeAutoXExtras produces — see TODO.md's note on not stacking lock + chime)
+//   2. more than one cell changed without locking anything (a multi-cell hint, or the
+//      auto-X-without-locking case kept as a literal fallback even though 1) subsumes it in
+//      practice) — 'batchCompleteChime'
+//   3. mid-drag (dragStep:true), a single swept cell — drag-sweep, not fill/x-click
+//   4. a single cell changed — 'fillClick' or 'xClick' depending on its new state
+// A newly-contradictory line plays 'error' independently of the above (it's feedback about
+// the board, not about what kind of move just happened, so it can layer with any of them).
+function applyMoveWithSound(changes, opts, { dragStep = false } = {}) {
+  const lockedBefore = allLockedSnapshot();
+  const contradictionBefore = allContradictionSnapshot();
+  const applied = applyWithAutoX(changes, opts);
+  if (applied.length === 0) return applied;
+
+  if (anyNewlyTrue(lockedBefore, allLockedSnapshot())) {
+    playSound('lock');
+  } else if (applied.length > 1) {
+    playSound('batchCompleteChime');
+  } else if (dragStep) {
+    onDragSweepCell();
+  } else {
+    playSound(applied[0].next === FILLED ? 'fillClick' : 'xClick');
+  }
+
+  if (anyNewlyTrue(contradictionBefore, allContradictionSnapshot())) playSound('error');
+  return applied;
+}
+
+// Same idea as applyMoveWithSound, for the one move type that can *un*lock a line.
+function applyUnfillWithSound(r, c, opts, { dragStep = false } = {}) {
+  const lockedBefore = allLockedSnapshot();
+  const applied = applyUnfill(r, c, opts);
+  if (applied.length === 0) return applied;
+
+  if (anyNewlyFalse(lockedBefore, allLockedSnapshot())) playSound('unlock');
+  else if (dragStep) onDragSweepCell();
+
+  return applied;
+}
+
 function attachPointerHandlers(grid) {
   let dragging = null; // { paintState, touched: Set<string> }
 
@@ -482,7 +660,10 @@ function attachPointerHandlers(grid) {
   // with one exception — clearing an existing FILLED cell back to UNKNOWN. That's always
   // let through, since it's the only way a locked line becomes editable again (see
   // computeUnfillChanges).
-  function paintCell(el, state) {
+  // dragStep distinguishes the drag's first cell (a click — fill-click/x-click) from cells
+  // it sweeps across afterward (drag-sweep — see src/sounds.js) for sound purposes only;
+  // it doesn't change what mark gets applied.
+  function paintCell(el, state, { dragStep = false } = {}) {
     const r = Number(el.dataset.row);
     const c = Number(el.dataset.col);
     const current = board.get(r, c);
@@ -491,7 +672,9 @@ function attachPointerHandlers(grid) {
     const isUnfill = current === FILLED && state === UNKNOWN;
     if (!isUnfill && (rowLockedNow(r) || colLockedNow(c))) return;
 
-    const applied = isUnfill ? applyUnfill(r, c) : applyWithAutoX([{ row: r, col: c, state }]);
+    const applied = isUnfill
+      ? applyUnfillWithSound(r, c, undefined, { dragStep })
+      : applyMoveWithSound([{ row: r, col: c, state }], undefined, { dragStep });
     if (applied.length === 0) return;
     for (const cell of applied) {
       const cellEl = cellEls.get(`${cell.row},${cell.col}`);
@@ -518,6 +701,7 @@ function attachPointerHandlers(grid) {
     const c = Number(el.dataset.col);
     const newState = targetStateFor(board.get(r, c));
     dragging = { paintState: newState, touched: new Set([`${r},${c}`]) };
+    startDragSweep(); // no-op unless the 'stretch' drag-sweep prototype mode is active
     paintCell(el, newState);
     syncAllCellVisuals();
   });
@@ -529,12 +713,13 @@ function attachPointerHandlers(grid) {
     const key = `${el.dataset.row},${el.dataset.col}`;
     if (dragging.touched.has(key)) return;
     dragging.touched.add(key);
-    paintCell(el, dragging.paintState);
+    paintCell(el, dragging.paintState, { dragStep: true });
     syncAllCellVisuals();
   });
 
   function endDrag() {
     dragging = null;
+    stopDragSweep();
   }
   grid.addEventListener('pointerup', endDrag);
   grid.addEventListener('pointercancel', endDrag);
@@ -544,6 +729,7 @@ function onCellChanged(r, c) {
   if (autoCheckEnabled && puzzle.solution) {
     const mistake = autoCheckMark(board, puzzle.solution, r, c);
     if (mistake) {
+      playSound('error'); // shared with the contradiction (red clue) trigger — see syncAllCellVisuals
       highlightDeduction(mistake);
       showMistakePopup(mistake);
     }
@@ -714,8 +900,103 @@ els.toggleAutocheck.addEventListener('change', (e) => {
   autoCheckEnabled = e.target.checked;
 });
 
+// ---- persistent mute toggle (item 3) ----
+
+function syncMuteButton() {
+  const muted = isMuted();
+  els.muteToggle.textContent = muted ? '🔇' : '🔊';
+  els.muteToggle.setAttribute('aria-pressed', String(muted));
+  els.muteToggle.setAttribute('aria-label', muted ? 'Unmute sound' : 'Mute sound');
+}
+
+els.muteToggle.addEventListener('click', () => {
+  toggleMuted();
+  syncMuteButton();
+});
+
+// ---- stats & pairing (item 4) ----
+
+function formatAvgDuration(ms) {
+  return formatDuration(ms);
+}
+
+async function refreshStatsTable() {
+  els.statsStatus.textContent = 'Loading…';
+  els.statsTable.classList.add('hidden');
+  try {
+    const rows = await fetchAllStats();
+    if (rows.length === 0) {
+      els.statsStatus.textContent = "No completed puzzles yet — solve one to start tracking stats.";
+      return;
+    }
+    els.statsTableBody.innerHTML = '';
+    for (const row of rows) {
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        `<td>${row.size}</td><td>${row.puzzlesSolved}</td>` +
+        `<td>${formatAvgDuration(row.avgTimeMs)}</td><td>${row.avgHints.toFixed(1)}</td>`;
+      els.statsTableBody.appendChild(tr);
+    }
+    els.statsStatus.textContent = '';
+    els.statsTable.classList.remove('hidden');
+  } catch (err) {
+    console.warn('fetchAllStats failed:', err);
+    els.statsStatus.textContent =
+      "Couldn't load stats — this needs the stats Cloud Functions/Firestore rules deployed " +
+      "(see functions/README.md) and a network connection.";
+  }
+}
+
+els.menuStats.addEventListener('click', () => {
+  closeHelpMenu();
+  els.pairingCodeDisplay.classList.add('hidden');
+  els.pairingCodeInput.value = '';
+  els.pairingStatus.textContent = '';
+  els.statsModal.classList.remove('hidden');
+  refreshStatsTable();
+});
+
+els.btnStatsClose.addEventListener('click', () => {
+  els.statsModal.classList.add('hidden');
+});
+
+els.btnGenerateCode.addEventListener('click', async () => {
+  els.pairingCodeDisplay.classList.add('hidden');
+  els.pairingStatus.textContent = 'Generating…';
+  try {
+    const { code, expiresInSeconds } = await generatePairingCode();
+    els.pairingCodeDisplay.textContent = code;
+    els.pairingCodeDisplay.classList.remove('hidden');
+    const minutes = Math.round(expiresInSeconds / 60);
+    els.pairingStatus.textContent = `Enter this on your other device within ${minutes} minutes.`;
+  } catch (err) {
+    console.warn('generatePairingCode failed:', err);
+    els.pairingStatus.textContent =
+      "Couldn't generate a code — this needs the pairing Cloud Functions deployed (see functions/README.md).";
+  }
+});
+
+els.btnRedeemCode.addEventListener('click', async () => {
+  const code = els.pairingCodeInput.value.trim();
+  if (!code) return;
+  els.pairingStatus.textContent = 'Linking…';
+  try {
+    await redeemPairingCode(code);
+    els.pairingCodeInput.value = '';
+    els.pairingStatus.textContent = 'Linked! Your stats are now combined with the other device.';
+    refreshStatsTable();
+  } catch (err) {
+    console.warn('redeemPairingCode failed:', err);
+    const message = err?.message || 'That code is invalid or already used.';
+    els.pairingStatus.textContent = `Couldn't link: ${message}`;
+  }
+});
+
 // ---- boot ----
 
 setMode('fill');
+syncMuteButton();
 populatePuzzleSelect();
 loadPuzzle(SAMPLE_PUZZLES[0].id);
+window.addEventListener('resize', debounce(fitBoardToViewport, 100));
+window.addEventListener('orientationchange', () => setTimeout(fitBoardToViewport, 50));

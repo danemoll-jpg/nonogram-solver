@@ -1,0 +1,27 @@
+rules_version = '2';
+
+// Backs item 4 (cross-device stats + pairing). Only two collections exist so far:
+//
+//   users/{uid}/stats/{size}  — per-grid-size completion stats (src/stats.js). Owning-uid
+//     only, both read and write — no sharing/friend-visibility yet (that's item 9's
+//     concern). "Owning uid" is meaningful even across pairing: redeeming a pairing code
+//     re-authenticates the second device as the first device's uid (see
+//     functions/index.js's redeemPairingCode) rather than trying to merge two separate
+//     Firebase Auth identities, so a plain request.auth.uid == uid check is all that's
+//     needed here — no merge-aware special-casing.
+//
+//   pairingCodes/{code} — short-lived code -> uid mappings. Only ever read/written by the
+//     createPairingCode/redeemPairingCode Cloud Functions via the Admin SDK, which bypasses
+//     these rules entirely — so client access is locked down completely rather than given
+//     its own (harder to get right) rule.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/stats/{size} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /pairingCodes/{code} {
+      allow read, write: if false;
+    }
+  }
+}

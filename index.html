@@ -31,6 +31,10 @@
             Auto-check
           </label>
 
+          <button id="mute-toggle" class="btn mute-toggle" type="button" aria-pressed="false" aria-label="Mute sound">
+            <span aria-hidden="true">🔊</span>
+          </button>
+
           <div class="help-menu">
             <button id="help-menu-btn" class="btn help-menu__trigger" type="button" aria-haspopup="true" aria-expanded="false">
               Help <span aria-hidden="true">▾</span>
@@ -40,6 +44,7 @@
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-hint">Get a hint</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-check">Check my work</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-remove-bad">Remove bad marks</button></li>
+              <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-stats">Stats & pairing</button></li>
               <li class="help-menu__divider" role="none" aria-hidden="true"></li>
               <li role="none"><button class="help-menu__item help-menu__item--danger" role="menuitem" type="button" id="menu-clear-all">Clear all</button></li>
             </ul>
@@ -107,12 +112,58 @@
   <div id="complete-modal" class="modal-overlay hidden">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="complete-title">
       <h2 id="complete-title" class="modal-card__title">🎉 Solved!</h2>
+      <!-- The puzzle's real name is hidden during play (see #puzzle-select's generic
+           "Puzzle N — RxC" labels) so it doesn't give away what image is being built —
+           revealed here now that there's no more picture left to spoil. -->
       <dl class="modal-stats">
+        <div class="modal-stats__row"><dt>Puzzle</dt><dd id="stat-name"></dd></div>
         <div class="modal-stats__row"><dt>Time</dt><dd id="stat-time"></dd></div>
         <div class="modal-stats__row"><dt>Hints used</dt><dd id="stat-hints"></dd></div>
         <div class="modal-stats__row"><dt>Mistakes made</dt><dd id="stat-mistakes"></dd></div>
       </dl>
       <button id="btn-complete-close" class="btn btn--primary" type="button">Nice!</button>
+    </div>
+  </div>
+
+  <!-- Stats & pairing (item 4) — per-grid-size stats plus a Worldly-style pairing code to
+       link a second device to the same stats identity. Both the stats list and the pairing
+       actions call out to Firebase (Anonymous Auth + Firestore + two Cloud Functions), which
+       may not be deployed/configured yet — see src/stats.js and functions/README.md — so
+       every action here shows its own inline status/error rather than failing silently. -->
+  <div id="stats-modal" class="modal-overlay hidden">
+    <div class="modal-card modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="stats-title">
+      <h2 id="stats-title" class="modal-card__title">Stats & pairing</h2>
+      <div class="modal-card__body">
+        <h3>Your stats</h3>
+        <p id="stats-status" class="stats-status">Loading…</p>
+        <table id="stats-table" class="stats-table hidden">
+          <thead>
+            <tr><th>Size</th><th>Solved</th><th>Avg time</th><th>Avg hints</th></tr>
+          </thead>
+          <tbody id="stats-table-body"></tbody>
+        </table>
+
+        <h3>Link another device</h3>
+        <p>No account needed — generate a code on one device, then enter it on another to
+          combine their stats and keep them in sync going forward.</p>
+
+        <div class="pairing-block">
+          <button id="btn-generate-code" class="btn" type="button">Generate a code</button>
+          <p id="pairing-code-display" class="pairing-code hidden"></p>
+        </div>
+
+        <div class="pairing-block">
+          <label class="pairing-input-row">
+            Enter a code from another device
+            <span class="pairing-input-group">
+              <input id="pairing-code-input" type="text" maxlength="6" placeholder="ABCD12" autocomplete="off" />
+              <button id="btn-redeem-code" class="btn" type="button">Link</button>
+            </span>
+          </label>
+        </div>
+        <p id="pairing-status" class="stats-status" aria-live="polite"></p>
+      </div>
+      <button id="btn-stats-close" class="btn btn--primary" type="button">Close</button>
     </div>
   </div>
 

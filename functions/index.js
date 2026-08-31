@@ -1,13 +1,23 @@
-// Cloud Function backing item 7.6: takes the structured "deduction" object the solver
-// already produces (src/hintPhrasing.js on the client) and asks an LLM to phrase it as a
-// short, conversational hint. The LLM API key lives only here (as a Secret Manager secret,
-// never in client code or source control) — see functions/README.md for deploy steps.
+// Cloud Functions for the nonogram app:
+//   - phraseHint (item 7.6): takes the structured "deduction" object the solver already
+//     produces (src/hintPhrasing.js on the client) and asks an LLM to phrase it as a short,
+//     conversational hint. The LLM API key lives only here (as a Secret Manager secret,
+//     never in client code or source control) — see functions/README.md for deploy steps.
+//   - createPairingCode / redeemPairingCode (item 4): cross-device stats pairing. See the
+//     comment above createPairingCode for the design.
 //
-// Callable (not a raw HTTPS endpoint) so the client gets request/response marshalling and
-// CORS handling for free via the Firebase SDK (see src/firebase.js).
+// All three are callable (not raw HTTPS endpoints) so the client gets request/response
+// marshalling, auth-context propagation, and CORS handling for free via the Firebase SDK
+// (see src/firebase.js).
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
+const { getAuth } = require('firebase-admin/auth');
+
+initializeApp();
+const db = getFirestore();
 
 const anthropicApiKey = defineSecret('ANTHROPIC_API_KEY');
 
@@ -124,3 +134,111 @@ function describeDeduction(deduction) {
   }
   return lines.join('\n');
 }
+
+// ---- Cross-device stats pairing (item 4) ----
+//
+// No accounts, no passwords — matches the pairing pattern from the project owner's other
+// app (Worldly). Each device signs in with Firebase Anonymous Auth on its own (client-side,
+// see src/firebase.js's ensureSignedIn) and gets its own UID. Rather than trying to merge
+// two separate Firebase Auth identities (not really a supported operation), pairing instead
+// re-authenticates the *second* device as the *first* device's UID via a custom token minted
+// here with the Admin SDK — after that, both devices are simply the same Firebase user, so
+// the client-facing Firestore rule for stats (firestore.rules) stays a plain
+// `request.auth.uid == uid` check with no merge-aware special-casing needed.
+//
+// Resolved open questions from TODO.md:
+//   - Code expiry: 10 minutes (PAIRING_CODE_TTL_MS below) — long enough to type a code from
+//     one device to another, short enough that a stale/abandoned code isn't a lingering way
+//     to attach a random device to someone's stats.
+//   - Merging pre-existing stats on redemption: sum the cumulative counters bucket-by-bucket
+//     (mergeStatsBucket) — puzzlesSolved/totalTimeMs/totalHints/totalMistakes are all
+//     running totals, so summing is lossless and the natural combination (unlike, say, a
+//     "longest streak" field, which would need max instead — not a concern here since no
+//     such field exists yet).
+//   - Visibility: player-only for now — these functions don't expose stats to anyone but the
+//     owning UID. Friend-visible stats are item 9's concern, not this one's.
+
+const PAIRING_CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+// Excludes 0/O/1/I — characters easy to misread/mistype when copying a code by eye.
+const PAIRING_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function randomPairingCode(length = 6) {
+  let out = '';
+  for (let i = 0; i < length; i++) {
+    out += PAIRING_CODE_ALPHABET[Math.floor(Math.random() * PAIRING_CODE_ALPHABET.length)];
+  }
+  return out;
+}
+
+exports.createPairingCode = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign-in required.');
+  const uid = request.auth.uid;
+
+  // Collision-check against live (non-expired-looking) codes; a handful of retries is
+  // plenty at this codespace size (32^6) and low expected concurrent-code volume.
+  let code = null;
+  for (let attempt = 0; attempt < 5 && !code; attempt++) {
+    const candidate = randomPairingCode();
+    const existing = await db.collection('pairingCodes').doc(candidate).get();
+    if (!existing.exists) code = candidate;
+  }
+  if (!code) throw new HttpsError('internal', 'Could not generate a unique pairing code — try again.');
+
+  const now = Date.now();
+  await db.collection('pairingCodes').doc(code).set({
+    uid,
+    createdAt: now,
+    expiresAt: now + PAIRING_CODE_TTL_MS,
+  });
+
+  return { code, expiresInSeconds: PAIRING_CODE_TTL_MS / 1000 };
+});
+
+// Pure and side-effect-free so it's unit-testable without Firestore/Admin — see
+// functions/test-merge.js (`node functions/test-merge.js`).
+function mergeStatsBucket(a = {}, b = {}) {
+  return {
+    puzzlesSolved: (a.puzzlesSolved || 0) + (b.puzzlesSolved || 0),
+    totalTimeMs: (a.totalTimeMs || 0) + (b.totalTimeMs || 0),
+    totalHints: (a.totalHints || 0) + (b.totalHints || 0),
+    totalMistakes: (a.totalMistakes || 0) + (b.totalMistakes || 0),
+  };
+}
+exports.mergeStatsBucket = mergeStatsBucket;
+
+exports.redeemPairingCode = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign-in required.');
+  const fromUid = request.auth.uid;
+  const code = typeof request.data?.code === 'string' ? request.data.code.trim().toUpperCase() : '';
+  if (!code) throw new HttpsError('invalid-argument', 'Expected { code }.');
+
+  const codeRef = db.collection('pairingCodes').doc(code);
+  const codeSnap = await codeRef.get();
+  if (!codeSnap.exists) throw new HttpsError('not-found', 'That code is invalid or already used.');
+
+  const { uid: toUid, expiresAt } = codeSnap.data();
+  if (Date.now() > expiresAt) {
+    await codeRef.delete();
+    throw new HttpsError('deadline-exceeded', 'That code has expired — generate a new one.');
+  }
+
+  if (toUid !== fromUid) {
+    // Merge fromUid's existing stats into toUid's, then drop fromUid's copies so they can
+    // never be double-counted (e.g. if this ever ran twice for the same pair of devices).
+    const fromStatsSnap = await db.collection('users').doc(fromUid).collection('stats').get();
+    const batch = db.batch();
+    for (const doc of fromStatsSnap.docs) {
+      const toRef = db.collection('users').doc(toUid).collection('stats').doc(doc.id);
+      const toSnap = await toRef.get();
+      batch.set(toRef, mergeStatsBucket(toSnap.exists ? toSnap.data() : {}, doc.data()));
+      batch.delete(doc.ref);
+    }
+    batch.delete(codeRef);
+    await batch.commit();
+  } else {
+    await codeRef.delete(); // redeeming your own code — nothing to merge, just clean up
+  }
+
+  const customToken = await getAuth().createCustomToken(toUid);
+  return { customToken };
+});

@@ -103,79 +103,112 @@ Completed Tasks
   — safe to check in. The LLM provider's API key is the one that must stay server-side
   inside the Cloud Function only.
 
+* **Post-iPad-verification pass: puzzle-name reveal, responsive board sizing, sound
+  plumbing, and cross-device stats/pairing.** All four coded and tested against a local
+  static server; two need a manual Firebase deploy/console step before they work live (see
+  the Current Objective below) — everything else works today.
+  1. **Puzzle name hidden until completion.** `#puzzle-select` now shows `Puzzle N — RxC`
+     (`app.js`'s `populatePuzzleSelect`) instead of `puzzle.name`; the real name is revealed
+     as a new row in the completion modal (`#stat-name`) once there's no picture left to
+     spoil. Verified end-to-end (solved Heart 5x5, modal showed "Puzzle: Heart (5x5)").
+  2. **Grid scales to fill available screen space.** `app.js`'s `fitBoardToViewport`
+     measures live layout (board-root's top position and width, the explain panel's actual
+     current height, the status line and board-panel's own padding) rather than fixed
+     breakpoints, and picks the largest square cell size (clamped 18–64px) that fits both
+     the puzzle's width and height budget — driven through one `--cell-size` CSS variable
+     (`styles.css`) that clue font-size and the ✕ mark also scale off of. Re-fits on
+     window resize/orientation change (debounced) and whenever the explain panel's content
+     (and therefore height) changes. Verified at multiple viewport sizes and both a 5×5 and
+     10×10 puzzle in the Browser preview — old fixed-breakpoint small-screen CSS override
+     removed since it would have fought the dynamic sizing.
+  3. **Sound-effect plumbing**, built against placeholder silent audio
+     (`assets/sounds/*.mp3` — see `assets/sounds/README.md`; drop real files in at the same
+     names, no code changes needed). `src/sounds.js` holds playback + the persistent mute
+     toggle (`#mute-toggle`, `localStorage`-backed, defaults unmuted); `app.js` wires all
+     eight trigger points, including the priority rule for not stacking `lock` and
+     `batchCompleteChime` when auto-X completing a line also locks it (see
+     `applyMoveWithSound`'s comment — lock always wins, since `isLineLocked` is a superset
+     of what triggers auto-X). Verified via a full manual solve (fill/x-click/lock/complete
+     all fired without console errors) and a multi-cell hint (batch-complete-chime path).
+     **Drag-sweep prototype — resolved: go with 'retrigger'.** Both approaches from the
+     original write-up are implemented in `src/sounds.js` (switch via `?dragSweep=stretch`
+     for a side-by-side listen); **retrigger is recommended and wired as the default.**
+     Reasoning: it scales naturally with drag speed and cell count (more cells crossed per
+     second just means more overlapping retriggers) with no pitch/tempo distortion, matching
+     the standard pattern for this kind of feedback (scroll ticks, minesweeper flood-fill).
+     'stretch' can only start/stop a fixed-length sample with the stroke — it doesn't
+     actually track drag speed without real time-stretching, a much bigger asset-pipeline
+     lift than this warrants. **Ask for `drag-sweep.mp3` as a short, cleanly-loopable
+     tick/scrape sample** (not a long glissando) — that's what 'retrigger' expects.
+  4. **Cross-device stats + pairing.** `src/stats.js` (client) + two new callables in
+     `functions/index.js` (`createPairingCode`, `redeemPairingCode`, using `firebase-admin`
+     for `createCustomToken` + Firestore) + `firestore.rules` (new — per-uid stats access
+     only; pairing codes are Admin-SDK-only, locked to the client entirely). Design:
+     Anonymous Auth per device; pairing re-authenticates the second device as the first
+     device's uid via a minted custom token (rather than trying to merge two separate
+     Firebase Auth identities), so ordinary per-uid security rules just work afterward with
+     no merge-aware special-casing. **Resolved open questions:** code expiry 10 minutes;
+     pre-existing stats on redemption are summed bucket-by-bucket (cumulative counters, so
+     lossless — see `mergeStatsBucket`, unit-tested in `functions/test-merge.js`); visibility
+     stays player-only (friend-visible stats remain item 9's concern). New "Stats & pairing"
+     Help-menu item opens a modal with the stats table and generate/redeem-code UI.
+     **Verified failing gracefully, not yet verified working live** — tested against the
+     real `nonogram-pro-e8a31` project with nothing deployed yet: `fetchAllStats` and
+     `generatePairingCode` both surfaced clear in-modal errors
+     (`auth/configuration-not-found`, then a CORS/404 once past that) instead of crashing or
+     hanging, and a puzzle solve's `recordCompletion` call failed the same way silently in
+     the console without affecting the completion modal — see Current Objective below for
+     the deploy + enable-Anonymous-Auth steps needed to actually test the live path.
+  5. **Node.js 20→22 runtime bump — bundled into this pass as requested**, since it already
+     touched `functions/`. `functions/package.json`: `engines.node` now `"22"`; ran
+     `npm install firebase-functions@latest firebase-admin@latest` (also needed fresh for
+     item 4 above) — picked up `firebase-functions@^7.3.2` and `firebase-admin@^14.3.0`.
+     **Breaking change hit and fixed**: `firebase-admin` v12+ dropped the old
+     `admin.firestore()`/`admin.auth()` namespaced API from the default import — switched
+     `functions/index.js` to the modular `firebase-admin/app`, `firebase-admin/firestore`,
+     `firebase-admin/auth` imports. Re-tested via `node functions/test-merge.js` (passes) —
+     **`phraseHint`'s actual LLM call path is untested against this dependency bump** since
+     that needs a live deploy; re-verify hint phrasing after deploying, per the existing
+     "check console/logs, not just that a hint shows up" guidance below.
+
 Current Objective (Focus Area)
 
-* **iPad verification: done, surfaced four items to address.** The app loads and plays
-  correctly on iPad (Cloud Function + Netlify deploy confirmed working end-to-end). Playing
-  it surfaced the four items below.
+* **Deploy is done; re-confirm pairing works, then generate real audio.** Deploy steps
+  actually taken: Anonymous sign-in enabled in the Firebase console; `functions` deployed via
+  `firebase deploy --only functions` (`phraseHint`, `createPairingCode`, and
+  `redeemPairingCode` all live); a Firestore database was created (it didn't exist before —
+  this project had only ever used Functions/Auth) and `firestore.rules` published through the
+  console's Rules tab (pasting the CLI command's rules-file content works the same as
+  `firebase deploy --only firestore:rules`).
+  1. **Hit and fixed: IAM permissions gap.** `createPairingCode` first failed with a generic
+     client-side "internal" error; `firebase functions:log` showed the real cause —
+     `7 PERMISSION_DENIED: Missing or insufficient permissions` from the Firestore Admin
+     client. Cause: 2nd-gen Cloud Functions run as the **default Compute Engine service
+     account** (`537841607435-compute@developer.gserviceaccount.com`), and on newer GCP
+     projects that account no longer gets automatic Firestore access. **Fix applied**: added
+     the **Cloud Datastore User** IAM role to that service account via
+     console.cloud.google.com → IAM & Admin → IAM (not the Firebase console — this is a
+     Google Cloud IAM grant, same category as the "several IAM grants" hit during the
+     original `phraseHint` deploy). **Not yet re-confirmed working** — the fix was applied
+     but "Generate a code" hasn't been re-tested successfully since (local dev server access
+     issues interrupted the retest; next session should re-verify via **Help → Stats &
+     pairing → Generate a code** on the running app before considering item 4 fully done).
+  2. **Generate `drag-sweep.mp3`** as a short, loopable tick/scrape sample (not a long
+     glissando) — see the resolved recommendation in Completed Tasks above — then generate
+     the other seven real files (`fill-click.mp3`, `x-click.mp3`,
+     `batch-complete-chime.mp3`, `error.mp3`, `complete-fanfare.mp3`, `lock.mp3`,
+     `unlock.mp3`) and drop them into `assets/sounds/` at those exact filenames — no code
+     changes needed.
+  3. **Not yet committed/pushed.** All of this pass's code changes are sitting in the working
+     tree only — confirm with the project owner before committing/pushing (Netlify
+     auto-deploys `main`, so a push goes live immediately).
+  4. Also re-verify `phraseHint` still phrases hints correctly post-Node-22-bump next time
+     hints are used, per the existing "check console/logs" guidance below — not re-tested
+     this session.
 
-  1. **Hide the puzzle's name until completion.** Currently the puzzle name is shown during
-     play, which gives away too much when the player is trying to figure out what image
-     they're building. Show a generic placeholder during play (e.g. "Puzzle — 10×10"
-     instead of the real name), and reveal the actual name in the completion modal
-     alongside the existing stats (time, hints, mistakes).
-
-  2. **Grid should scale to fill available screen space.** Currently undersized. The board
-     should scale up to fill the available viewport while keeping cells square (no
-     distortion) — account for the fixed-height Help/toolbar area and the persistent
-     bottom explanation panel so the scaled board doesn't overlap either, and confirm this
-     works in both portrait and landscape.
-
-  3. **Sound effects.** Eight distinct audio assets needed. **Split into two tracks so work
-     can proceed in parallel:**
-     - **Build plumbing now, against placeholder/silent audio.** Code should wire up
-       playback triggers, the file-loading structure, and the persistent mute toggle
-       without waiting for real audio files. Expected filenames (project owner is
-       generating these via ElevenLabs separately): `fill-click.mp3`, `x-click.mp3`,
-       `batch-complete-chime.mp3`, `error.mp3`, `complete-fanfare.mp3`, `lock.mp3`,
-       `unlock.mp3`, and `drag-sweep.mp3` (placeholder for now — see below). Suggested
-       location: `assets/sounds/`.
-     - **Drag-sweep needs a prototype decision first, before the project owner generates
-       that one file.** Code should try both playback approaches with a placeholder sound
-       — (a) a single sample stretched/scaled across the drag's duration, or (b) fast
-       per-cell notes triggered as the drag crosses each cell, quick enough to blend into a
-       run — and report back which feels better (or if neither does) so the project owner
-       knows what kind of asset to actually generate (one long glissando sample vs. a short
-       repeatable note). Don't finalize `drag-sweep.mp3` until this is resolved.
-     - Trigger points: fill-click (manual fill), x-click (manual X), drag-sweep
-       (click-and-drag across cells), batch-complete-chime (auto-X or a hint completing
-       multiple cells at once — same sound for both), error (shared by both an
-       auto-check-caught mistake and a line turning red/contradiction), complete-fanfare
-       (full puzzle solve), lock (a row/column becomes fully marked and locks — item
-       "Post-ship bug fixes" #3 in Completed Tasks), unlock (a fill is cleared and the line
-       becomes editable again). Confirm lock/unlock don't fire redundantly alongside
-       batch-complete-chime when a line locks via auto-X finishing it in the same action —
-       likely want lock to play instead of (or immediately after) batch-complete-chime in
-       that case, not both stacked, for review once both exist.
-     - **Persistent mute toggle** — its own control, separate from the Help dropdown, state
-       saved across sessions (e.g. localStorage), defaulting to unmuted.
-
-  4. **Cross-device stats sync via pairing code (Worldly-style).** No accounts, no
-     passwords — one device generates a short code, entering that code on a second device
-     links the two to the same underlying identity, matching the pattern used in the
-     project owner's other app (Worldly). Maps naturally onto **Firebase Anonymous Auth**:
-     each device gets its own anonymous UID by default; "generate a code" creates a
-     short-lived Firestore record mapping a random code to that device's UID; entering the
-     code on a second device looks up the record and re-points/merges that device onto the
-     same underlying user record going forward. This pulls the **stats + pairing** piece
-     out of item 9 and scopes it as its own near-term item — it does not need to wait for
-     the rest of item 9 (puzzle library, sharing, etc.). Per the earlier design pass, stats
-     are bucketed by exact grid size (puzzles solved, avg completion time, avg hints used).
-     **Resolved: a puzzle imported via item 10's scan/photo flow (a snapshot of an
-     already-partially-filled puzzle) never counts toward stats** — the whole point of that
-     import path is getting unstuck on a puzzle already in progress, so tracking it as a
-     fast/hint-heavy solve would misrepresent the player's actual skill. If the player
-     separately saves that puzzle to their own library and plays it again from a blank
-     start, that fresh playthrough counts normally, same as any other in-app puzzle.
-     Remaining open questions to settle before/while building: does a linking code expire,
-     and after how long; if two devices already have independent stats history before
-     linking, how do they merge (sum, keep the longer history, ask the user); is this
-     visible to the player only, or does it tie into future friend-visible stats from item
-     9.
-
-  Items 1–2 are UI-only. Item 3 is UI wiring, blocked on audio files from the project
-  owner. Item 4 is new Firebase/Firestore infrastructure (Anonymous Auth + a pairing-code
-  collection) — the first real Firestore usage in the app, ahead of the rest of item 9.
+* **iPad verification (superseded by the above).** The app loads and plays correctly on
+  iPad (Cloud Function + Netlify deploy confirmed working end-to-end). Playing it there
+  originally surfaced the four items completed in the pass above.
 
 Next Steps (Do Not Start Yet)
 
@@ -208,23 +241,22 @@ Technical Notes / Blockers
   (`functions/index.js`) by default, with `defaultPhraser`'s old deterministic templates kept
   as the fallback for when that call fails — see the comment at the top of that file.
 * Firebase project exists (`nonogram-pro-e8a31`) — config above. `firebase.json` /
-  `.firebaserc` at the repo root scope Firebase to Functions only (deploy target for the
-  static site stays Netlify). Auth/Firestore for item 9 come later.
+  `.firebaserc` at the repo root now also declare Firestore (rules only — see below);
+  deploy target for the static site stays Netlify regardless. Auth (Anonymous) + Firestore
+  are now in use for item 4's stats/pairing (see Completed Tasks) — item 9's puzzle-library
+  Firestore usage is still separate/later.
 * No CI is configured — run `npm test` (or `node test/run.js`) locally before pushing.
-* **Node.js 20 runtime deprecation — time-boxed fast-follow, not urgent today but do before
-  2026-10-30.** `functions/package.json` pins `"engines": { "node": "20" }`. Node 20 was
-  deprecated 2026-04-30 and is fully decommissioned 2026-10-30 (Google may stop accepting
-  deploys on it, or disable functions still on it, after that date). Deploys still work
-  fine today. Fix: bump `"engines"` to `"22"`, and run `npm install --save
-  firebase-functions@latest` inside `functions/` (the deploy log has warned this package is
-  outdated too, and warns of possible breaking changes on upgrade — re-test the hint flow
-  after, don't assume it still works). Do this alongside any other planned redeploy rather
-  than as a standalone deploy, to avoid a repeat of the IAM/build surprises hit during the
-  initial Cloud Function deploy (see Completed Tasks).
-* Firestore security rules: **not** needed for the hint-phrasing function — it doesn't
-  read/write Firestore. Real rules design (who can read/write puzzle documents, per-user
-  stats write access, etc.) belongs to item 9 when it's scoped. Update `firestore.rules` only
-  if/when Code identifies an actual read/write need.
+* **Node.js 20→22 runtime bump — done in the repo, not yet deployed.** Was a time-boxed
+  fast-follow (Node 20 decommissions 2026-10-30); bundled into the item-4 pass above since
+  that already touched `functions/`, per instruction, rather than as a separate deploy. See
+  the Completed Tasks entry above for what changed (`engines.node`, dependency versions, the
+  `firebase-admin` v12+ modular-API migration) — the only thing left is the actual
+  `firebase deploy`, covered by the Current Objective above.
+* **Firestore security rules: now needed** — item 4 above is the first real Firestore usage
+  in the app. `firestore.rules` (repo root) covers `users/{uid}/stats/*` (owning-uid only)
+  and locks `pairingCodes/*` to the Admin SDK entirely (see that file's own comments). Full
+  puzzle-library rules (who can read/write shared puzzle documents, etc.) still belong to
+  item 9 when it's scoped — this only covers what item 4 needs.
 * Hint phrasing has an invisible-by-design fallback (real LLM call → deterministic template
   on any failure), which means "a hint appeared" is not proof the LLM call actually
   succeeded — a request once failed silently this way during initial deploy (see deploy
