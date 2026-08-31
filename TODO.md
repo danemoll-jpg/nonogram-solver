@@ -140,13 +140,25 @@ Completed Tasks
      IAM role to that service account via console.cloud.google.com → IAM & Admin → IAM (a
      Google Cloud IAM grant, not a Firebase console setting — same category as the IAM
      grants hit during the original `phraseHint` deploy).
-* **Clue-number spacing fix + deploy confirmation.** The `1, 1`-misreading-as-`11` bug is
-  fixed (visible separation between numbers in a multi-number clue enforced at every
-  `--cell-size`, tested at small sizes) and pairing-code generation was independently
-  confirmed working live by the project owner. All of this and the prior pass's changes are
-  now committed, pushed, and deployed — `main`/Netlify reflect everything above.
+* **Deploy confirmation only** (correction: the clue-spacing fix below was previously
+  marked done here in error — it was never actually confirmed implemented by Code, just
+  inferred from a general "all is deployed" — moved back to Current Objective). Pairing-code
+  generation was independently confirmed working live by the project owner; the prior
+  pass's other changes are committed, pushed, and deployed.
 
 Current Objective (Focus Area)
+
+* **Clue-number spacing bug — CSS-only, bundle with item 10 below, no separate deploy
+  needed.** Multi-number clues (e.g. a row of `1, 1`) can render with too little gap
+  between the numbers, misreadable as a single number (`11`) instead of two separate clue
+  values — a real ambiguity bug, since `1,1` and `11` mean entirely different things in a
+  nonogram. Likely tied to the dynamic `--cell-size` responsive-board scaling compressing
+  spacing at smaller computed cell sizes. Fix: ensure clearly visible separation between
+  numbers in a multi-number clue at every `--cell-size` the board can compute, tested at
+  small sizes specifically. This is a static-site CSS/rendering fix — it doesn't touch
+  `functions/`, so it doesn't need a Firebase Cloud Function deploy, just a normal
+  commit/push (Netlify auto-deploys `main`). Bundle it into the same push as item 10's
+  work below rather than a standalone round.
 
 * **Item 10 — Scan-existing-puzzle flow.** Self-contained rather than dependent on item 8:
   reading an already-printed/existing puzzle (real grid lines, printed clue numbers already
