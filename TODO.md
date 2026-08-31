@@ -228,11 +228,29 @@ Completed Tasks
        ALL five modals (confirm/complete/how-to-play/stats/scan), not just the one reported —
        there was nothing modal-specific about the bug, and hand-wiring a lock call into each
        modal's own scattered show/hide call sites would leave the same bug for whichever one
-       got missed. Verified in the Browser pane (scroll position saved on lock, restored
-       exactly on unlock, for both the scan wizard and the how-to-play modal). **Neither this
-       nor the previous iOS fix has been confirmed on a real iOS device yet** — worth a
-       real-device check (ideally the exact repro: open "Scan a puzzle", try to scroll before
-       reaching "Looks good") next time the project owner is on iPad/iPhone.
+       got missed.
+     - **iOS follow-up #3**: the project owner tested #2 on a real iOS device — background
+       scroll was fixed, but now the modal's OWN content couldn't scroll at all either ("no
+       scroll bar like on PC"). Root cause: `position: fixed` on `<body>` (the technique #2
+       used) is known to change how iOS Safari hit-tests touch-scroll gestures on a NESTED
+       `overflow: auto` region, and can stop recognizing it as scrollable at all — the fix for
+       one bug directly caused the other. Replaced with the modern, non-disruptive
+       combination: plain `overflow: hidden` on `<html>`/`<body>` (no `position: fixed`, so
+       `<body>` never leaves normal document flow and never interferes with a descendant's
+       own scrolling) plus `overscroll-behavior: contain` on `.modal-card__body` itself (in
+       `styles.css`) — the CSS-native way to stop a scrollable region's OWN scroll from
+       chaining to whatever's behind it once it hits its boundary, which is the actual thing
+       the body-lock was trying to fake in the first place. Still needed a manual scroll-
+       position save/restore (confirmed directly: setting `overflow: hidden` on the page
+       collapses its current `scrollTop` to 0 immediately, same as the position:fixed version
+       needed, just for a different reason) — `window.scrollY` saved before locking, restored
+       via `window.scrollTo` after unlocking.
+     - **Still not confirmed on a real iOS device as of this fix** (#1 and #2 both were, and
+       both had real bugs #2 and #3 above only surfaced that way) — this one needs the same
+       real-device check before being treated as actually resolved: open "Scan a puzzle",
+       confirm the background does NOT scroll, and confirm `.modal-card__body` DOES scroll
+       (there should be a visible native scrollbar/thumb during a scroll gesture, same as
+       desktop).
 
 Current Objective (Focus Area)
 

@@ -455,6 +455,13 @@ body {
   max-height: min(28rem, 60vh);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch; /* smooth momentum scrolling on iOS Safari */
+  /* Stops this region's own scroll from chaining to the page behind the modal once it hits
+     its top/bottom boundary — the CSS-native replacement for a JS body-position:fixed lock
+     (see app.js's lockBodyScroll comment for why that approach was tried and reverted: it
+     also broke touch-scrolling THIS element on a real iOS device, confirmed by the project
+     owner). app.js's overflow:hidden lock handles the "no modal open" case (nothing to
+     contain scroll INTO in the first place); this handles the "modal open" case. */
+  overscroll-behavior: contain;
   margin-bottom: 1.25rem;
 }
 

@@ -122,28 +122,34 @@ const els = {
 // each modal's own scattered show/hide call sites — safer against a future modal forgetting
 // to wire it in, and there's nothing modal-specific about the fix itself.
 //
-// `position: fixed` on <body> (not just `overflow: hidden`) is the more robust of the two
-// common approaches: plain `overflow: hidden` alone is known to still let iOS Safari
-// rubber-band-scroll the body in some versions, where actually removing it from the normal
-// scroll flow doesn't. Saves/restores the real scroll position across lock/unlock so closing
-// a modal doesn't jump the page back to the top.
+// First attempt used `position: fixed` on <body> (the older, more forceful lock technique,
+// needed on pre-iOS-13 Safari) — confirmed BY THE PROJECT OWNER directly that it overshot:
+// it stopped the background from scrolling, but also broke touch-scrolling the modal's own
+// content (`.modal-card__body`)  — no visible scrollbar, no scroll at all, on a real iOS
+// device. Root cause: taking <body> out of normal flow with `position: fixed` changes how
+// iOS Safari hit-tests a nested `overflow: auto` region's touch-scroll gesture, and it can
+// simply stop recognizing the inner region as scrollable. Switched to the modern
+// `overflow: hidden` + `overscroll-behavior: contain` combination instead (the latter is on
+// .modal-card__body itself, see styles.css) — `overscroll-behavior: contain` is the
+// CSS-native way to stop a scrollable region's OWN scroll from chaining to whatever's behind
+// it once it hits its boundary, which is the actual thing a body-lock hack was trying to
+// fake, without body ever leaving normal document flow or interfering with its descendants'
+// own scroll regions. Still needs a manual scroll-position save/restore, though, same as the
+// position:fixed version did: setting `overflow: hidden` on the page collapses its current
+// scrollTop to 0 immediately (confirmed directly — there's no longer any overflow left to be
+// scrolled to), so without saving it first, closing a modal opened partway down the page
+// would jump the page back to the top.
 let bodyScrollLocked = false;
 let savedBodyScrollY = 0;
 
 function lockBodyScroll() {
   savedBodyScrollY = window.scrollY;
-  document.body.style.position = 'fixed';
-  document.body.style.top = `-${savedBodyScrollY}px`;
-  document.body.style.left = '0';
-  document.body.style.right = '0';
+  document.documentElement.style.overflow = 'hidden';
   document.body.style.overflow = 'hidden';
 }
 
 function unlockBodyScroll() {
-  document.body.style.position = '';
-  document.body.style.top = '';
-  document.body.style.left = '';
-  document.body.style.right = '';
+  document.documentElement.style.overflow = '';
   document.body.style.overflow = '';
   window.scrollTo(0, savedBodyScrollY);
 }
