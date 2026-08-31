@@ -38,10 +38,12 @@
 - **Item 10 (scan-existing-puzzle) specifically: prefer testing against a real image file
   over synthetic/guessed pixel data.** This feature's grid/line-detection, OCR, and
   fill-state-detection code has repeatedly had bugs that synthetic mockups missed but a real
-  screenshot immediately surfaced (a swamped global threshold, a three-tier line-darkness
-  scheme, filled-cell brightness drift, a scrollbar-like false positive, OCR digit-merging, a
-  thick-border cell-boundary offset) — see `TODO.md`'s Completed Tasks for the full history.
-  This applies to any further work in this area.
+  screenshot immediately surfaced — see `TODO.md`'s Completed Tasks for the full history.
+- **iOS scroll/touch bugs in this app have proven resistant to incremental CSS fixes.** The
+  scan wizard's scroll bug took four rounds; the working fix removed the risky structural
+  pattern (an overlay with its own nested scroll region) rather than continuing to patch CSS
+  properties on it. Consider that lesson before repeating the same patch-and-retest cycle on
+  a similar iOS-only symptom elsewhere.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -52,53 +54,28 @@
 **Always check `TODO.md` for the current objective before starting work** — it's kept more
 up to date than this file's summary below.
 
-Short version: items 1–7 (solver engine, hint/mistake/contradiction logic, and a full
-playable UI with LLM-backed hint phrasing), the UI consolidation pass, a post-ship
-bug-fix/mechanics pass, the iPad-verification follow-up pass (puzzle-name hidden until
-completion, grid scales to fill the screen, sound-effect plumbing and real audio files,
-persistent mute toggle, cross-device stats + pairing via Anonymous Auth, and the Node 20→22
-runtime bump), the clue-number spacing fix, and **item 10 (scan-existing-puzzle flow)** are
-all done, deployed, and confirmed working. Item 10 in particular has been tested
-end-to-end against the project owner's own real screenshots across several rounds of fixes:
-the original missing-confirm-button bug, a full redesign (auto-detect the grid on load with
-a highlighted/adjustable overlay, manual drag as fallback), two deeper rounds of
-real-screenshot-driven fixes covering grid-detection accuracy (filled/X-marked cells, a
-scrollbar-like false positive, a dark app-chrome background swamping naive thresholds) and
-OCR accuracy (clue numbers merging together with no space — fixed via pixel-geometry gap
-analysis in `src/ocrSegment.js`, not by trusting Tesseract's own word-spacing), and finally
-**fill-state detection** — capturing which cells are already filled/X-marked in the scanned
-photo (not just its clues), so a mid-solve scan restores real progress instead of handing
-back a blank board. New pure module `src/cellStateDetect.js` (per-cell FILLED/EMPTY/UNKNOWN
-classification against a puzzle's own detected background color, never a hardcoded palette)
-plus a `gridDetect.js` addition (`centerRectOnBorders`) fixing a real bug the real test
-screenshot's unusually thick border surfaced — a naive even-subdivided cell boundary landed
-inside the border instead of at its true inner edge, corrupting classification. A new
-click-to-correct wizard step feeds the confirmed state into `Board.fromGrid` via a new
-`puzzle.initialMarks` field, verified end-to-end (detection against the real screenshot;
-full wizard flow incl. click-correction through to the final playable board against a
-synthetic puzzle with known ground truth). Item 10 — the project's primary feature, not a
-side item — is now complete across grid detection, clue OCR, and fill-state capture. See
-`TODO.md`'s Completed Tasks for the full round-by-round breakdown and every design tradeoff
-(`src/gridDetect.js`, `src/scanPuzzle.js`, `src/ocr.js`, `src/ocrSegment.js`,
-`src/scanUI.js`, `src/cellStateDetect.js`).
+Short version: items 1–7, the UI consolidation pass, a post-ship bug-fix pass, the
+iPad-verification follow-up pass, the clue-number spacing fix, and **item 10
+(scan-existing-puzzle flow)** are all done, deployed, and confirmed working. Item 10 — the
+project's primary current feature — is complete across grid detection, clue OCR, and
+fill-state capture (a new `src/cellStateDetect.js` module restores which cells were already
+filled/X-marked in a mid-solve scan, rather than always handing back a blank board), plus a
+structural iOS-scroll fix (the wizard is now a full-screen view, not a modal overlay). All
+of this was built and repeatedly hardened against the project owner's own real screenshots,
+not synthetic mockups alone — see `TODO.md`'s Completed Tasks for the full round-by-round
+history and every design tradeoff (`src/gridDetect.js`, `src/scanPuzzle.js`, `src/ocr.js`,
+`src/ocrSegment.js`, `src/scanUI.js`, `src/cellStateDetect.js`).
 
-Fill-state detection's initial ship had an iOS-only follow-up: the scan wizard couldn't be
-scrolled on a real device. Took four rounds to actually fix — three CSS-only attempts on the
-modal itself (nested-scroll conflict, then a missing background-scroll lock, then that
-lock's own `position: fixed` side effect breaking the modal's own scroll) each fixed the
-reported symptom and broke or missed the next one on-device. **The fix that actually worked
-was architectural, not another CSS property**: the scan wizard is no longer a modal overlay
-at all — it's a full-screen view that replaces the normal page content in the DOM (see
-`.scan-screen` in `styles.css`, `openWizard`/`closeWizard` in `src/scanUI.js`), so it's
-scrolled by the browser's own native page scroll instead of a nested `overflow` region
-fighting a `position: fixed` ancestor. **Confirmed working on a real iOS device by the
-project owner.** Worth remembering as a general lesson for this app: when an iOS-only
-scroll/touch bug survives a couple of targeted CSS fixes, consider removing the risky
-structural pattern (overlay + nested scroll) rather than continuing to patch it — each
-on-device re-test round has a real cost for the project owner, confirmed directly by their
-own feedback mid-fix.
+**Current objective is five items from real-world play**, found after item 10 shipped:
+(1) clue OCR accuracy and correction tedium — including an idea to cross-check OCR'd clues
+against the separately-detected fill state to flag likely-wrong lines automatically; (2) a
+bug where the main board stays undersized after returning from the scan wizard until a
+puzzle is reselected; (3) eliminating page overscroll bounce app-wide (confirmed: bounce
+specifically, not disabling scroll on genuinely-tall content like the scan wizard's
+correction list); (4) a bug where dragging to mark cells overwrites already-marked cells it
+crosses over, instead of only painting blank ones; and (5) making "Remove bad marks" count
+as hint usage in stats, same as an actual hint. See `TODO.md`'s Current Objective for full
+detail on each.
 
-**Current objective**: the project owner flagged some further clean-up while testing the
-above but hasn't detailed it yet — check `TODO.md`'s Current Objective / wait for that
-follow-up before starting new work. Item 8 (arbitrary-photo puzzle generation) and item 9
-(Firestore shared library) remain deferred pending their own design pass.
+Item 8 (arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain
+deferred pending their own design pass.
