@@ -385,17 +385,27 @@ Completed Tasks
      chase blind. **If further precision tuning is wanted, the most useful thing the
      project owner can provide is the actual image file** (not just a chat screenshot) so
      the real pixel values can be tested against directly instead of approximated.
-  7. Also worth trying once the above is confirmed: a **blank (not-yet-started)**
-     screenshot of the same puzzle, if available — item 10's whole design (grid-line
-     detection, then deriving a unique solution from clues via `scanPuzzle.js`) was built
-     around a blank puzzle, not a mid-solve state with filled/crossed cells: those aren't
-     just visual noise for grid-line detection (this pass's problem) but are literally
-     absent from what the scan pipeline records afterward (only the *clues* get scanned,
-     never current fill state) — is mid-solve scanning ("continue playing where I left off
-     on paper/another app") an actual use case worth designing for, or was this screenshot
-     just what was on hand for a first test with the puzzle already blank being the real
-     common case? Worth confirming before investing further in mid-solve-specific
-     robustness.
+  7. **Confirmed with the project owner: mid-solve scanning is a real use case, not just
+     what was on hand for a first test.** This was a real puzzle they'd started elsewhere,
+     hit something that seemed off on, and used the scan feature against as a genuine
+     attempt to get help — not a synthetic/incidental test image. This matters because
+     item 10's pipeline currently only scans *clues*, never captures current fill state
+     (`scanPuzzle.js`'s `buildScannedPuzzle` derives a fresh solution from clues alone via
+     `fullSolve.js`) — so today, scanning a mid-solve puzzle successfully would still hand
+     back a **blank** board with the right clues, silently discarding whatever progress was
+     already made. Worth deciding deliberately (not by default) whether that's acceptable
+     for now (get unstuck on a stuck puzzle, restart marking it) or whether capturing
+     current fill state (green/X'd cells, not just clue text) belongs in scope too — that's
+     a materially bigger addition (color-aware cell-state detection per cell, not just
+     clue-strip OCR) and should get its own design pass rather than being absorbed
+     silently into this bug-fix round.
+  8. **Best next step for further precision on the detection bugs above: the actual image
+     file**, not another chat screenshot — this round's fixes were verified against
+     synthetic mockups built to *approximate* the reported failure (no readable file was
+     available), which is good enough to confirm root causes but not to tune exact
+     thresholds with confidence. If the project owner can save the screenshot as a file
+     (anywhere on disk, then share the path), a follow-up pass could test against the real
+     bytes directly instead of a guessed re-creation.
 
 Next Steps (Do Not Start Yet)
 
