@@ -11,6 +11,7 @@ import {
   sliceVertical,
   findGridCandidates,
   detectBestGrid,
+  adaptiveBinarize,
 } from '../src/gridDetect.js';
 
 // ---- test helpers for the full-image detection tests below -----------------------------
@@ -127,6 +128,27 @@ describe('computeClueBands', () => {
   });
 });
 
+describe('adaptiveBinarize', () => {
+  test('marks a locally-faint edge dark even when the whole image is dominated by a much darker region', () => {
+    const width = 40, height = 40;
+    const gray = blankImage(width, height, 35); // dark background dominates the image
+    for (let y = 5; y < 25; y++) {
+      for (let x = 5; x < 25; x++) gray[y * width + x] = 250; // white panel
+    }
+    for (let y = 10; y < 20; y++) gray[y * width + 15] = 190; // medium-gray "line" inside the panel
+
+    const dark = adaptiveBinarize(gray, width, height, { tileSize: 10 });
+    assertEqual(dark[15 * width + 15], 1, 'the medium-gray line should register as dark within its own local tile');
+  });
+
+  test('leaves a uniform tile alone rather than manufacturing speckle', () => {
+    const width = 20, height = 20;
+    const gray = blankImage(width, height, 35); // perfectly uniform -- no real edges anywhere
+    const dark = adaptiveBinarize(gray, width, height, { tileSize: 10 });
+    assert(dark.every((v) => v === 0), 'a uniform region has no edges, so nothing should be marked dark');
+  });
+});
+
 describe('findGridCandidates / detectBestGrid', () => {
   test('finds an evenly-subdivided grid drawn on a blank image', () => {
     const width = 200, height = 150;
@@ -173,6 +195,32 @@ describe('findGridCandidates / detectBestGrid', () => {
     assert(best, 'expected a confident candidate');
     assertEqual(best.rows, 5);
     assertEqual(best.cols, 5);
+  });
+
+  test('finds a grid embedded in much darker surrounding UI (real screenshot failure)', () => {
+    // Reproduces a real failure reported against an actual app screenshot: a dark navy app
+    // background surrounding a white puzzle panel, with grid lines that are a medium gray
+    // (legible against the white panel, but nowhere near as dark as the navy background). A
+    // single whole-image Otsu threshold ends up splitting "navy" from "everything else" —
+    // the medium-gray lines never register as dark at all, and detection finds nothing (the
+    // literal failure reported: "wouldn't detect it"). Adaptive per-tile binarization fixes
+    // this by judging each tile against only its own local contrast.
+    const width = 400, height = 300;
+    const gray = blankImage(width, height, 35); // dark navy background, fills the whole image
+    // A generous margin (wider than one binarization tile) between the grid's own border and
+    // the panel's edge, so the tiles right at the grid's outer lines see only the panel/line
+    // contrast, not the panel/background transition too -- matching a real screenshot, which
+    // has plenty of clue-number margin around the grid before hitting the app's background.
+    const panel = { left: 40, top: 30, right: 360, bottom: 270 };
+    for (let y = panel.top; y <= panel.bottom; y++) {
+      for (let x = panel.left; x <= panel.right; x++) gray[y * width + x] = 250; // white panel
+    }
+    drawGrid(gray, width, { left: 110, top: 80, right: 290, bottom: 220 }, 6, 6, 190); // medium-gray lines
+
+    const best = detectBestGrid(gray, width, height);
+    assert(best, 'expected a confident candidate even with a much darker surrounding background');
+    assertEqual(best.rows, 6);
+    assertEqual(best.cols, 6);
   });
 
   test('picks the real grid over a nearby plain rectangle when both are present', () => {

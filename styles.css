@@ -732,7 +732,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-height: 16rem;
+  max-height: 22rem;
   overflow-y: auto;
 }
 
@@ -756,7 +756,13 @@ body {
 .scan-clue-row__thumb {
   grid-area: thumb;
   max-width: 100%;
-  max-height: 2.4rem;
+  /* Was a flat 2.4rem, sized for a short strip with a couple of numbers. A large puzzle's
+     column-clue strips can stack a dozen+ numbers (see TODO.md — a real 25x25 screenshot
+     had column clues this tall), and forcing that into 2.4rem made the crop "too big [to
+     scroll past] and mostly not visible [once shrunk]" per the project owner's own report.
+     This cap is just a sanity ceiling so one extreme strip can't swallow the whole
+     scrollable list (.scan-clue-list) — most strips are nowhere near it. */
+  max-height: 11rem;
   width: auto;
   height: auto;
   justify-self: start;

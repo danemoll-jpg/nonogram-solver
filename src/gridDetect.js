@@ -108,14 +108,36 @@ export function countDarkRuns(profile, start, end, threshold, { minGap = 2 } = {
   return count;
 }
 
+// Estimates the darkness threshold below which a sample counts as "ink", as an alternative
+// to otsuThreshold for line-counting specifically. Otsu is fundamentally a two-class
+// splitter, which is exactly right for a plain photo (paper vs. ink) but breaks down against
+// a real app screenshot that renders its OWN chunking convention — this project's app does
+// the same thing (see CLAUDE.md/TODO.md's "5x5 grid chunking"): thin regular lines AND much
+// darker reinforced lines every 5th row/col, i.e. three populations (near-white background,
+// faint lines, heavy lines), not two. With three unevenly-sized populations, Otsu's optimal
+// single cut can land between the wrong pair — e.g. isolating just the heavy lines from
+// "everything else, including the fainter real lines" — undercounting badly (confirmed
+// against a live browser reproduction: a mocked-up screenshot with this exact three-tier
+// line style only counted the heavy reinforcement lines, ~4 rows instead of 20). This
+// instead estimates the background/paper tone as a high percentile of the sample (robust to
+// a minority of darker ink pixels, whatever tier they're in) and treats anything a fixed
+// margin darker than that as ink — no assumption that the ink itself forms one tidy cluster.
+function inkThreshold(values, { backgroundPercentile = 0.85, margin = 20 } = {}) {
+  if (values.length === 0) return 127;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * backgroundPercentile));
+  return sorted[idx] - margin;
+}
+
 // Suggests how many grid lines (not cells — cells = lines - 1) are present along one axis
-// of a rectangle, thresholding via Otsu on that rectangle's own slice of the profile so it
-// adapts to the photo's actual lighting rather than a fixed brightness cutoff. This is a
-// suggestion the scan wizard pre-fills for the user to confirm or correct, never applied
-// blind — a noisy photo can over/under-count.
+// of a rectangle, thresholding via inkThreshold on that rectangle's own slice of the profile
+// so it adapts to the photo's actual lighting (and, per inkThreshold's own comment, to more
+// than one line-darkness tier) rather than a fixed brightness cutoff. This is a suggestion
+// the scan wizard pre-fills for the user to confirm or correct, never applied blind — a
+// noisy photo can over/under-count.
 export function countGridLines(profile, start, end) {
   const slice = profile.slice(start, end);
-  const threshold = otsuThreshold(slice);
+  const threshold = inkThreshold(slice);
   return countDarkRuns(profile, start, end, threshold);
 }
 
@@ -226,14 +248,17 @@ export function sliceHorizontal(rect, n) {
 // grid line usually spans only part of the image's width (the grid itself), not edge to
 // edge, so averaging the full row would dilute a real line's darkness with unrelated light
 // background on either side — exactly the failure mode this function avoids by tracking
-// each dark run's own extent instead.
-function horizontalSegments(gray, width, height, threshold, minLen) {
+// each dark run's own extent instead. Takes a pre-computed binary dark mask (see
+// adaptiveBinarize below), not a raw grayscale array + single threshold — a screenshot's
+// surrounding app chrome can be far darker than the puzzle's own faint grid lines, and one
+// global threshold for the whole image would never register those lines as dark at all.
+function horizontalSegments(darkMask, width, height, minLen) {
   const segs = [];
   for (let y = 0; y < height; y++) {
     const base = y * width;
     let runStart = -1;
     for (let x = 0; x <= width; x++) {
-      const dark = x < width && gray[base + x] <= threshold;
+      const dark = x < width && darkMask[base + x] === 1;
       if (dark && runStart === -1) {
         runStart = x;
       } else if (!dark && runStart !== -1) {
@@ -246,12 +271,12 @@ function horizontalSegments(gray, width, height, threshold, minLen) {
 }
 
 // Mirror of horizontalSegments along the vertical axis, for vertical grid lines.
-function verticalSegments(gray, width, height, threshold, minLen) {
+function verticalSegments(darkMask, width, height, minLen) {
   const segs = [];
   for (let x = 0; x < width; x++) {
     let runStart = -1;
     for (let y = 0; y <= height; y++) {
-      const dark = y < height && gray[y * width + x] <= threshold;
+      const dark = y < height && darkMask[y * width + x] === 1;
       if (dark && runStart === -1) {
         runStart = y;
       } else if (!dark && runStart !== -1) {
@@ -261,6 +286,55 @@ function verticalSegments(gray, width, height, threshold, minLen) {
     }
   }
   return segs;
+}
+
+// Binarizes the WHOLE image ink-vs-background per small tile rather than with one global
+// threshold — the actual fix for a real failure hit against a live screenshot (see
+// gridDetect.test.js's "finds a grid embedded in much darker surrounding UI"): a
+// screenshot's app chrome (e.g. a dark navy background around a white puzzle panel) can be
+// far darker than the puzzle's own comparatively faint grid lines, so a single whole-image
+// threshold ends up splitting "dark navy" from "everything else" and never registers the
+// grid lines as dark at all. Thresholding each tile against only its own local content
+// instead means a tile that straddles the white grid panel and its lines is judged purely on
+// that contrast, regardless of how dark the rest of the image is elsewhere.
+//
+// Uses inkThreshold (background-percentile-relative), not otsuThreshold, per-tile — see
+// inkThreshold's own comment for why: a tile can itself contain more than one line-darkness
+// tier (this project's own app renders exactly that, thin lines plus heavier reinforced
+// lines every 5th row/col), which an Otsu split can misjudge even at tile granularity. A
+// tile with too little internal range for anything to clear inkThreshold's margin is safely
+// left as "not dark" — the same margin check that keeps a uniform swath of background (or a
+// solid-filled puzzle cell) from turning into meaningless speckle, with no separate
+// uniform-tile special case needed.
+export function adaptiveBinarize(gray, width, height, options = {}) {
+  const { tileSize = 32, margin = 20 } = options;
+  const dark = new Uint8Array(width * height);
+  for (let ty = 0; ty < height; ty += tileSize) {
+    const tyEnd = Math.min(height, ty + tileSize);
+    for (let tx = 0; tx < width; tx += tileSize) {
+      const txEnd = Math.min(width, tx + tileSize);
+      let min = Infinity;
+      let max = -Infinity;
+      const values = [];
+      for (let y = ty; y < tyEnd; y++) {
+        for (let x = tx; x < txEnd; x++) {
+          const v = gray[y * width + x];
+          values.push(v);
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+      }
+      if (max - min < margin) continue; // nothing in this tile could clear the margin below
+      const threshold = inkThreshold(values, { margin });
+      for (let y = ty; y < tyEnd; y++) {
+        for (let x = tx; x < txEnd; x++) {
+          const i = y * width + x;
+          if (gray[i] <= threshold) dark[i] = 1;
+        }
+      }
+    }
+  }
+  return dark;
 }
 
 // A printed line a few pixels thick produces one raw segment per row (or column) it
@@ -365,9 +439,23 @@ function gapRegularity(positions) {
 // slack here is fine since it's comparing two independently-derived estimates of the same
 // edges rather than deciding cluster membership.
 export function findGridCandidates(gray, width, height, options = {}) {
-  const { minLineLenRatio = 0.15, minLines = 4, minLineOverlap = 0.75, minBoxOverlap = 0.5 } = options;
+  const {
+    minLineLenRatio = 0.15,
+    minLines = 4,
+    minLineOverlap = 0.75,
+    minBoxOverlap = 0.5,
+    tileSize,
+    margin,
+  } = options;
 
-  const threshold = otsuThreshold(gray);
+  // Adaptive (per-tile) binarization, not one global threshold — see adaptiveBinarize's own
+  // comment for the real screenshot failure this fixes (a dark app background swamping the
+  // puzzle's own fainter grid lines under a single whole-image threshold).
+  const binarizeOptions = {};
+  if (tileSize !== undefined) binarizeOptions.tileSize = tileSize;
+  if (margin !== undefined) binarizeOptions.margin = margin;
+  const darkMask = adaptiveBinarize(gray, width, height, binarizeOptions);
+
   // Both floors are the same fraction of the SHORTER image dimension, not "this axis's own
   // dimension" — a nonogram grid is roughly square, but the photo/screenshot it's embedded
   // in usually isn't (a tall phone screenshot, say). Using each axis's own full extent as
@@ -376,11 +464,9 @@ export function findGridCandidates(gray, width, height, options = {}) {
   // candidates — caught by this file's own tests (see gridDetect.test.js's "small grid
   // inside a much taller frame" case).
   const minLen = Math.max(1, Math.round(Math.min(width, height) * minLineLenRatio));
-  const minLenH = minLen;
-  const minLenV = minLen;
 
-  const hBands = mergeSegmentBands(horizontalSegments(gray, width, height, threshold, minLenH), 'y', 'xStart', 'xEnd');
-  const vBands = mergeSegmentBands(verticalSegments(gray, width, height, threshold, minLenV), 'x', 'yStart', 'yEnd');
+  const hBands = mergeSegmentBands(horizontalSegments(darkMask, width, height, minLen), 'y', 'xStart', 'xEnd');
+  const vBands = mergeSegmentBands(verticalSegments(darkMask, width, height, minLen), 'x', 'yStart', 'yEnd');
 
   const hClusters = clusterLinesBySpan(hBands, 'xStart', 'xEnd', minLineOverlap).filter((c) => c.lines.length >= minLines);
   const vClusters = clusterLinesBySpan(vBands, 'yStart', 'yEnd', minLineOverlap).filter((c) => c.lines.length >= minLines);

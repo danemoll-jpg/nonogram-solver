@@ -304,11 +304,98 @@ Completed Tasks
   grid" click that itself depended on state that a manual drag alone didn't fully set up
   right — the redesign removes that split entirely rather than re-patching it.
 
-Current Objective (Focus Area)
-
-* **Awaiting the project owner's real-screenshot verification of the scan-wizard
-  redesign above** (see its item 5) before considering this bug closed. No other objective
-  queued — check back in once that's confirmed, or with whatever tuning it points to.
+* **Real-screenshot verification round 1: two deeper detection bugs found and fixed,
+  one real limitation remains (row/col auto-count still needs manual correction on this
+  app's screenshots).** The project owner tried the redesign above against an actual
+  screenshot from their target app (dark navy background, colorful clue-number chips
+  directly on that background, a 25x25 grid with thin per-cell lines reinforced by darker
+  lines every 5th row/col — this project's own app uses that same "every 5" convention).
+  Result: auto-detection found nothing at all, and manually dragging a box only counted
+  5x9 instead of the true 25x25 (confirmable/correctable, but a bad starting suggestion);
+  separately, the correction-step thumbnails for this puzzle's tall multi-number column
+  clues were "too big and mostly not visible."
+  1. **Root cause 1 (why auto-detection found nothing): a single global threshold gets
+     swamped by a large dark background.** Confirmed directly: fed a synthetic
+     navy-background/white-panel/medium-gray-line image through `otsuThreshold` and the
+     global threshold came back at 35 — the line color (190) was nowhere near dark enough
+     to register relative to a whole-image split dominated by the navy background. **Fix:**
+     `gridDetect.js`'s new `adaptiveBinarize` bins the image into small tiles and
+     thresholds each tile against only its own local content, so a tile straddling the
+     white grid panel judges the grid's lines on that contrast alone, regardless of how
+     dark the rest of the image is. `findGridCandidates` now builds its dark-pixel mask
+     from this instead of one global `otsuThreshold` call. New tests: `adaptiveBinarize`
+     directly (marks a locally-faint edge dark despite a much-darker dominant region;
+     leaves a truly uniform tile alone rather than manufacturing speckle), plus a
+     `detectBestGrid` regression test reproducing the exact navy-background/white-panel
+     scenario.
+  2. **Root cause 2 (why the row/col count undercounted so badly, in *both* the old
+     manual-fallback path and the new auto path): Otsu is a two-class splitter, but this
+     app's screenshots render (at least) three line-darkness tiers** — near-white
+     background, thin regular lines, and much darker reinforced lines every 5th row/col
+     (this project's own app does the same "5x5 chunking" per the Completed Tasks above).
+     With three unevenly-sized populations, Otsu's single optimal cut can land between the
+     wrong pair — e.g. isolating just the heavy reinforcement lines from "everything else,
+     including the thinner real lines" — undercounting badly. Confirmed directly against a
+     live mockup built to reproduce this exact three-tier style: the pre-existing
+     `countGridLines` path (unchanged by the redesign, called by "Looks good" regardless of
+     auto or manual rect) only found the heavy lines. **Fix:** new `inkThreshold` helper
+     (not exported outside the module) estimates the background tone as a high percentile
+     of the sample (robust to a minority of darker ink pixels, in whatever tier they're in)
+     and treats anything a fixed margin darker than that as ink, rather than requiring the
+     ink to form one tidy Otsu cluster. Swapped into both `countGridLines` (the row/col
+     count suggestion, both paths) and `adaptiveBinarize` (the full-image rectangle search).
+     `otsuThreshold` itself is untouched and still exported/used as-is for `scanUI.js`'s OCR
+     strip binarization, a genuinely simpler two-class (ink digit vs. paper) problem where
+     it's still the right tool.
+  3. **Verified via a live-browser mockup built specifically to reproduce the reported
+     failure** (dark navy background, colorful clue-number text on that background, a
+     20x20 grid with thin gray lines reinforced every 5th line, plus scattered
+     filled/X-marked cells to mimic a mid-solve screenshot): before these two fixes,
+     auto-detection found nothing (fell back to manual-only) and the manual path's line
+     count came back as low as 4-7 lines per axis; after both fixes, auto-detection finds
+     the grid immediately with a correctly-placed rectangle (confirmed by screenshot — gold
+     overlay bounds exactly the white grid area, ignoring the navy background, the moon
+     icon, and the clue-number chips) and the row/col suggestion improved to 12/12 —
+     **much closer, but still short of the true 20/20 in this mockup**, presumably because
+     some faint lines near the scattered filled/X-marked cells still don't clear the ink
+     margin. This remaining gap is exactly what the always-editable rows/cols fields exist
+     for (never applied blind, per this file's own long-standing design note) — but it
+     means the auto-suggested count on a busy, mid-solve, three-tier-line screenshot like
+     this one will likely still need manual correction. **Not a regression**: the old
+     pre-redesign code had this same undercounting weakness on this style of screenshot
+     (confirmed above) — it's just newly visible because detection now gets far enough to
+     produce a rect and a (still-imperfect) count at all, instead of finding nothing.
+  4. **`styles.css`: `.scan-clue-row__thumb`'s fixed `2.4rem` max-height raised to
+     `11rem`** (and `.scan-clue-list`'s scrollable max-height from 16rem to 22rem) — a
+     25x25 puzzle's column clues can stack a dozen+ numbers, illegible when forced into a
+     height sized for a couple of numbers. This was likely the dominant cause of the
+     "too big and mostly not visible" complaint on its own (independent of the row/col
+     miscount above, though a wrong count also produces strips that don't correspond to
+     real single lines, compounding it).
+  5. **`npm test`: 464 passed, 0 failed** (8 new tests across `adaptiveBinarize` and
+     `findGridCandidates`/`detectBestGrid`, all built from first-principles reproductions
+     of the confirmed root causes above, not blind tuning).
+  6. **Still open — everything above was verified against synthetic mockups built to
+     reproduce the *described* failure, not the literal real screenshot file** (only a
+     rendered preview was available in chat, not a file this environment could read
+     pixel-exact). The project owner should re-try the actual screenshot: auto-detection
+     finding the grid at all would confirm root-cause-1's fix generalizes; if the row/col
+     count is still noticeably off, that's the known remaining gap in item 2 above (correct
+     it manually — the fields are designed for exactly this) rather than a new bug to
+     chase blind. **If further precision tuning is wanted, the most useful thing the
+     project owner can provide is the actual image file** (not just a chat screenshot) so
+     the real pixel values can be tested against directly instead of approximated.
+  7. Also worth trying once the above is confirmed: a **blank (not-yet-started)**
+     screenshot of the same puzzle, if available — item 10's whole design (grid-line
+     detection, then deriving a unique solution from clues via `scanPuzzle.js`) was built
+     around a blank puzzle, not a mid-solve state with filled/crossed cells: those aren't
+     just visual noise for grid-line detection (this pass's problem) but are literally
+     absent from what the scan pipeline records afterward (only the *clues* get scanned,
+     never current fill state) — is mid-solve scanning ("continue playing where I left off
+     on paper/another app") an actual use case worth designing for, or was this screenshot
+     just what was on hand for a first test with the puzzle already blank being the real
+     common case? Worth confirming before investing further in mid-solve-specific
+     robustness.
 
 Next Steps (Do Not Start Yet)
 
