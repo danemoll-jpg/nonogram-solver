@@ -252,6 +252,77 @@ export function snapRectToBorder(gray, width, height, rect, { searchPx = 15 } = 
   };
 }
 
+// Finds the true INNER edge of the border stroke a rough edge position sits on or near —
+// i.e. the boundary between the border's own ink and the grid's white/background cell
+// interior — by scanning from `pos` in the given `direction` (+1 = toward increasing
+// index, e.g. rightward for a left edge or downward for a top edge; -1 = the mirror image
+// for a right/bottom edge) and returning the last position that's still <= threshold before
+// the scan runs out of room. Deliberately scans FROM the rough position INWARD only, not a
+// symmetric window centered on it: the outward side of a left/top edge in this feature's real
+// test image is contaminated by the row/column clue margin's own dark content (numbers/chips
+// sitting immediately outside the grid, confirmed directly — see centerRectOnBorders' own
+// comment), which is indistinguishable from border ink in a same-axis brightness profile. The
+// inward side, by contrast, is guaranteed to be genuine grid interior once the border ends,
+// so it's the only side that reliably answers "where does the border actually stop".
+function innerEdgeOfBorder(profile, pos, threshold, direction, maxWalk) {
+  const p = Math.max(0, Math.min(profile.length - 1, Math.round(pos)));
+  let lastDark = null;
+  for (let step = 0; step <= maxWalk; step++) {
+    const idx = p + direction * step;
+    if (idx < 0 || idx >= profile.length) break;
+    if (profile[idx] <= threshold) lastDark = idx;
+  }
+  if (lastDark === null) return pos; // no dark border found within range -- leave the rough position alone
+  return lastDark + direction * 0.5; // the half-pixel boundary just past the last dark sample
+}
+
+// Re-anchors each of snapRectToBorder's already-snapped edges on the true INNER edge of the
+// border stroke it sits on (see innerEdgeOfBorder), rather than leaving it wherever
+// snapEdge's single-darkest-pixel search happened to land. Exists specifically for the
+// fill-state detection objective's cell-slicing step (src/scanUI.js), which even-subdivides
+// this rect into individual cells (gridDetect.js's sliceGridCells) — a border noticeably
+// THICKER than the grid's own internal lines (confirmed against this feature's real test
+// screenshot: a ~14px outer border vs. ~1-2px internal lines, itself sitting flush against a
+// dark row-clue margin with no white gap between them) makes snapEdge's darkest-single-pixel
+// pick land anywhere within that combined dark span, up to several px outside where the grid's
+// actual cell area begins — which then offsets every subsequently even-subdivided cell
+// boundary by that same extra amount, and real internal grid lines end up running through the
+// middle of what should have been blank cell interiors (confirmed directly: a clearly blank
+// cell's crop showed a real vertical grid line crossing it, traced back to exactly this
+// offset). No change needed to snapRectToBorder itself (used as-is by the existing,
+// already-tuned OCR clue-band flow, where a few px of margin slop doesn't matter) or to the
+// even-subdivision approach this file already prefers over hunting for every individual
+// internal line (see the file-level comment) — this only fixes where subdivision STARTS.
+export function centerRectOnBorders(gray, width, height, rect, { searchPx = 15, maxBorderWidth = 20 } = {}) {
+  const snapped = snapRectToBorder(gray, width, height, rect, { searchPx });
+  const xStart = Math.max(0, Math.round(rect.left));
+  const xEnd = Math.min(width, Math.round(rect.right));
+  const yStart = Math.max(0, Math.round(rect.top));
+  const yEnd = Math.min(height, Math.round(rect.bottom));
+  const rp = rowProfile(gray, width, height, { xStart, xEnd });
+  const cp = colProfile(gray, width, height, { yStart, yEnd });
+
+  // Threshold from a window that only ever extends INWARD from the rough edge position (see
+  // innerEdgeOfBorder's own comment for why outward is unsafe on the left/top side) — mostly
+  // white/background interior plus the border's own tail, a clean bimodal split for
+  // inkThreshold's background-percentile method regardless of which edge this is.
+  function inwardThreshold(profile, edgePos, direction) {
+    const span = maxBorderWidth * 3;
+    const a = direction > 0 ? edgePos : edgePos - span;
+    const b = direction > 0 ? edgePos + span : edgePos;
+    const lo = Math.max(0, Math.round(a));
+    const hi = Math.min(profile.length, Math.round(b));
+    return inkThreshold(profile.slice(lo, hi));
+  }
+
+  return {
+    left: innerEdgeOfBorder(cp, snapped.left, inwardThreshold(cp, snapped.left, 1), 1, maxBorderWidth),
+    top: innerEdgeOfBorder(rp, snapped.top, inwardThreshold(rp, snapped.top, 1), 1, maxBorderWidth),
+    right: innerEdgeOfBorder(cp, snapped.right, inwardThreshold(cp, snapped.right, -1), -1, maxBorderWidth),
+    bottom: innerEdgeOfBorder(rp, snapped.bottom, inwardThreshold(rp, snapped.bottom, -1), -1, maxBorderWidth),
+  };
+}
+
 // ---- clue-band geometry ---------------------------------------------------
 
 // Given the full puzzle crop (grid + both clue margins) and the detected cell-grid
@@ -292,6 +363,25 @@ export function sliceHorizontal(rect, n) {
     top: rect.top + i * h,
     bottom: rect.top + (i + 1) * h,
   }));
+}
+
+// Slices the grid rect itself into a rows x cols grid of cell rectangles — the fill-state
+// detection objective's equivalent of sliceHorizontal/sliceVertical above, which slice the
+// CLUE bands. Same even-subdivision tradeoff as the rest of this file (see the file-level
+// comment): one cell size computed from the confirmed grid rect and row/col count, rather
+// than hunting for each individual internal line, which is exactly as forgiving here as it
+// is for clue-band slicing — the user has already confirmed rows/cols by this point.
+export function sliceGridCells(gridRect, rows, cols) {
+  const w = rectWidth(gridRect) / cols;
+  const h = rectHeight(gridRect) / rows;
+  return Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => ({
+      left: gridRect.left + c * w,
+      right: gridRect.left + (c + 1) * w,
+      top: gridRect.top + r * h,
+      bottom: gridRect.top + (r + 1) * h,
+    }))
+  );
 }
 
 // ---- full-image auto grid detection ---------------------------------------

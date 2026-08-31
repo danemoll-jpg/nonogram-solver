@@ -85,6 +85,7 @@ const els = {
   scanStepGrid: document.getElementById('scan-step-grid'),
   scanStepOcr: document.getElementById('scan-step-ocr'),
   scanStepCorrect: document.getElementById('scan-step-correct'),
+  scanStepFillstate: document.getElementById('scan-step-fillstate'),
   scanStepDone: document.getElementById('scan-step-done'),
   scanFileInput: document.getElementById('scan-file-input'),
   scanCanvas: document.getElementById('scan-canvas'),
@@ -99,6 +100,8 @@ const els = {
   scanColClueList: document.getElementById('scan-col-clue-list'),
   scanBuildError: document.getElementById('scan-build-error'),
   scanBtnBuild: document.getElementById('scan-btn-build'),
+  scanFillstateGrid: document.getElementById('scan-fillstate-grid'),
+  scanBtnConfirmState: document.getElementById('scan-btn-confirm-state'),
   scanBtnPlay: document.getElementById('scan-btn-play'),
   scanBtnCancel: document.getElementById('scan-btn-cancel'),
 };
@@ -156,10 +159,18 @@ function loadPuzzle(id) {
 // model.js's Board class comment and mistakes.js's snapshot-origin mistake-checking) — the
 // "no move history" and "never counts toward stats" behavior both fall out of that one
 // puzzle.source check (recordCompletion skips it separately — see src/stats.js).
+//
+// `puzzle.initialMarks`, when present (a scanned puzzle whose fill/X state was detected and
+// confirmed — see src/scanUI.js's fill-state review step and TODO.md's Current Objective),
+// seeds the board from that snapshot via Board.fromGrid instead of starting blank — this is
+// the whole point of capturing fill state at all: it lets a mid-solve scan land the player
+// straight back where their photo already was, with the existing mistake-checking tools
+// (autoCheckMark/checkForMistakes) immediately able to point at whatever's wrong, rather than
+// silently discarding real progress the way scanning used to (see TODO.md's history).
 function startPuzzle(p) {
   puzzle = p;
   els.puzzleSelect.value = puzzle.id;
-  board = new Board(puzzle.rows, puzzle.cols);
+  board = puzzle.initialMarks ? Board.fromGrid(puzzle.initialMarks) : new Board(puzzle.rows, puzzle.cols);
   board.hasHistory = puzzle.source !== 'scan';
   highlightedCells = [];
   autoXCells = new Set();

@@ -21,15 +21,19 @@ import {
   rowProfile,
   colProfile,
   snapRectToBorder,
+  centerRectOnBorders,
   countGridLines,
   computeClueBands,
   sliceHorizontal,
   sliceVertical,
+  sliceGridCells,
   detectBestGrid,
 } from './gridDetect.js';
 import { parseClueText, buildScannedPuzzle } from './scanPuzzle.js';
 import { recognizeClueStrip, terminateOcr } from './ocr.js';
 import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines } from './ocrSegment.js';
+import { classifyGridCells } from './cellStateDetect.js';
+import { FILLED, EMPTY, UNKNOWN } from './model.js';
 
 // Longest side, in pixels, for the canvas used for both on-screen dragging and grid-line
 // analysis. Full sensor-resolution photos are unnecessary (and slow) for line detection;
@@ -78,11 +82,24 @@ export function initScanWizard({ els, onPuzzleReady }) {
     rowClueInputs: [],
     colClueInputs: [],
     pendingPuzzle: null,
+    // Detected fill/X state (Current Objective — see TODO.md), one FILLED/EMPTY/UNKNOWN per
+    // cell, rows x cols. Computed once alongside the OCR pass (see scanBtnScanClues) since
+    // both need the same confirmed grid rect; mutated in place by the fill-state review
+    // step's click-to-correct handler (see renderFillStateGrid) before being handed off as
+    // the puzzle's initialMarks.
+    fillMarks: null,
     scanCount: 0, // used to mint a unique id per scanned puzzle this session
   };
 
   function showStep(name) {
-    for (const el of [els.scanStepUpload, els.scanStepGrid, els.scanStepOcr, els.scanStepCorrect, els.scanStepDone]) {
+    for (const el of [
+      els.scanStepUpload,
+      els.scanStepGrid,
+      els.scanStepOcr,
+      els.scanStepCorrect,
+      els.scanStepFillstate,
+      els.scanStepDone,
+    ]) {
       el.classList.toggle('hidden', el.dataset.step !== name);
     }
   }
@@ -100,6 +117,7 @@ export function initScanWizard({ els, onPuzzleReady }) {
     state.rowClueInputs = [];
     state.colClueInputs = [];
     state.pendingPuzzle = null;
+    state.fillMarks = null;
     els.scanFileInput.value = '';
     els.scanGridHint.textContent = '';
     els.scanGridConfirm.classList.add('hidden');
@@ -107,6 +125,7 @@ export function initScanWizard({ els, onPuzzleReady }) {
     els.scanRowClueList.innerHTML = '';
     els.scanColClueList.innerHTML = '';
     els.scanBuildError.classList.add('hidden');
+    els.scanFillstateGrid.innerHTML = '';
     showStep('upload');
   }
 
@@ -364,6 +383,21 @@ export function initScanWizard({ els, onPuzzleReady }) {
     return gray;
   }
 
+  // A SMALL search radius on purpose (was 4% of the image's shorter dimension, e.g. ~32px on
+  // an 800px-wide analysis canvas) — confirmed against a real screenshot: this app draws each
+  // clue number on its own near-black background chip right next to the grid's top/left
+  // border, which is darker than the border itself. A generous search window reliably found
+  // those chips instead, growing the confirmed box up past the top row and left past the
+  // first column rather than the (already accurate — see TODO.md) auto-detected edge it
+  // started from. This radius only smooths over a few px of natural imprecision
+  // (auto-detection rounding, or a slightly-off manual drag/handle nudge); it's deliberately
+  // too small to ever jump a whole cell into unrelated content. Shared by both the grid-confirm
+  // handler below and detectFillState's centerRectOnBorders call, which needs the same
+  // protection for the same reason (confirmed directly — see that function's own comment).
+  function gridBorderSearchPx(width, height) {
+    return Math.max(2, Math.round(Math.min(width, height) * 0.01));
+  }
+
   // The one, always-available "proceed" action for the grid step — the fix for the bug this
   // redesign replaces (see the module-level comment). Works the same whether gridRect is
   // still exactly what auto-detection produced, or the user dragged/resized it: snaps it
@@ -373,16 +407,7 @@ export function initScanWizard({ els, onPuzzleReady }) {
     if (!state.gridRect) return;
     const { width, height } = state.analysisCanvas;
     const gray = analysisGrayscale();
-    // A SMALL search radius on purpose (was 4% of the image's shorter dimension, e.g. ~32px
-    // on an 800px-wide analysis canvas) — confirmed against a real screenshot: this app
-    // draws each clue number on its own near-black background chip right next to the grid's
-    // top/left border, which is darker than the border itself. A generous search window
-    // reliably found those chips instead, growing the confirmed box up past the top row and
-    // left past the first column rather than the (already accurate — see TODO.md)
-    // auto-detected edge it started from. This radius only smooths over a few px of natural
-    // imprecision (auto-detection rounding, or a slightly-off manual drag/handle nudge); it's
-    // deliberately too small to ever jump a whole cell into unrelated content.
-    const searchPx = Math.max(2, Math.round(Math.min(width, height) * 0.01));
+    const searchPx = gridBorderSearchPx(width, height);
     const snapped = snapRectToBorder(gray, width, height, state.gridRect, { searchPx });
     state.gridRect = snapped;
     redrawGridCanvas();
@@ -604,6 +629,86 @@ export function initScanWizard({ els, onPuzzleReady }) {
     return input;
   }
 
+  // ---- fill-state detection (Current Objective — see TODO.md) ----
+  //
+  // Classifies every confirmed grid cell's fill/X/blank state from the analysis canvas — see
+  // src/cellStateDetect.js for the actual per-cell classification. Runs on the ANALYSIS
+  // canvas (not the higher-resolution full canvas OCR strip crops use, see FULL_MAX_DIM):
+  // unlike OCR, this only needs to tell "a large block of non-background color" from "thin
+  // diagonal strokes" apart, which the analysis canvas's own resolution is already comfortably
+  // enough for — no need to pay for a second higher-res crop pass the way cropStripCanvas
+  // does for legibility-sensitive clue digits.
+  function detectFillState() {
+    const { width, height } = state.analysisCanvas;
+    const gray = analysisGrayscale();
+    // Re-centers the confirmed grid rect on the true INNER edge of its own border stroke
+    // before subdividing into cells — see gridDetect.js's centerRectOnBorders for why this
+    // matters here specifically, unlike the clue-band slicing below (computeClueBands),
+    // which only needs a rough margin and tolerates a few px of slop: a border noticeably
+    // thicker than the grid's own internal lines would otherwise offset every even-subdivided
+    // cell boundary, leaving real internal grid lines running through what should be blank
+    // cell interiors (confirmed directly against this feature's real test screenshot — see
+    // TODO.md). Same small searchPx as the grid-confirm handler below (gridBorderSearchPx) —
+    // centerRectOnBorders' own default is far too generous (confirmed directly: it snapped
+    // clean past the true border onto nearby clue-number text on a test image), for exactly
+    // the reason that handler's own comment documents.
+    const cellsRect = centerRectOnBorders(gray, width, height, state.gridRect, {
+      searchPx: gridBorderSearchPx(width, height),
+    });
+    const cellRects = sliceGridCells(cellsRect, state.rows, state.cols);
+    const cellData = cellRects.map((row) =>
+      row.map((r) => {
+        const cw = Math.max(1, Math.round(r.right - r.left));
+        const ch = Math.max(1, Math.round(r.bottom - r.top));
+        const { data } = state.analysisCtx.getImageData(Math.round(r.left), Math.round(r.top), cw, ch);
+        return { pixels: data, width: cw, height: ch };
+      })
+    );
+    const { states } = classifyGridCells(cellData);
+    state.fillMarks = states.map((row) => row.map((s) => s.state));
+  }
+
+  // Cycles a fill-state review cell's mark on click, the same UNKNOWN -> FILLED -> EMPTY ->
+  // UNKNOWN order a fresh cell goes through under normal play's fill mode (see app.js's
+  // targetStateFor) — not a new interaction pattern, just applied to a detected starting
+  // state instead of always starting from UNKNOWN.
+  function nextFillMark(current) {
+    if (current === UNKNOWN) return FILLED;
+    if (current === FILLED) return EMPTY;
+    return UNKNOWN;
+  }
+
+  // Renders state.fillMarks as a compact grid of clickable cells reusing the real play
+  // board's own .nono-cell/.filled/.empty visuals (styles.css) for consistency — see
+  // TODO.md's design sketch: "the correction UX should match how a player already marks
+  // cells during normal play, not introduce a new interaction pattern." A click mutates
+  // state.fillMarks directly and re-renders just that one cell's classes, not the whole grid.
+  function renderFillStateGrid() {
+    const container = els.scanFillstateGrid;
+    container.innerHTML = '';
+    container.style.setProperty('--scan-fillstate-cols', String(state.cols));
+    for (let r = 0; r < state.rows; r++) {
+      for (let c = 0; c < state.cols; c++) {
+        const cell = document.createElement('div');
+        cell.className = 'scan-fillstate-cell';
+        cell.dataset.row = String(r);
+        cell.dataset.col = String(c);
+        applyFillMarkClass(cell, state.fillMarks[r][c]);
+        cell.addEventListener('click', () => {
+          const next = nextFillMark(state.fillMarks[r][c]);
+          state.fillMarks[r][c] = next;
+          applyFillMarkClass(cell, next);
+        });
+        container.appendChild(cell);
+      }
+    }
+  }
+
+  function applyFillMarkClass(cell, markState) {
+    cell.classList.toggle('filled', markState === FILLED);
+    cell.classList.toggle('empty', markState === EMPTY);
+  }
+
   els.scanBtnScanClues.addEventListener('click', async () => {
     const rows = parseInt(els.scanRowsInput.value, 10);
     const cols = parseInt(els.scanColsInput.value, 10);
@@ -613,6 +718,7 @@ export function initScanWizard({ els, onPuzzleReady }) {
     }
     state.rows = rows;
     state.cols = cols;
+    detectFillState();
     showStep('ocr');
     els.scanOcrStatus.textContent = 'Reading clue numbers…';
 
@@ -673,6 +779,19 @@ export function initScanWizard({ els, onPuzzleReady }) {
     }
     els.scanBuildError.classList.add('hidden');
     state.pendingPuzzle = result.puzzle;
+    renderFillStateGrid();
+    showStep('fillstate');
+  });
+
+  // ---- step 5: confirm/correct detected fill state ----
+
+  els.scanBtnConfirmState.addEventListener('click', () => {
+    if (state.pendingPuzzle) {
+      // A plain deep-enough copy (fillMarks is only ever mutated by replacing a string at
+      // [r][c], never in place beyond that) — pendingPuzzle carries this forward as
+      // initialMarks for Board.fromGrid (see app.js's startPuzzle) once the puzzle is played.
+      state.pendingPuzzle = { ...state.pendingPuzzle, initialMarks: state.fillMarks.map((row) => row.slice()) };
+    }
     showStep('done');
   });
 

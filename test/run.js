@@ -7,5 +7,6 @@ import './mistakes.test.js';
 import './gridDetect.test.js';
 import './scanPuzzle.test.js';
 import './ocrSegment.test.js';
+import './cellStateDetect.test.js';
 
 await runAll();

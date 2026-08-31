@@ -787,6 +787,47 @@ body {
   margin: 0.75rem 0 0;
 }
 
+/* Fill-state review step (Current Objective — see TODO.md): a compact grid of clickable
+   cells previewing the detected fill/X state, reusing the real play board's own
+   .nono-cell-style filled/empty visuals (below) at a smaller fixed size — this grid can be as
+   large as the puzzle itself (e.g. 25x25), so it needs to stay compact and scrollable rather
+   than sized off --cell-size like the real board. --scan-fillstate-cols is set inline by
+   scanUI.js's renderFillStateGrid, from the confirmed column count. */
+.scan-fillstate-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--scan-fillstate-cols, 10), 1.1rem);
+  gap: 1px;
+  max-height: 24rem;
+  overflow: auto;
+  background: rgba(230, 183, 63, 0.15);
+  border: 1px solid rgba(230, 183, 63, 0.3);
+  border-radius: 0.3rem;
+  padding: 1px;
+}
+
+.scan-fillstate-cell {
+  width: 1.1rem;
+  height: 1.1rem;
+  background: var(--cell-unknown);
+  cursor: pointer;
+  position: relative;
+}
+
+.scan-fillstate-cell.filled {
+  background: var(--gold);
+}
+
+.scan-fillstate-cell.empty::after {
+  content: '✕';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  color: rgba(242, 236, 221, 0.45);
+}
+
 #scan-modal .btn--ghost {
   margin-top: 1rem;
 }

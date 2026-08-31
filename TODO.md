@@ -140,57 +140,67 @@ Completed Tasks
      result: fully garbled merged output → mostly-correct clue text, remaining errors now
      ordinary single-digit OCR noise (exactly what the correction step's editable
      text-next-to-thumbnail design exists to catch), not systematic merging failures.
-  6. **Current status**: 478 tests passing (all real-data-driven, not blind threshold
-     tuning). Grid/line detection and clue OCR are considered solid against real-world
-     screenshots from the project owner's actual target app. **Known limitation, not yet
-     addressed**: `buildScannedPuzzle` derives a fresh blank-board solution from the
-     confirmed clues alone — it never captures which cells are already filled/X-marked in
-     the source screenshot, so scanning a mid-solve puzzle today hands back a **blank**
-     board with the right clues, silently discarding real progress. This is the subject of
-     the Current Objective below.
+  6. **Fill-state detection — built and verified against the real test screenshot,
+     completing item 10.** `buildScannedPuzzle` used to derive a fresh blank-board solution
+     from the confirmed clues alone, discarding whatever was already filled/X-marked in the
+     source screenshot — scanning a mid-solve puzzle now restores that state instead. New
+     pure module **`src/cellStateDetect.js`** (`estimateBackgroundColor` — a color MODE over
+     pooled cell-interior pixels, not a fixed palette, so it adapts to whatever fill/X colors
+     a given app/theme uses; `classifyCellPixels` — FILLED for a large block of non-background
+     ink, EMPTY for ink concentrated near BOTH diagonals AND spanning most of the cell on
+     both axes, UNKNOWN otherwise; the two-part diagonal test matters — diagonal-proximity
+     alone isn't enough, since a stray straight line through a cell's center is geometrically
+     close to a diagonal too without running corner-to-corner, confirmed by a real bug this
+     caught, see below). Returns `model.js`'s own FILLED/EMPTY/UNKNOWN states directly, no
+     separate vocabulary to translate later.
+     - **Real bug found and fixed via the real screenshot** (confirming CLAUDE.md's
+       "synthetic mockups miss real failure modes" pattern yet again): this screenshot's
+       outer grid border (~14px) is noticeably thicker than its internal lines (~1-2px).
+       `sliceGridCells`' even subdivision — anchored on `snapRectToBorder`'s snapped edge,
+       which picks the single DARKEST pixel near a rough edge — landed on the border's OUTER
+       edge rather than its middle, offsetting every cell boundary inward by the extra
+       thickness and leaving real internal grid lines crossing straight through what should
+       have been blank cell interiors (confirmed directly: blank cells read as false
+       X-marks). Fixed with new `gridDetect.js` export **`centerRectOnBorders`**
+       (`innerEdgeOfBorder` walks INWARD only from a rough edge — the outward side is
+       unreliable here since this app's clue-number margin sits flush against the border with
+       no white gap, confirmed directly — until the border's own ink ends, using a threshold
+       computed from a window straddling just that edge rather than the whole image or the
+       rect's own interior span, both of which were tried and shown wrong against real pixel
+       data). Used only for the fill-state cell-slicing step; `snapRectToBorder` itself is
+       untouched, so the already-tuned OCR clue-band flow is unaffected.
+     - Wizard gained a new step between clue-correction and done: a compact clickable grid
+       (`.scan-fillstate-grid`/`.scan-fillstate-cell` in `styles.css`, reusing the real play
+       board's own filled/X visuals) previewing detected state per cell, cycling
+       UNKNOWN→FILLED→EMPTY→UNKNOWN on click — the same order normal play's fill mode already
+       uses, not a new interaction pattern. Confirmed marks attach to the puzzle object as
+       `initialMarks`; `app.js`'s `startPuzzle` seeds the board via `Board.fromGrid` when
+       present instead of a blank `new Board()`, so `mistakes.js`'s existing snapshot-origin
+       checking (`hasHistory: false`) picks it up with no changes needed there — matched the
+       design sketch's prediction that this wouldn't need a data-model change.
+     - **Verified two ways**: (1) the classification pipeline directly against real crops
+       from the project owner's actual test screenshot (a temporary browser-side harness
+       driving the real `src/` modules against the real image, not synthetic pixel arrays —
+       matched the puzzle's true fill/X shape once the border-offset bug above was found and
+       fixed); (2) the full wizard flow end-to-end through the real UI (auto-detect → confirm
+       → fill-state review incl. a live click-to-correct → confirm → play), using a
+       synthetic photo for this pass only because it needed a *known* ground truth to
+       diff against and a *solvable* clue set — confirmed the restored board matches exactly,
+       including a manual correction made in the review step surviving into the final
+       playable board. 15 new unit tests (`test/cellStateDetect.test.js`), all real-data-
+       calibrated (background/fill/X colors taken from real measured pixels, not guessed).
+     - **Known limitation, documented, not yet hit in practice**: the background-color
+       estimate is a mode across ALL cells' interior pixels, which assumes blank cells are
+       the majority — true for the actual target use case (a mid-solve scan) but could drift
+       toward the fill color on an almost-entirely-filled puzzle. The wizard's click-to-correct
+       step is the safety net, same as it already is for OCR misreads.
 
 Current Objective (Focus Area)
 
-* **Fill-state detection: capture the puzzle's current fill/X state from the scanned
-  image, not just its clues.** Previously paused pending a design discussion with the
-  project owner — that discussion happened (see the design sketch preserved below, from
-  when this was on hold) and the project owner is now ready to move forward, so this is
-  greenlit. Confirmed this is the actual core use case, not a nice-to-have: the project
-  owner scans mid-solve specifically to get unstuck on a mistake they can feel but can't
-  find, and that only works once restored fill state can be run through the *existing*
-  mistake-checking tools (`autoCheckMark`/`checkForMistakes` in `mistakes.js`) to point at
-  exactly what's wrong.
-
-  **Design sketch already discussed (starting point, not a locked spec — revisit anything
-  that doesn't hold up once real detection work starts):**
-  1. **New per-cell classification step**, distinct from grid-line detection and clue OCR:
-     for each confirmed grid cell, classify filled / X-marked / still-blank. "Filled" is
-     comparatively easy (a large block of non-background color). "X-marked" is harder — a
-     mostly-background-colored cell with only two thin diagonal ink strokes, which won't
-     show up from a simple average-color check and needs an actual stroke/pattern
-     detection, in the same spirit as the digit-gap geometry work in `ocrSegment.js`.
-  2. **Don't hardcode a fill color.** This project owner's specific screenshot uses green
-     fill / gray X, but another app or theme could use anything. Classify each cell
-     relative to *that puzzle's own* detected background tone (already known from grid
-     detection), not a fixed palette — the same principle behind `inkThreshold` and
-     `adaptiveBinarize` in the grid-detection work above.
-  3. **Where it plugs in**: a new pure, unit-tested module (e.g. `src/cellStateDetect.js`,
-     tested against real cell crops, matching this project's established pattern), run once
-     the grid rect and row/col count are confirmed — cropping each cell the same way clue
-     strips are already cropped. A new wizard step: a visual grid preview of detected
-     fill/X state, click-to-correct rather than text boxes (the correction UX should match
-     how a player already marks cells during normal play, not introduce a new interaction
-     pattern).
-  4. **Board integration looks straightforward, not a data-model redesign**: `Board`'s
-     existing "no move history" mode for scanned puzzles already anticipates a board that
-     starts with pre-set marks rather than being built move-by-move — restoring detected
-     fill state should fit into that existing shape.
-  5. **Scope**: comparable in size to the Round 3 OCR-segmentation work above — a new
-     detection algorithm, a new wizard UI step, new tests, likely multiple real-screenshot
-     verification rounds given how the grid/OCR work above played out. Treat it the same
-     way: build against a first real-screenshot pass, expect to iterate against the actual
-     project owner's real images (synthetic mockups alone have repeatedly missed real
-     failure modes in this feature so far), not as a one-shot addition.
+* None right now — item 10 (scan-existing-puzzle, including fill-state detection) is
+  complete. Check with the project owner on what's next: item 8 (photo → puzzle generation)
+  and item 9 (Firestore shared library) are both still open and undesigned, see "Next Steps"
+  below.
 
 Next Steps (Do Not Start Yet)
 

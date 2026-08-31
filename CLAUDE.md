@@ -36,12 +36,12 @@
   tests (see `test/lineSolver.test.js`'s brute-force check) over hand-picked examples alone
   when correctness is subtle.
 - **Item 10 (scan-existing-puzzle) specifically: prefer testing against a real image file
-  over synthetic/guessed pixel data.** This feature's grid/line-detection and OCR code has
-  repeatedly had bugs that synthetic mockups missed but a real screenshot immediately
-  surfaced (a swamped global threshold, a three-tier line-darkness scheme, filled-cell
-  brightness drift, a scrollbar-like false positive, OCR digit-merging) — see `TODO.md`'s
-  Completed Tasks for the full history. This applies to any further work in this area,
-  including the current fill-state-detection objective.
+  over synthetic/guessed pixel data.** This feature's grid/line-detection, OCR, and
+  fill-state-detection code has repeatedly had bugs that synthetic mockups missed but a real
+  screenshot immediately surfaced (a swamped global threshold, a three-tier line-darkness
+  scheme, filled-cell brightness drift, a scrollbar-like false positive, OCR digit-merging, a
+  thick-border cell-boundary offset) — see `TODO.md`'s Completed Tasks for the full history.
+  This applies to any further work in this area.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -59,27 +59,29 @@ completion, grid scales to fill the screen, sound-effect plumbing and real audio
 persistent mute toggle, cross-device stats + pairing via Anonymous Auth, and the Node 20→22
 runtime bump), the clue-number spacing fix, and **item 10 (scan-existing-puzzle flow)** are
 all done, deployed, and confirmed working. Item 10 in particular has been tested
-end-to-end against the project owner's own real screenshots across three rounds of fixes:
+end-to-end against the project owner's own real screenshots across several rounds of fixes:
 the original missing-confirm-button bug, a full redesign (auto-detect the grid on load with
-a highlighted/adjustable overlay, manual drag as fallback), then two deeper rounds of
+a highlighted/adjustable overlay, manual drag as fallback), two deeper rounds of
 real-screenshot-driven fixes covering grid-detection accuracy (filled/X-marked cells, a
 scrollbar-like false positive, a dark app-chrome background swamping naive thresholds) and
 OCR accuracy (clue numbers merging together with no space — fixed via pixel-geometry gap
-analysis in `src/ocrSegment.js`, not by trusting Tesseract's own word-spacing). Item 10 is
-confirmed as the project's primary current feature, not a side item. See `TODO.md`'s
-Completed Tasks for the full round-by-round breakdown and every design tradeoff
+analysis in `src/ocrSegment.js`, not by trusting Tesseract's own word-spacing), and finally
+**fill-state detection** — capturing which cells are already filled/X-marked in the scanned
+photo (not just its clues), so a mid-solve scan restores real progress instead of handing
+back a blank board. New pure module `src/cellStateDetect.js` (per-cell FILLED/EMPTY/UNKNOWN
+classification against a puzzle's own detected background color, never a hardcoded palette)
+plus a `gridDetect.js` addition (`centerRectOnBorders`) fixing a real bug the real test
+screenshot's unusually thick border surfaced — a naive even-subdivided cell boundary landed
+inside the border instead of at its true inner edge, corrupting classification. A new
+click-to-correct wizard step feeds the confirmed state into `Board.fromGrid` via a new
+`puzzle.initialMarks` field, verified end-to-end (detection against the real screenshot;
+full wizard flow incl. click-correction through to the final playable board against a
+synthetic puzzle with known ground truth). Item 10 — the project's primary feature, not a
+side item — is now complete across grid detection, clue OCR, and fill-state capture. See
+`TODO.md`'s Completed Tasks for the full round-by-round breakdown and every design tradeoff
 (`src/gridDetect.js`, `src/scanPuzzle.js`, `src/ocr.js`, `src/ocrSegment.js`,
-`src/scanUI.js`).
+`src/scanUI.js`, `src/cellStateDetect.js`).
 
-**Current objective, now greenlit after a design discussion with the project owner**:
-capture the puzzle's CURRENT FILL STATE from a scan (green filled/X-marked cells), not just
-its clues — today, scanning a mid-solve puzzle silently discards existing progress and
-hands back a blank board, which undercuts the project's actual core use case (mid-solve
-scanning to get unstuck on a mistake). See `TODO.md`'s Current Objective for the full
-design sketch (per-cell fill/X classification relative to the puzzle's own detected
-background rather than a hardcoded color, a new click-to-correct wizard step, and why it
-matters: restored fill state can run through the *existing* mistake-checker immediately).
-
-Item 8 (arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain
-deferred pending their own design pass — check with the project owner before picking either
-up.
+**No current objective** — check with the project owner on what's next. Item 8
+(arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain deferred
+pending their own design pass.

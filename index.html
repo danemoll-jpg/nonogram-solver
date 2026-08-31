@@ -222,6 +222,14 @@
         <button id="scan-btn-build" class="btn btn--primary" type="button">Build puzzle</button>
       </div>
 
+      <div class="scan-step hidden" data-step="fillstate" id="scan-step-fillstate">
+        <p>Detected which cells are already filled in or X-marked in the photo — click any
+          cell to correct it (blank → filled → X → blank) before playing. Getting this right is
+          what lets "Check my work" find a real mistake instead of starting you over blank.</p>
+        <div id="scan-fillstate-grid" class="scan-fillstate-grid"></div>
+        <button id="scan-btn-confirm-state" class="btn btn--primary" type="button">Looks good</button>
+      </div>
+
       <div class="scan-step hidden" data-step="done" id="scan-step-done">
         <p>Puzzle ready — grid detected, clues read, and a solution found. This puzzle plays
           normally, but (being a scan rather than a saved puzzle) it won't count toward your
