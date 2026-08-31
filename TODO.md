@@ -535,6 +535,51 @@ Completed Tasks
      owner finds the remaining error rate still too high in practice, worth discussing
      as its own follow-up rather than more blind threshold tuning.
 
+Current Objective (Focus Area)
+
+* **Paused for discussion — do not start without the project owner.** Item 10's scan wizard
+  (grid detection + clue OCR, both rounds above) is done, verified against the real,
+  uncropped screenshot, and considered solid for now. The project owner has said they'll
+  work on the next piece themselves and wants to talk it through in chat first, so this is
+  intentionally left unscoped/unstarted pending that conversation — don't pick it up
+  automatically.
+* **The next piece under discussion: capturing the puzzle's CURRENT FILL STATE (green
+  filled cells, X-marked cells), not just its clues.** Confirmed earlier in this file
+  (Round 2, item 7) that `buildScannedPuzzle` derives a fresh blank-board solution from
+  clues alone — scanning a mid-solve puzzle today silently discards any progress already
+  made. Since mid-solve scanning is confirmed as the actual core use case (not an edge
+  case), this gap is a real, deliberate open question. Design sketch discussed with the
+  project owner (recorded here so the discussion doesn't have to restart from scratch):
+  1. **New per-cell classification step** — for each of the grid's cells, decide
+     filled / X-marked / still-blank. A new detection problem, distinct from grid-line
+     detection and clue OCR: "filled" is a big block of non-background color (easy);
+     "X-marked" is a mostly-background-colored cell with only two thin diagonal ink
+     strokes (hard — average-color checks won't catch it, needs an actual stroke/pattern
+     check, in the same spirit as the digit-gap work in `ocrSegment.js`).
+  2. **Don't hardcode a fill color.** This screenshot happens to use green fill / gray X,
+     but another app or theme could use anything. Classify each cell relative to *that
+     puzzle's own* detected background tone (already known from grid detection) rather
+     than a fixed palette — same principle behind every fix landed so far this project.
+  3. **Where it plugs in**: a new pure, unit-tested module (e.g. `src/cellStateDetect.js`,
+     tested against real cell crops the way `gridDetect.js`/`ocrSegment.js` are), run once
+     the grid rect and row/col count are confirmed, cropping each cell the same way clue
+     strips are cropped today. A new wizard step — a visual grid preview of detected
+     fill/X state, click-to-correct rather than text boxes — before finalizing.
+  4. **Board integration looks straightforward**: `Board`'s existing "no move history"
+     mode for scanned puzzles (see `model.js`'s comment, `mistakes.js`'s snapshot-origin
+     mistake-checking) already anticipates a board that starts with pre-set marks rather
+     than being built move-by-move — restoring detected fill state looks like it fits
+     without a data-model redesign.
+  5. **The actual payoff, and the reason this is worth the effort**: once fill state is
+     restored, the *existing* mistake-checking tools (`autoCheckMark`/`checkForMistakes`)
+     can run against it immediately, pointing at exactly which restored cell conflicts
+     with the derived solution — directly serving the project owner's stated real use case
+     ("I clearly saw I made a mistake, help me find it"), not just redrawing progress for
+     its own sake.
+  6. **Scope note**: comparable in size to the OCR segmentation work in Round 3 above — a
+     new detection algorithm, a new wizard UI step, new tests. Worth its own focused pass,
+     not a quick add-on.
+
 Next Steps (Do Not Start Yet)
 
 * Item 8 — Photo → puzzle generation (arbitrary photo, thresholded/downsampled grid; the

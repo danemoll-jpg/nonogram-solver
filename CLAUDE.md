@@ -50,22 +50,30 @@ playable UI with LLM-backed hint phrasing), the UI consolidation pass, a post-sh
 bug-fix/mechanics pass, the iPad-verification follow-up pass (puzzle-name hidden until
 completion, grid scales to fill the screen, sound-effect plumbing and real audio files,
 persistent mute toggle, cross-device stats + pairing via Anonymous Auth, and the Node 20→22
-runtime bump), the clue-number spacing fix, and **item 10 (scan-existing-puzzle flow, v1)**
-are all done, deployed, and confirmed working in the live app — item 10 was verified
-against a synthetic test image during development. The project owner's actual use case is
-screenshots of a puzzle rather than a camera photo of a printed one — a friendlier input
-(no lighting/skew/camera noise, crisp digital text) — so the file input no longer nudges
-mobile browsers toward the camera (`capture="environment"` removed). See `TODO.md`'s
-Completed Tasks for the full breakdown, including item 10's design tradeoffs
-(`src/gridDetect.js`, `src/scanPuzzle.js`, `src/ocr.js`, `src/scanUI.js`).
+runtime bump), the clue-number spacing fix, and **item 10 (scan-existing-puzzle flow)** are
+all done, deployed, and confirmed working — item 10 has now been tested end-to-end against
+the project owner's own real screenshots (not just synthetic images) across three rounds of
+fixes: the original missing-confirm-button bug, then a full redesign (auto-detect the grid
+on load with a highlighted/adjustable overlay, manual drag as fallback), then two deeper
+rounds of real-screenshot-driven bug fixes covering grid-detection accuracy against a busy
+mid-solve screenshot (filled/X-marked cells, a scrollbar-like false positive, a dark
+app-chrome background swamping naive thresholds) and OCR accuracy (clue numbers merging
+together with no space, e.g. "2 5" read as "25" — fixed via pixel-geometry gap analysis in
+the new `src/ocrSegment.js`, not by trusting Tesseract's own word-spacing). See `TODO.md`'s
+Completed Tasks for the full round-by-round breakdown, including every design tradeoff
+(`src/gridDetect.js`, `src/scanPuzzle.js`, `src/ocr.js`, `src/ocrSegment.js`,
+`src/scanUI.js`).
 
-**Current objective is a real bug**, found when the project owner tried item 10 against an
-actual screenshot on iPad for the first time: the "Scan a puzzle" wizard has no visible
-action to trigger grid detection after the user drags the selection box — nothing happens,
-no button, no error. See `TODO.md`'s Current Objective for the likely cause (the
-drag-completion handler probably never got wired to a rendered button in `scanUI.js`) and
-a note that this may have slipped past the synthetic-image test if that test drove the flow
-programmatically rather than through an actual clicked button.
+**Current objective is paused, awaiting a design discussion with the project owner**: the
+natural next piece is capturing the puzzle's CURRENT FILL STATE from a scan (green
+filled/X-marked cells), not just its clues — today, scanning a mid-solve puzzle silently
+discards existing progress and hands back a blank board. The project owner wants to think
+it through together before work starts; see `TODO.md`'s Current Objective for the design
+sketch already discussed (per-cell fill/X classification relative to the puzzle's own
+detected background rather than a hardcoded color, a new click-to-correct wizard step, and
+why it's worth doing: restored fill state can run through the *existing* mistake-checker
+immediately, pointing at exactly what's wrong). **Do not start this without the project
+owner** — check in first.
 
 Item 8 (arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain
 deferred pending their own design pass — check with the project owner before picking either
