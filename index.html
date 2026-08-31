@@ -184,12 +184,14 @@
       </div>
 
       <div class="scan-step hidden" data-step="grid" id="scan-step-grid">
-        <p>Drag a box around just the puzzle's grid squares — <strong>not</strong> the clue
-          numbers around the edges — then detect the grid.</p>
+        <p id="scan-grid-hint" aria-live="polite"></p>
         <div class="scan-canvas-wrap">
           <canvas id="scan-canvas"></canvas>
         </div>
-        <button id="scan-btn-detect" class="btn" type="button" disabled>Detect grid</button>
+        <p class="scan-grid-hint-secondary">Drag the gold handles to adjust the box, or draw a
+          new one over just the grid squares — <strong>not</strong> the clue numbers around the
+          edges.</p>
+        <button id="scan-btn-confirm-grid" class="btn btn--primary" type="button" disabled>Looks good</button>
         <div id="scan-grid-confirm" class="scan-grid-confirm hidden">
           <label class="scan-grid-confirm__field">Rows <input id="scan-rows-input" type="number" min="1" max="30" /></label>
           <label class="scan-grid-confirm__field">Columns <input id="scan-cols-input" type="number" min="1" max="30" /></label>

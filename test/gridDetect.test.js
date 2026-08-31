@@ -9,7 +9,40 @@ import {
   computeClueBands,
   sliceHorizontal,
   sliceVertical,
+  findGridCandidates,
+  detectBestGrid,
 } from '../src/gridDetect.js';
+
+// ---- test helpers for the full-image detection tests below -----------------------------
+
+function blankImage(width, height, bg = 250) {
+  return new Array(width * height).fill(bg);
+}
+
+// Draws an evenly-subdivided rows x cols grid (outer border + internal lines), 2px thick,
+// at `color`, inside `rect`.
+function drawGrid(gray, width, rect, rows, cols, color) {
+  const { left, top, right, bottom } = rect;
+  const setPx = (x, y) => {
+    if (x >= 0 && x < width && y >= 0 && y * width + x < gray.length) gray[y * width + x] = color;
+  };
+  const w = (right - left) / cols;
+  const h = (bottom - top) / rows;
+  for (let i = 0; i <= cols; i++) {
+    const x = Math.round(left + i * w);
+    for (let y = top; y <= bottom; y++) { setPx(x, y); setPx(x + 1, y); }
+  }
+  for (let i = 0; i <= rows; i++) {
+    const y = Math.round(top + i * h);
+    for (let x = left; x <= right; x++) { setPx(x, y); setPx(x, y + 1); }
+  }
+}
+
+// Draws a plain single-outline rectangle (no internal subdivisions) — stands in for
+// ordinary rectangular UI chrome (a button, a card, a panel) in a screenshot.
+function drawPlainRect(gray, width, rect, color) {
+  drawGrid(gray, width, rect, 1, 1, color);
+}
 
 describe('rowProfile / colProfile', () => {
   test('averages intensity per row and per column', () => {
@@ -91,6 +124,55 @@ describe('computeClueBands', () => {
     const { rowBand, colBand } = computeClueBands(fullRect, gridRect);
     assertEqual(rowBand, { left: 0, top: 15, right: 20, bottom: 100 });
     assertEqual(colBand, { left: 20, top: 0, right: 100, bottom: 15 });
+  });
+});
+
+describe('findGridCandidates / detectBestGrid', () => {
+  test('finds an evenly-subdivided grid drawn on a blank image', () => {
+    const width = 200, height = 150;
+    const gray = blankImage(width, height);
+    const gridRect = { left: 40, top: 30, right: 160, bottom: 110 };
+    drawGrid(gray, width, gridRect, 8, 8, 20);
+
+    const best = detectBestGrid(gray, width, height);
+    assert(best, 'expected a confident candidate');
+    assertEqual(best.rows, 8);
+    assertEqual(best.cols, 8);
+    // Line positions are recovered from actual dark-pixel centers, so allow a couple of
+    // pixels of slack rather than demanding an exact match to the drawn rect.
+    assert(Math.abs(best.rect.left - gridRect.left) <= 3, `left off by too much: ${best.rect.left}`);
+    assert(Math.abs(best.rect.right - gridRect.right) <= 3, `right off by too much: ${best.rect.right}`);
+    assert(Math.abs(best.rect.top - gridRect.top) <= 3, `top off by too much: ${best.rect.top}`);
+    assert(Math.abs(best.rect.bottom - gridRect.bottom) <= 3, `bottom off by too much: ${best.rect.bottom}`);
+  });
+
+  test('does not mistake a plain single-outline rectangle for a grid (false-positive guard)', () => {
+    // A button/card/panel has exactly one outline per side — no internal subdivisions — the
+    // exact shape this project's screenshots are expected to have nearby (see TODO.md).
+    const width = 200, height = 150;
+    const gray = blankImage(width, height);
+    drawPlainRect(gray, width, { left: 20, top: 20, right: 180, bottom: 60 }, 20);
+
+    const candidates = findGridCandidates(gray, width, height);
+    assertEqual(candidates.length, 0, 'a bare outline has too few lines per axis to ever become a candidate');
+    assertEqual(detectBestGrid(gray, width, height), null);
+  });
+
+  test('picks the real grid over a nearby plain rectangle when both are present', () => {
+    const width = 220, height = 220;
+    const gray = blankImage(width, height);
+    // Unrelated UI chrome up top — a plain rectangle, wider than the grid.
+    drawPlainRect(gray, width, { left: 10, top: 10, right: 210, bottom: 40 }, 20);
+    // The actual puzzle grid, lower in the image.
+    const gridRect = { left: 50, top: 60, right: 170, bottom: 180 };
+    drawGrid(gray, width, gridRect, 10, 10, 20);
+
+    const best = detectBestGrid(gray, width, height);
+    assert(best, 'expected a confident candidate');
+    assertEqual(best.rows, 10);
+    assertEqual(best.cols, 10);
+    assert(Math.abs(best.rect.left - gridRect.left) <= 3, `left off by too much: ${best.rect.left}`);
+    assert(Math.abs(best.rect.top - gridRect.top) <= 3, `top off by too much: ${best.rect.top}`);
   });
 });
 

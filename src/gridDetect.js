@@ -200,3 +200,227 @@ export function sliceHorizontal(rect, n) {
     bottom: rect.top + (i + 1) * h,
   }));
 }
+
+// ---- full-image auto grid detection ---------------------------------------
+//
+// Everything above this point either refines a rectangle the user already drew
+// (snapRectToBorder) or slices one the user already confirmed (computeClueBands/
+// sliceHorizontal/sliceVertical). The functions below instead search the *whole* image for
+// the puzzle grid, so the scan wizard can highlight a candidate immediately on image load
+// instead of making manual drag-to-select the only way in (see TODO.md's "Current
+// Objective" for the bug this replaces).
+//
+// Design tradeoff, same spirit as the rest of this file: rather than a general-purpose
+// rectangle detector, this looks specifically for what a nonogram grid looks like as pixels
+// — a rectangle subdivided by *multiple, evenly-spaced* internal lines on both axes. That
+// last part is the deliberate false-positive guard the project owner's screenshots need:
+// ordinary rectangular UI chrome (a button, a card, a panel) has exactly one outline on each
+// side — 2 horizontal lines + 2 vertical lines — and is rejected by `minLines` before it
+// even becomes a candidate, regardless of how large or prominent it is. Only a genuinely
+// subdivided grid (>= minLines per axis, i.e. several cells) is scored at all, and among
+// scored candidates, regularity of line spacing and rectangle area break further ties toward
+// the real grid over some other incidentally-regular UI element.
+
+// Finds maximal horizontal runs of "dark" (<= threshold) pixels at least `minLen` long, one
+// row at a time. Segments, not a whole-row average (contrast with rowProfile): a puzzle
+// grid line usually spans only part of the image's width (the grid itself), not edge to
+// edge, so averaging the full row would dilute a real line's darkness with unrelated light
+// background on either side — exactly the failure mode this function avoids by tracking
+// each dark run's own extent instead.
+function horizontalSegments(gray, width, height, threshold, minLen) {
+  const segs = [];
+  for (let y = 0; y < height; y++) {
+    const base = y * width;
+    let runStart = -1;
+    for (let x = 0; x <= width; x++) {
+      const dark = x < width && gray[base + x] <= threshold;
+      if (dark && runStart === -1) {
+        runStart = x;
+      } else if (!dark && runStart !== -1) {
+        if (x - runStart >= minLen) segs.push({ y, xStart: runStart, xEnd: x - 1 });
+        runStart = -1;
+      }
+    }
+  }
+  return segs;
+}
+
+// Mirror of horizontalSegments along the vertical axis, for vertical grid lines.
+function verticalSegments(gray, width, height, threshold, minLen) {
+  const segs = [];
+  for (let x = 0; x < width; x++) {
+    let runStart = -1;
+    for (let y = 0; y <= height; y++) {
+      const dark = y < height && gray[y * width + x] <= threshold;
+      if (dark && runStart === -1) {
+        runStart = y;
+      } else if (!dark && runStart !== -1) {
+        if (y - runStart >= minLen) segs.push({ x, yStart: runStart, yEnd: y - 1 });
+        runStart = -1;
+      }
+    }
+  }
+  return segs;
+}
+
+// A printed line a few pixels thick produces one raw segment per row (or column) it
+// occupies. Merges those into one band per actual line: consecutive rows/cols (within
+// `maxGap`) whose spans overlap substantially are treated as the same line, and the band's
+// span widens to their union (a later row's segment may reveal the line's true extent better
+// than the first, e.g. if anti-aliasing shortened it). `posKey` is the axis the bands are
+// merged along ('y' for horizontal segments, 'x' for vertical); `startKey`/`endKey` name the
+// segment's cross-axis span ('xStart'/'xEnd' or 'yStart'/'yEnd').
+function mergeSegmentBands(segs, posKey, startKey, endKey, { maxGap = 2, minOverlap = 0.6 } = {}) {
+  const sorted = [...segs].sort((a, b) => a[posKey] - b[posKey]);
+  const bands = [];
+  for (const seg of sorted) {
+    const band = bands.find((b) => {
+      if (seg[posKey] - b.lastPos > maxGap) return false;
+      const overlap = Math.min(seg[endKey], b[endKey]) - Math.max(seg[startKey], b[startKey]);
+      const shorter = Math.min(seg[endKey] - seg[startKey], b[endKey] - b[startKey]) || 1;
+      return overlap / shorter >= minOverlap;
+    });
+    if (band) {
+      band.lastPos = seg[posKey];
+      band.posSum += seg[posKey];
+      band.count++;
+      band[startKey] = Math.min(band[startKey], seg[startKey]);
+      band[endKey] = Math.max(band[endKey], seg[endKey]);
+    } else {
+      bands.push({
+        lastPos: seg[posKey],
+        posSum: seg[posKey],
+        count: 1,
+        [startKey]: seg[startKey],
+        [endKey]: seg[endKey],
+      });
+    }
+  }
+  return bands.map((b) => ({ pos: b.posSum / b.count, [startKey]: b[startKey], [endKey]: b[endKey] }));
+}
+
+// Intersection-over-union of two [start,end] spans: 0 when they don't overlap, 1 when they
+// coincide exactly. Deliberately IoU rather than "overlap / shorter span" — the latter
+// would call a long unrelated line (e.g. a wide banner spanning most of a screenshot) a
+// match for a much shorter grid line just because the grid line's span sits entirely inside
+// the long one, silently inflating a cluster's line count with lines that aren't part of
+// the grid at all (caught by this file's own tests — see gridDetect.test.js's "picks the
+// real grid over a nearby plain rectangle" case). IoU instead requires both spans to be
+// close to the same size, not just overlapping.
+function spanOverlapRatio(a, b, startKey, endKey) {
+  const overlap = Math.min(a[endKey], b[endKey]) - Math.max(a[startKey], b[startKey]);
+  if (overlap <= 0) return 0;
+  const union = Math.max(a[endKey], b[endKey]) - Math.min(a[startKey], b[startKey]);
+  return union > 0 ? overlap / union : 0;
+}
+
+// Groups line bands into clusters that share roughly the same cross-axis span — i.e. lines
+// belonging to the same grid, as opposed to unrelated lines elsewhere in the image with a
+// different extent (a table off to one side, a divider under a header, ...).
+function clusterLinesBySpan(bands, startKey, endKey, minOverlapRatio) {
+  const clusters = [];
+  for (const band of bands) {
+    const cluster = clusters.find((c) => spanOverlapRatio(band, c.span, startKey, endKey) >= minOverlapRatio);
+    if (cluster) {
+      cluster.lines.push(band);
+      cluster.span[startKey] = Math.min(cluster.span[startKey], band[startKey]);
+      cluster.span[endKey] = Math.max(cluster.span[endKey], band[endKey]);
+    } else {
+      clusters.push({ span: { [startKey]: band[startKey], [endKey]: band[endKey] }, lines: [band] });
+    }
+  }
+  return clusters;
+}
+
+// How evenly spaced a sorted set of line positions is, as a score in (0, 1] (1 = perfectly
+// even). A real grid's lines sit at a constant pitch; unrelated dark runs that happened to
+// cluster together by cross-axis span usually don't.
+function gapRegularity(positions) {
+  const sorted = [...positions].sort((a, b) => a - b);
+  if (sorted.length < 2) return 0;
+  const gaps = [];
+  for (let i = 1; i < sorted.length; i++) gaps.push(sorted[i] - sorted[i - 1]);
+  const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+  if (mean <= 0) return 0;
+  const variance = gaps.reduce((a, g) => a + (g - mean) ** 2, 0) / gaps.length;
+  const coeffVariation = Math.sqrt(variance) / mean;
+  return 1 / (1 + coeffVariation * 4);
+}
+
+// Searches the whole image for candidate grid rectangles and returns them sorted best-first.
+// A candidate needs a cluster of >= `minLines` horizontal lines sharing one x-span, and a
+// cluster of >= `minLines` vertical lines sharing one y-span, that mutually bound the same
+// box (each cluster's line positions must line up with the *other* cluster's shared span,
+// within `minBoxOverlap`) — see the file-level comment for why `minLines` alone already
+// rejects plain single-outline UI rectangles. rows/cols come directly from the line counts
+// (n lines bound n-1 cells), no separate line-counting pass needed for the auto path.
+//
+// `minLineOverlap` is deliberately stricter than `minBoxOverlap`: it decides whether two
+// lines belong to the *same* line family (e.g. two of the grid's own row-dividers, which
+// should have nearly identical x-spans), where a loose threshold would let one long
+// unrelated line (a banner spanning much of the screenshot) absorb a shorter grid line into
+// its cluster just because the grid line's span sits inside it. `minBoxOverlap` instead
+// checks whether an already-formed horizontal-line cluster and vertical-line cluster
+// describe the same box — true grid corners line up almost exactly, but a little more
+// slack here is fine since it's comparing two independently-derived estimates of the same
+// edges rather than deciding cluster membership.
+export function findGridCandidates(gray, width, height, options = {}) {
+  const { minLineLenRatio = 0.15, minLines = 4, minLineOverlap = 0.75, minBoxOverlap = 0.5 } = options;
+
+  const threshold = otsuThreshold(gray);
+  const minLenH = Math.max(1, Math.round(width * minLineLenRatio));
+  const minLenV = Math.max(1, Math.round(height * minLineLenRatio));
+
+  const hBands = mergeSegmentBands(horizontalSegments(gray, width, height, threshold, minLenH), 'y', 'xStart', 'xEnd');
+  const vBands = mergeSegmentBands(verticalSegments(gray, width, height, threshold, minLenV), 'x', 'yStart', 'yEnd');
+
+  const hClusters = clusterLinesBySpan(hBands, 'xStart', 'xEnd', minLineOverlap).filter((c) => c.lines.length >= minLines);
+  const vClusters = clusterLinesBySpan(vBands, 'yStart', 'yEnd', minLineOverlap).filter((c) => c.lines.length >= minLines);
+
+  const candidates = [];
+  for (const hc of hClusters) {
+    const hTop = Math.min(...hc.lines.map((l) => l.pos));
+    const hBottom = Math.max(...hc.lines.map((l) => l.pos));
+    for (const vc of vClusters) {
+      const vLeft = Math.min(...vc.lines.map((l) => l.pos));
+      const vRight = Math.max(...vc.lines.map((l) => l.pos));
+      // The horizontal lines' shared x-span and the vertical lines' own x-positions must
+      // describe the same box (and vice versa on the other axis) for these two clusters to
+      // be the two axes of one grid, rather than unrelated structure that happened to
+      // cluster on its own axis.
+      const xMatch = spanOverlapRatio(hc.span, { xStart: vLeft, xEnd: vRight }, 'xStart', 'xEnd');
+      const yMatch = spanOverlapRatio(vc.span, { yStart: hTop, yEnd: hBottom }, 'yStart', 'yEnd');
+      if (xMatch < minBoxOverlap || yMatch < minBoxOverlap) continue;
+
+      const rect = { left: vLeft, top: hTop, right: vRight, bottom: hBottom };
+      const area = Math.max(0, rect.right - rect.left) * Math.max(0, rect.bottom - rect.top);
+      const sizeFactor = Math.min(1, area / (width * height * 0.05));
+      const regH = gapRegularity(hc.lines.map((l) => l.pos));
+      const regV = gapRegularity(vc.lines.map((l) => l.pos));
+      const score = hc.lines.length * vc.lines.length * regH * regV * sizeFactor;
+
+      candidates.push({ rect, rows: hc.lines.length - 1, cols: vc.lines.length - 1, score });
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates;
+}
+
+// Default confidence floor for accepting an auto-detected candidate without asking the user
+// to draw one by hand. Chosen so a small, clean, evenly-spaced grid clears it comfortably
+// (e.g. a 5x5 grid — 6 lines each axis, good regularity — scores well above this) while a
+// borderline/noisy candidate that barely met `minLines` falls back to manual selection
+// instead of confidently highlighting the wrong thing.
+const DEFAULT_MIN_CONFIDENT_SCORE = 6;
+
+// Convenience wrapper around findGridCandidates for the common case: the single best
+// candidate if it's confident enough, otherwise null (the wizard falls back to manual
+// drag-to-select when this returns null).
+export function detectBestGrid(gray, width, height, options = {}) {
+  const candidates = findGridCandidates(gray, width, height, options);
+  if (!candidates.length) return null;
+  const best = candidates[0];
+  const minScore = options.minConfidentScore ?? DEFAULT_MIN_CONFIDENT_SCORE;
+  return best.score >= minScore ? best : null;
+}

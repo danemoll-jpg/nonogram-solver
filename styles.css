@@ -671,10 +671,16 @@ body {
 #scan-canvas {
   max-width: 100%;
   height: auto;
-  touch-action: none; /* the canvas owns drag gestures for marking the grid rectangle */
+  touch-action: none; /* the canvas owns drag gestures for marking/adjusting the grid rectangle */
   border: 1px solid rgba(230, 183, 63, 0.3);
   border-radius: 0.4rem;
   cursor: crosshair;
+}
+
+.scan-grid-hint-secondary {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin: 0.5rem 0 0.75rem;
 }
 
 .scan-grid-confirm {

@@ -224,47 +224,91 @@ Completed Tasks
      this pass shipped — **the project owner has since tried it on a real device; see the
      bug found, in Current Objective below.**
 
-Current Objective (Focus Area)
+* **Scan wizard grid-selection redesign: auto-detect on load, highlighted/adjustable
+  overlay, explicit confirm button, manual drag as fallback.** Replaces (not just patches)
+  the bug found on real-device testing — see that bug's own writeup below for what was
+  actually wrong.
+  1. **`src/gridDetect.js`: full-image auto grid detection**, new exports
+     `findGridCandidates`/`detectBestGrid`, pure functions, unit-tested
+     (`test/gridDetect.test.js`). Extends this file's existing line-detection primitives
+     from "refine a user-given rectangle" to "search the whole image": finds horizontal/
+     vertical dark-pixel runs long enough to plausibly be grid lines, merges same-line
+     runs into bands, clusters bands into line-families sharing a common cross-axis span,
+     and pairs a horizontal-line-family with a vertical-line-family that mutually bound
+     the same box. **The false-positive guard the project owner's screenshots specifically
+     needed**: requiring >= `minLines` (default 4) lines per axis before a cluster is even
+     considered rejects ordinary rectangular UI chrome outright — a button/card/panel has
+     exactly one outline per side (2 lines), never enough to become a candidate at all,
+     regardless of size or prominence. Among clusters that do qualify, score =
+     line-count-product × spacing-regularity × rectangle-area-fraction, and only a
+     candidate clearing a minimum confidence floor (`DEFAULT_MIN_CONFIDENT_SCORE`) is
+     auto-accepted — otherwise the wizard falls back to manual selection. rows/cols come
+     directly from the winning clusters' line counts (n lines bound n-1 cells), no
+     separate counting pass needed for the auto path. **Bug caught by the unit tests
+     during development**: the first cluster-matching metric (overlap ÷ shorter-span)
+     let one long unrelated line's span *contain* a much shorter grid line's span and
+     merge into its cluster, silently inflating the line count (a 10x10 test grid next to
+     a wide banner line came back as 12 rows) — fixed by switching to
+     intersection-over-union, which requires both spans to be close to the same size, not
+     just overlapping. See that file's comment above `findGridCandidates` for the full
+     writeup.
+  2. **`src/scanUI.js`: one rectangle, one interaction model, always one working "Looks
+     good" button.** Replaced the old two-state roughRect/gridRect split (and the
+     never-rendered confirm button that went with it) with a single `state.gridRect` that
+     always exists once an image is loaded — either from `detectBestGrid` immediately on
+     load, or from a fresh manual drag if detection wasn't confident. It's always
+     adjustable via 8 canvas-drawn handles (4 corners + 4 edge midpoints; pressing inside
+     the box moves it, pressing outside starts a brand new box). The `#scan-btn-confirm-
+     grid` ("Looks good") button is enabled any time the rect has real size, regardless of
+     how it got there — that's the actual fix for the missing-action bug, since there's no
+     longer a distinct hidden step whose button could go unwired. Clicking it runs the
+     same snap-to-border + line-counting refinement either way (auto-detected or
+     hand-drawn), populating the existing editable rows/cols fields before OCR.
+  3. **`index.html`/`app.js`/`styles.css`: renamed `#scan-btn-detect` → `#scan-btn-confirm-
+     grid` ("Detect grid" → "Looks good"), added a live-updating `#scan-grid-hint`
+     paragraph** ("Grid detected automatically…" vs. "Couldn't auto-detect the grid…")
+     driven by whether `detectBestGrid` found a confident candidate.
+  4. **Verification:** `npm test` — 460 passed, 0 failed, incl. 3 new tests for the
+     detection false-positive guard specifically (a plain outline rectangle never becomes
+     a candidate; the real grid wins over a nearby plain rectangle when both are present).
+     Live-browser smoke test via a synthetic *screenshot-style* mockup (a dark header bar,
+     a bordered "Submit" button, a bordered card, and an 8x8 grid with clue-number-style
+     digits, deliberately built to exercise the false-positive risk) confirmed: auto-
+     detection found the grid and ignored all three UI-chrome rectangles, the overlay +
+     handles rendered correctly, "Looks good" was enabled immediately and produced the
+     exact right row/col count (8/8) with no manual step required. Also drove the pointer
+     handlers with real `PointerEvent`s (not just clicks) against a *no-grid* image to
+     exercise the manual-fallback path end-to-end, which **caught a real bug before it
+     shipped**: the fresh-rectangle-draw branch of the pointerdown handler never set
+     `state.dragStart`, so dragging out a manual box crashed on the first `pointermove`
+     (`Cannot read properties of null`) — fixed by setting it alongside the other two drag
+     modes. Confirmed the fallback path (auto-detect declines, manual drag, "Looks good",
+     no crash) end-to-end after the fix.
+  5. **Still open — not yet verified against a real screenshot.** Everything above was
+     checked with synthetic mockups (deliberately including nearby UI-chrome rectangles to
+     stress the false-positive guard), not an actual photo/screenshot from a device — the
+     project owner should re-try the flow on the iPad screenshot that originally surfaced
+     the missing-button bug (or a similar one) to confirm both that detection finds the
+     real grid on genuine screenshot content and that the false-positive guard holds up
+     against whatever UI chrome that app's screenshots actually contain. Report back
+     either way — if detection is unconfident or wrong on real content, `minLines`/
+     `minLineLenRatio`/`DEFAULT_MIN_CONFIDENT_SCORE` in `gridDetect.js` are the knobs to
+     retune, not a reason to redesign the fallback (manual drag still always works).
 
-* **Redesign "Scan a puzzle" grid selection: auto-detect first, highlight for
-  confirmation, with manual drag as fallback — this also fixes the missing-confirm-button
-  bug found on real-device testing.** The original flow (drag a box, then "detect the
-  grid") is being found to have no working way to proceed after the drag — see the bug
-  found below. Rather than just patching that missing button, redesign the step itself:
-  1. **On image load, auto-run grid detection immediately** — no manual drag required
-     first. Search the whole image for the most likely grid rectangle (extending the
-     existing line-counting/border-intensity heuristics in `gridDetect.js` from
-     "refine a user-given rectangle" to "find the best candidate across the full image").
-     **Real risk worth designing around**: the project owner's actual use case is
-     screenshots (not photos of printed puzzles), which likely contain other rectangular
-     UI elements — app chrome, buttons, other panels — that could be mistaken for the
-     puzzle grid if the search isn't reasonably selective (e.g. favoring the largest,
-     most regular/evenly-subdivided candidate rectangle, and requiring some minimum
-     confidence before accepting one automatically).
-  2. **Highlight the detected rectangle as an overlay on the image**, with draggable
-     corner/edge handles so the user can nudge it if it's slightly off, rather than
-     drawing a box from scratch.
-  3. **Explicit "Looks good" / "Confirm" button to proceed** — this is the actual fix for
-     the missing-action bug below: there is always a clear, visible, real action to
-     trigger next (grid-line counting → row/col confirmation → OCR), whether the user
-     just accepted the auto-detected rectangle or adjusted it first.
-  4. **Fallback to manual drag-to-select** (today's existing flow) if auto-detection finds
-     no confident candidate — same confirm button applies either way, so this isn't a
-     second, separately-fragile path.
-
-  **Bug this replaces/fixes: "Scan a puzzle" wizard has no way to proceed after drawing
+  **Bug this replaces/fixes: "Scan a puzzle" wizard had no way to proceed after drawing
   the grid-selection box.** Found by the project owner testing the deployed item 10 flow
   against a real screenshot on iPad (their actual use case) — the very case that hadn't
   been tried yet during development. After completing the manual drag, nothing happened:
-  no visible "Detect Grid"/confirm button, no loading state, no error. Confirmed this
-  isn't a hidden/offscreen-button issue (a known failure mode earlier in this project) —
-  the modal traps focus, and no button is visible regardless of scrolling. Likely means
-  the drag-completion handler was never actually wired to a rendered button in
-  `scanUI.js`, despite working in the synthetic-image browser test during development —
-  worth checking whether that test drove the flow programmatically rather than by
-  clicking an actual rendered button, which would explain how this slipped through.
-  **Verify the fix with a real screenshot** (the project owner's actual use case), not
-  another synthetic image.
+  no visible "Detect Grid"/confirm button, no loading state, no error. Root cause, per the
+  redesign above: the old flow's confirm button only appeared after a separate "Detect
+  grid" click that itself depended on state that a manual drag alone didn't fully set up
+  right — the redesign removes that split entirely rather than re-patching it.
+
+Current Objective (Focus Area)
+
+* **Awaiting the project owner's real-screenshot verification of the scan-wizard
+  redesign above** (see its item 5) before considering this bug closed. No other objective
+  queued — check back in once that's confirmed, or with whatever tuning it points to.
 
 Next Steps (Do Not Start Yet)
 

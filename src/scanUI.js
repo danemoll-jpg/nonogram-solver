@@ -5,11 +5,17 @@
 // per CLAUDE.md's "each module does one job"; app.js just calls initScanWizard() once at
 // boot and wires one Help-menu button to open the modal.
 //
-// Wizard steps: upload a photo -> drag a box around just the grid squares (grid detection
-// snaps it to the printed border and suggests a row/col count) -> OCR every row's and
-// column's clue strip -> a correction pass (editable text next to a thumbnail of what was
-// actually cropped) -> solve the confirmed clues into a real solution and hand the finished
-// puzzle back to app.js via the onPuzzleReady callback.
+// Wizard steps: upload a photo -> confirm the grid rectangle (auto-detected and highlighted
+// on load with draggable corner/edge handles, falling back to manual drag-to-select only
+// when auto-detection isn't confident — see gridDetect.js's findGridCandidates/
+// detectBestGrid) -> OCR every row's and column's clue strip -> a correction pass (editable
+// text next to a thumbnail of what was actually cropped) -> solve the confirmed clues into a
+// real solution and hand the finished puzzle back to app.js via the onPuzzleReady callback.
+//
+// The grid step always has one clear, visible, enabled-when-ready button to move forward
+// ("Looks good") regardless of whether the rectangle came from auto-detection or a manual
+// drag — see TODO.md's "Current Objective" for the bug (no working way to proceed after a
+// manual drag) this design replaces, not just patches.
 
 import {
   rowProfile,
@@ -19,6 +25,7 @@ import {
   computeClueBands,
   sliceHorizontal,
   sliceVertical,
+  detectBestGrid,
 } from './gridDetect.js';
 import { parseClueText, buildScannedPuzzle } from './scanPuzzle.js';
 import { recognizeClueStrip, terminateOcr } from './ocr.js';
@@ -37,6 +44,10 @@ const FULL_MAX_DIM = 1600;
 // recognition — a single grid row's worth of clue text can be a very short strip in pixels,
 // and small text is where OCR accuracy falls off fastest.
 const OCR_MIN_HEIGHT = 60;
+// Smallest width/height (analysis-canvas px) a grid rectangle is allowed to shrink to via
+// handle-dragging — well below any real puzzle grid, just prevents a handle drag from
+// collapsing the box to nothing (which would leave no rectangle to snap/count lines from).
+const MIN_RECT_SIZE = 20;
 
 // Hardcoded mirror of styles.css's --gold — canvas 2D context fill/strokeStyle can't consume
 // CSS custom properties directly.
@@ -48,10 +59,19 @@ export function initScanWizard({ els, onPuzzleReady }) {
     analysisCtx: null,
     fullCanvas: null,
     scaleFullOverAnalysis: 1,
-    roughRect: null, // { left, top, right, bottom } in analysis-canvas space, while dragging
-    gridRect: null, // snapped rect, analysis-canvas space, once "Detect grid" has run
-    dragging: false,
-    dragStart: null,
+    // The one rectangle the grid step works with, analysis-canvas space — set either by
+    // auto-detection on image load or by the user dragging one out by hand, then adjustable
+    // via its corner/edge handles either way. Replaces the old separate roughRect/gridRect
+    // split (roughRect while dragging, gridRect only once a since-removed "Detect grid"
+    // button had run) with one rect that's always present and always editable, which is
+    // what makes "Looks good" always a real, enabled action rather than something that only
+    // appears after a click that may never have been wired up (see TODO.md's bug writeup).
+    gridRect: null,
+    autoDetected: false, // true if gridRect came from detectBestGrid rather than a hand-drawn box
+    dragMode: null, // null | 'create' | 'move' | 'resize', while a pointer drag is in progress
+    activeHandle: null, // the handle being resize-dragged, from getHandles()
+    dragStart: null, // canvas-space point where the current drag began
+    dragOrigRect: null, // gridRect snapshot at drag start, for 'move'/'resize' deltas
     rows: 0,
     cols: 0,
     rowClueInputs: [],
@@ -70,15 +90,19 @@ export function initScanWizard({ els, onPuzzleReady }) {
     state.analysisCanvas = null;
     state.analysisCtx = null;
     state.fullCanvas = null;
-    state.roughRect = null;
     state.gridRect = null;
-    state.dragging = false;
+    state.autoDetected = false;
+    state.dragMode = null;
+    state.activeHandle = null;
+    state.dragStart = null;
+    state.dragOrigRect = null;
     state.rowClueInputs = [];
     state.colClueInputs = [];
     state.pendingPuzzle = null;
     els.scanFileInput.value = '';
+    els.scanGridHint.textContent = '';
     els.scanGridConfirm.classList.add('hidden');
-    els.scanBtnDetect.disabled = true;
+    els.scanBtnConfirmGrid.disabled = true;
     els.scanRowClueList.innerHTML = '';
     els.scanColClueList.innerHTML = '';
     els.scanBuildError.classList.add('hidden');
@@ -130,10 +154,37 @@ export function initScanWizard({ els, onPuzzleReady }) {
 
       els.scanCanvas.width = analysisSize.width;
       els.scanCanvas.height = analysisSize.height;
+      runAutoDetect();
       redrawGridCanvas();
     } finally {
       URL.revokeObjectURL(url);
     }
+  }
+
+  // Runs on every fresh image load: searches the whole photo/screenshot for the puzzle grid
+  // (see gridDetect.js's detectBestGrid for the false-positive guard against ordinary
+  // rectangular UI chrome) and, if confident, pre-fills gridRect with it so the user lands
+  // straight on a highlighted, adjustable box instead of an empty canvas requiring a manual
+  // drag. Confirming (or redrawing) the box is still always required before OCR runs — this
+  // only decides the box's *starting* position.
+  function runAutoDetect() {
+    const { width, height } = state.analysisCanvas;
+    const gray = analysisGrayscale();
+    const best = detectBestGrid(gray, width, height);
+    if (best) {
+      state.gridRect = { ...best.rect };
+      state.autoDetected = true;
+      els.scanGridHint.textContent =
+        "Grid detected automatically — drag the gold handles to adjust it if it's not quite " +
+        'right, or draw a new box yourself, then confirm below.';
+    } else {
+      state.gridRect = null;
+      state.autoDetected = false;
+      els.scanGridHint.textContent =
+        "Couldn't auto-detect the grid — drag a box around just the puzzle's grid squares " +
+        '(not the clue numbers around the edges), then confirm below.';
+    }
+    updateConfirmButtonState();
   }
 
   els.scanFileInput.addEventListener('change', async () => {
@@ -147,7 +198,7 @@ export function initScanWizard({ els, onPuzzleReady }) {
     }
   });
 
-  // ---- step 2: drag a box around the grid, then detect ----
+  // ---- step 2: confirm the grid rectangle (auto-detected, or drag one out by hand) ----
 
   function toCanvasPoint(evt) {
     const rect = els.scanCanvas.getBoundingClientRect();
@@ -165,36 +216,137 @@ export function initScanWizard({ els, onPuzzleReady }) {
     };
   }
 
+  function clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  // The 8 drag handles for the current gridRect: 4 corners (each moves two edges) + 4 edge
+  // midpoints (each moves one edge). `x`/`y` are where the handle is drawn/hit-tested;
+  // `edges` says which of the rect's edges a drag from this handle should move.
+  function getHandles(rect) {
+    const midX = (rect.left + rect.right) / 2;
+    const midY = (rect.top + rect.bottom) / 2;
+    return [
+      { x: rect.left, y: rect.top, edges: ['left', 'top'] },
+      { x: midX, y: rect.top, edges: ['top'] },
+      { x: rect.right, y: rect.top, edges: ['right', 'top'] },
+      { x: rect.right, y: midY, edges: ['right'] },
+      { x: rect.right, y: rect.bottom, edges: ['right', 'bottom'] },
+      { x: midX, y: rect.bottom, edges: ['bottom'] },
+      { x: rect.left, y: rect.bottom, edges: ['left', 'bottom'] },
+      { x: rect.left, y: midY, edges: ['left'] },
+    ];
+  }
+
+  // Handle hit-test radius, canvas-space px — scales with image size so handles stay
+  // comfortably tappable on a small screenshot without ballooning on a huge photo.
+  function handleHitRadius() {
+    const { width, height } = state.analysisCanvas;
+    return Math.max(14, Math.round(Math.min(width, height) * 0.025));
+  }
+
+  function hitTestHandle(rect, p, radius) {
+    let best = null;
+    let bestDist = Infinity;
+    for (const h of getHandles(rect)) {
+      const d = Math.hypot(p.x - h.x, p.y - h.y);
+      if (d <= radius && d < bestDist) {
+        bestDist = d;
+        best = h;
+      }
+    }
+    return best;
+  }
+
+  function pointInRect(p, r) {
+    return p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom;
+  }
+
+  function updateConfirmButtonState() {
+    const r = state.gridRect;
+    const hasSize = r && r.right - r.left > 10 && r.bottom - r.top > 10;
+    els.scanBtnConfirmGrid.disabled = !hasSize;
+  }
+
   function redrawGridCanvas() {
     if (!state.analysisCanvas) return;
     const ctx = els.scanCanvas.getContext('2d');
     ctx.drawImage(state.analysisCanvas, 0, 0);
-    const rect = state.roughRect || state.gridRect;
-    if (rect) {
-      ctx.strokeStyle = GOLD;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+    const rect = state.gridRect;
+    if (!rect) return;
+    ctx.strokeStyle = GOLD;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+    if (rect.right - rect.left > 4 && rect.bottom - rect.top > 4) {
+      const size = handleHitRadius() * 0.6; // drawn a bit smaller than the hit target, for a comfortably oversized tap area
+      ctx.fillStyle = GOLD;
+      for (const h of getHandles(rect)) {
+        ctx.fillRect(h.x - size / 2, h.y - size / 2, size, size);
+      }
     }
   }
 
+  // Unified pointer handling for the grid box, regardless of how it got there: pressing a
+  // handle resizes from that edge/corner, pressing inside the box moves it, and pressing
+  // outside it (or before any box exists) starts drawing a brand new one from scratch —
+  // which doubles as the manual-selection fallback when auto-detection found nothing.
   els.scanCanvas.addEventListener('pointerdown', (e) => {
     if (!state.analysisCanvas) return;
-    state.dragging = true;
-    state.dragStart = toCanvasPoint(e);
-    state.gridRect = null;
+    const p = toCanvasPoint(e);
+    const radius = handleHitRadius();
+    if (state.gridRect) {
+      const handle = hitTestHandle(state.gridRect, p, radius);
+      if (handle) {
+        state.dragMode = 'resize';
+        state.activeHandle = handle;
+        state.dragStart = p;
+        state.dragOrigRect = { ...state.gridRect };
+        return;
+      }
+      if (pointInRect(p, state.gridRect)) {
+        state.dragMode = 'move';
+        state.dragStart = p;
+        state.dragOrigRect = { ...state.gridRect };
+        return;
+      }
+    }
+    state.dragMode = 'create';
+    state.autoDetected = false;
+    state.dragStart = p;
+    state.gridRect = { left: p.x, top: p.y, right: p.x, bottom: p.y };
     els.scanGridConfirm.classList.add('hidden');
   });
+
   els.scanCanvas.addEventListener('pointermove', (e) => {
-    if (!state.dragging) return;
-    state.roughRect = normalizedRect(state.dragStart, toCanvasPoint(e));
+    if (!state.dragMode) return;
+    const p = toCanvasPoint(e);
+    const { width, height } = state.analysisCanvas;
+    if (state.dragMode === 'create') {
+      state.gridRect = normalizedRect(state.dragStart, p);
+    } else if (state.dragMode === 'move') {
+      const o = state.dragOrigRect;
+      const dx = clamp(p.x - state.dragStart.x, -o.left, width - o.right);
+      const dy = clamp(p.y - state.dragStart.y, -o.top, height - o.bottom);
+      state.gridRect = { left: o.left + dx, top: o.top + dy, right: o.right + dx, bottom: o.bottom + dy };
+    } else if (state.dragMode === 'resize') {
+      const o = state.dragOrigRect;
+      const rect = { ...o };
+      const edges = state.activeHandle.edges;
+      if (edges.includes('left')) rect.left = clamp(p.x, 0, o.right - MIN_RECT_SIZE);
+      if (edges.includes('right')) rect.right = clamp(p.x, o.left + MIN_RECT_SIZE, width);
+      if (edges.includes('top')) rect.top = clamp(p.y, 0, o.bottom - MIN_RECT_SIZE);
+      if (edges.includes('bottom')) rect.bottom = clamp(p.y, o.top + MIN_RECT_SIZE, height);
+      state.gridRect = rect;
+    }
     redrawGridCanvas();
   });
+
   window.addEventListener('pointerup', () => {
-    if (!state.dragging) return;
-    state.dragging = false;
-    const rect = state.roughRect;
-    const hasSize = rect && rect.right - rect.left > 10 && rect.bottom - rect.top > 10;
-    els.scanBtnDetect.disabled = !hasSize;
+    if (!state.dragMode) return;
+    state.dragMode = null;
+    state.activeHandle = null;
+    updateConfirmButtonState();
+    redrawGridCanvas();
   });
 
   // Turns the analysis canvas into a flat grayscale array (0=black..255=white), the plain
@@ -211,14 +363,18 @@ export function initScanWizard({ els, onPuzzleReady }) {
     return gray;
   }
 
-  els.scanBtnDetect.addEventListener('click', () => {
-    if (!state.roughRect) return;
+  // The one, always-available "proceed" action for the grid step — the fix for the bug this
+  // redesign replaces (see the module-level comment). Works the same whether gridRect is
+  // still exactly what auto-detection produced, or the user dragged/resized it: snaps it
+  // onto the photo's actual printed border and suggests a row/col count either way, since
+  // that refinement is just as valid a step after a nudge as after a fresh manual drag.
+  els.scanBtnConfirmGrid.addEventListener('click', () => {
+    if (!state.gridRect) return;
     const { width, height } = state.analysisCanvas;
     const gray = analysisGrayscale();
     const searchPx = Math.max(4, Math.round(Math.min(width, height) * 0.04));
-    const snapped = snapRectToBorder(gray, width, height, state.roughRect, { searchPx });
+    const snapped = snapRectToBorder(gray, width, height, state.gridRect, { searchPx });
     state.gridRect = snapped;
-    state.roughRect = null;
     redrawGridCanvas();
 
     // Row count comes from horizontal grid lines, found in the row profile (restricted to
