@@ -68,7 +68,17 @@ exports.phraseHint = onCall({ secrets: [anthropicApiKey], cors: true }, async (r
 
   const data = await response.json();
   const text = data?.content?.find((block) => block.type === 'text')?.text?.trim();
-  if (!text) throw new HttpsError('internal', 'LLM response had no text content.');
+  if (!text) {
+    // TEMPORARY DIAGNOSTIC (see TODO.md's Current Objective) — remove once the root cause of
+    // "LLM response had no text content" is found and fixed. Logs the full response so we can
+    // see what Anthropic actually sent back (e.g. an error object, a refusal, a different
+    // block shape) instead of just the fact that no text block was found.
+    console.error('phraseHint: no text block in Anthropic response', {
+      status: response.status,
+      data,
+    });
+    throw new HttpsError('internal', 'LLM response had no text content.');
+  }
 
   return { text };
 });

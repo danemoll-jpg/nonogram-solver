@@ -5,10 +5,12 @@
   directly via `<script type="module">`, matching the sibling `game-hub` project's pattern.
 - No TypeScript currently; the whole solver and UI are vanilla JS.
 - Firebase project exists (`nonogram-pro-e8a31`) for Auth/Firestore/Storage and Cloud
-  Functions. A `phraseHint` Cloud Function is written (`functions/index.js`) but not yet
-  deployed — deploying it is the current objective, see `TODO.md`.
-- Deploy target: Netlify, static-site mode (`netlify.toml`, `publish = "."`). Connecting
-  the Netlify site to auto-deploy from this repo is also part of the current objective.
+  Functions. The `phraseHint` Cloud Function (`functions/index.js`) is deployed and live,
+  confirmed producing real LLM-phrased hints — see `TODO.md` for deploy gotchas hit along the
+  way (Blaze plan requirement, several IAM grants, public-invoker access) if redeploying.
+- Deploy target: Netlify, static-site mode (`netlify.toml`, `publish = "."`). The Netlify
+  site is connected and auto-deploys from this repo's `main` branch — live at
+  https://nonogrampro.netlify.app/.
 
 ## Code Style & Architecture
 - Keep the solver's output as plain data ("deductions"), never player-facing text — the
@@ -40,8 +42,11 @@ Short version: items 1–7 (solver engine, hint/mistake/contradiction logic, and
 playable UI with LLM-backed hint phrasing), the UI consolidation pass, and a post-ship
 bug-fix/mechanics pass (Clear-all dialog, stray-footer/scroll cleanup, line locking, red
 contradiction numbers) are all done — see `TODO.md`'s Completed Tasks for the full
-breakdown. Current objective is deploying the Cloud Function and wiring up Netlify so the
-app is testable on a real device. Next up after that is item 10 (scan-existing-puzzle),
-rescoped to be self-contained rather than dependent on item 8. Item 8 (arbitrary-photo
-puzzle generation) and item 9 (Firestore shared library) remain deferred pending their own
-design pass; check with the project owner before picking either up.
+breakdown. The Cloud Function + Netlify deploy objective is done and verified (real LLM
+hint phrasing confirmed live) — only remaining step is the project owner's own iPad check.
+There's also a small time-boxed fast-follow: `functions/`'s Node 20 runtime is deprecated
+and decommissions 2026-10-30, needs bumping to Node 22 before then. Do not start item 10
+until the project owner confirms the iPad check. After that, item 10 (scan-existing-puzzle)
+is next, rescoped to be self-contained rather than dependent on item 8. Item 8
+(arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain deferred
+pending their own design pass; check with the project owner before picking either up.
