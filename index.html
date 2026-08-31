@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="page">
+  <div class="page" id="page-root">
     <header class="header">
       <h1 class="header__title"><span aria-hidden="true">🧩</span> Nonogram</h1>
       <p class="header__subtitle">Pick a puzzle, fill it in, and ask for a hint when you're stuck — it'll explain the reasoning, not just the answer.</p>
@@ -171,12 +171,22 @@
   <!-- Scan an existing puzzle (item 10) — photo/scan -> grid detection -> clue OCR -> a
        user-correction step, feeding the result in as a snapshot-origin (source: 'scan')
        puzzle. See src/scanUI.js for the step wiring; src/gridDetect.js, src/scanPuzzle.js
-       and src/ocr.js are the non-DOM pipeline pieces it calls. -->
-  <div id="scan-modal" class="modal-overlay hidden">
-    <div class="modal-card modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="scan-title">
-      <h2 id="scan-title" class="modal-card__title">Scan a puzzle</h2>
+       and src/ocr.js are the non-DOM pipeline pieces it calls.
 
-      <div class="modal-card__body">
+       A full-screen VIEW that replaces #page-root/#explain-panel while open (see
+       scanUI.js's openWizard/closeWizard), not a `.modal-overlay` — deliberately, after a
+       real-iOS bug spanning three failed fix attempts (see TODO.md): a `position: fixed`
+       overlay with an internal `overflow-y: auto` scroll region kept fighting iOS Safari
+       one way or another (background scrolling through it, or the region itself refusing to
+       scroll once background-scroll was blocked). A full-screen view has no overlay and no
+       nested scroll region to fight — it's normal in-flow page content, scrolled by the
+       browser's own native page scroll exactly like the rest of the app already is, which
+       sidesteps the whole bug category instead of chasing another fix for it. -->
+  <div id="scan-modal" class="scan-screen hidden">
+    <div class="scan-screen__panel">
+      <h2 id="scan-title" class="scan-screen__title">Scan a puzzle</h2>
+
+      <div class="scan-screen__body">
       <div class="scan-step" data-step="upload" id="scan-step-upload">
         <p>Choose a photo or screenshot of a nonogram puzzle — the grid lines and clue
           numbers should be clearly visible and not too skewed.</p>

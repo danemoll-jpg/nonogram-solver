@@ -36,6 +36,8 @@ const rowClueEls = [];
 const colClueEls = [];
 
 const els = {
+  pageRoot: document.getElementById('page-root'),
+  explainPanel: document.getElementById('explain-panel'),
   puzzleSelect: document.getElementById('puzzle-select'),
   boardRoot: document.getElementById('board-root'),
   statusLine: document.getElementById('status-line'),

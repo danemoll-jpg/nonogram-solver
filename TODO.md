@@ -245,12 +245,36 @@ Completed Tasks
        collapses its current `scrollTop` to 0 immediately, same as the position:fixed version
        needed, just for a different reason) — `window.scrollY` saved before locking, restored
        via `window.scrollTo` after unlocking.
-     - **Still not confirmed on a real iOS device as of this fix** (#1 and #2 both were, and
-       both had real bugs #2 and #3 above only surfaced that way) — this one needs the same
-       real-device check before being treated as actually resolved: open "Scan a puzzle",
-       confirm the background does NOT scroll, and confirm `.modal-card__body` DOES scroll
-       (there should be a visible native scrollbar/thumb during a scroll gesture, same as
-       desktop).
+     - **iOS follow-up #4 — architecture change, not another CSS tweak.** #3 also failed on a
+       real device: still no scrolling, no scrollbar, nothing. Three consecutive CSS-only
+       fixes to the same `position: fixed` overlay + internal `overflow-y: auto` scroll
+       region each fixed the specific symptom reported and broke (or failed to fix) the next
+       one — a pattern strongly suggesting the overlay-modal-with-internal-scroll shape
+       itself is what iOS Safari doesn't like here, not any one CSS property on it. Per the
+       project owner's own call (pushing untested fixes repeatedly wasn't cost-effective) and
+       CLAUDE.md's real-device-testing principle, stopped iterating on modal CSS and changed
+       the actual approach instead: **the scan wizard is now a full-screen VIEW, not a modal
+       overlay.** `#scan-modal` is no longer `.modal-overlay`/`.modal-card` — opening it
+       (`scanUI.js`'s `openWizard`) hides the normal page content (`#page-root`, plus the
+       fixed-position `#explain-panel`, added to `els` for this) and shows `#scan-modal` in
+       its place as ordinary in-flow page content (new `.scan-screen`/`.scan-screen__panel`/
+       `.scan-screen__body` classes in `styles.css`, deliberately with NO `max-height` or
+       `overflow-y` anywhere in the new styles). There is no overlay and no nested scroll
+       region left to fight: the browser's own native page/document scroll — never once in
+       question anywhere else in this app — is what carries the user down to "Looks good" and
+       back. `closeWizard` restores `#page-root`/`#explain-panel`. The five REMAINING modals
+       (confirm/complete/how-to-play/stats) are unaffected and still use the #3 fix
+       (`overflow: hidden` + `overscroll-behavior: contain`), since none of them were ever
+       reported broken and they don't have the scan wizard's especially tall,
+       variable-height content driving the issue.
+     - Verified structurally in the Browser pane (mobile viewport): `document.body`'s own
+       `scrollHeight` exceeds `window.innerHeight` with `overflow: visible` throughout (no
+       lock, no fixed positioning anywhere) — i.e. this is now provably just an ordinary tall
+       webpage, the single most well-tested code path a browser has. **Not yet confirmed on a
+       real iOS device** — given the last three rounds, treat this as unverified until the
+       project owner confirms; if THIS still doesn't scroll on a real device, the problem is
+       almost certainly not scroll-CSS-related at all (worth checking for a global touch/
+       gesture handler, or a viewport meta-tag issue, next).
 
 Current Objective (Focus Area)
 

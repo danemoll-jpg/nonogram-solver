@@ -664,7 +664,50 @@ body {
 }
 
 /* Scan-a-puzzle wizard (item 10) — see src/scanUI.js for the step-by-step logic this
-   supports: upload -> drag a box around the grid -> OCR -> correct -> play. */
+   supports: upload -> drag a box around the grid -> OCR -> correct -> play.
+
+   A full-screen VIEW (see index.html's own comment on #scan-modal for the real-iOS bug
+   history behind this), not a modal overlay — replaces #page-root/#explain-panel in normal
+   document flow while open, rather than floating on top of them. Styled to match the rest
+   of the app's own page/panel look (.page/.board-panel) for visual consistency, but there's
+   no dialog semantics (no role="dialog"/aria-modal) since this isn't a floating dialog
+   anymore — it's the page's actual content while scanning is in progress. */
+.scan-screen {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+}
+
+.scan-screen__panel {
+  max-width: 40rem;
+  margin: 0 auto;
+  background: var(--panel-bg);
+  border: 2px solid var(--gold);
+  border-radius: 1rem;
+  padding: 1.75rem 2rem;
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.25);
+}
+
+.scan-screen__title {
+  margin: 0 0 1rem;
+  color: var(--gold);
+  font-size: 1.4rem;
+  text-align: center;
+}
+
+.scan-screen__title,
+.scan-screen__body {
+  text-align: left;
+}
+
+/* The whole point of this being a screen instead of a modal: NO max-height/overflow-y here.
+   Content just flows to whatever height it needs, and the browser's own native page scroll
+   (document/body — already used everywhere else in the app, never in question) handles the
+   rest. See index.html's #scan-modal comment for the three rounds of real-iOS scroll bugs
+   this sidesteps rather than re-fights. */
+.scan-screen__body {
+  margin-bottom: 1.25rem;
+}
 
 .scan-file-input {
   color: var(--text);

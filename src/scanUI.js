@@ -129,13 +129,22 @@ export function initScanWizard({ els, onPuzzleReady }) {
     showStep('upload');
   }
 
+  // #scan-modal is a full-screen VIEW, not a floating modal (see its own comment in
+  // index.html for the real-iOS scroll-bug history behind that) — opening it means hiding
+  // the normal page content (#page-root, and the fixed-position #explain-panel, which would
+  // otherwise float over this screen's own content) rather than layering on top of it.
   function openWizard() {
     resetWizard();
+    els.pageRoot.classList.add('hidden');
+    els.explainPanel.classList.add('hidden');
     els.scanModal.classList.remove('hidden');
+    window.scrollTo(0, 0); // start at the top of the fresh screen, not wherever the page was scrolled to
   }
 
   function closeWizard() {
     els.scanModal.classList.add('hidden');
+    els.pageRoot.classList.remove('hidden');
+    els.explainPanel.classList.remove('hidden');
     terminateOcr().catch(() => {}); // free the OCR worker's wasm/network resources
   }
 
