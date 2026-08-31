@@ -29,6 +29,7 @@ import {
 } from './gridDetect.js';
 import { parseClueText, buildScannedPuzzle } from './scanPuzzle.js';
 import { recognizeClueStrip, terminateOcr } from './ocr.js';
+import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines } from './ocrSegment.js';
 
 // Longest side, in pixels, for the canvas used for both on-screen dragging and grid-line
 // analysis. Full sensor-resolution photos are unnecessary (and slow) for line detection;
@@ -372,7 +373,16 @@ export function initScanWizard({ els, onPuzzleReady }) {
     if (!state.gridRect) return;
     const { width, height } = state.analysisCanvas;
     const gray = analysisGrayscale();
-    const searchPx = Math.max(4, Math.round(Math.min(width, height) * 0.04));
+    // A SMALL search radius on purpose (was 4% of the image's shorter dimension, e.g. ~32px
+    // on an 800px-wide analysis canvas) — confirmed against a real screenshot: this app
+    // draws each clue number on its own near-black background chip right next to the grid's
+    // top/left border, which is darker than the border itself. A generous search window
+    // reliably found those chips instead, growing the confirmed box up past the top row and
+    // left past the first column rather than the (already accurate — see TODO.md)
+    // auto-detected edge it started from. This radius only smooths over a few px of natural
+    // imprecision (auto-detection rounding, or a slightly-off manual drag/handle nudge); it's
+    // deliberately too small to ever jump a whole cell into unrelated content.
+    const searchPx = Math.max(2, Math.round(Math.min(width, height) * 0.01));
     const snapped = snapRectToBorder(gray, width, height, state.gridRect, { searchPx });
     state.gridRect = snapped;
     redrawGridCanvas();
@@ -462,6 +472,118 @@ export function initScanWizard({ els, onPuzzleReady }) {
     return threshold;
   }
 
+  // Padding (px, at the strip crop's own already-upscaled resolution) added around a crop on
+  // every side before handing it to Tesseract. Not a minor cosmetic margin — confirmed
+  // directly (see TODO.md) that Tesseract returns nothing at all (confidence 0, every page-
+  // segmentation mode tried) for a glyph cropped tight to its own ink with only ~4px of
+  // border, on an otherwise perfectly legible isolated digit; 8px was enough to reliably
+  // recognize it. This is comfortably above that floor.
+  const CROP_PADDING = 12;
+
+  // Locates every text LINE and, within each line, every clue NUMBER (as a pixel x-range and
+  // a digit count) in an already-binarized (pure black/white, see cropStripCanvas) strip
+  // canvas — using real pixel geometry (src/ocrSegment.js), not Tesseract's own word-boundary
+  // detection. Lines (top to bottom) exist because a clue margin can stack multiple rows of
+  // numbers when a clue has more numbers than fit on one line (see computeClueBands's
+  // column-clue case, which is the tall, narrow, multi-line kind).
+  function findStripLines(canvas) {
+    const { width, height } = canvas;
+    const ctx = canvas.getContext('2d');
+    const { data } = ctx.getImageData(0, 0, width, height);
+
+    // Ink is whichever color is the minority overall — this app's clue digits happen to
+    // render lighter than their background, but working off "the less common of the two
+    // binarized colors" instead of assuming a fixed polarity keeps this correct regardless.
+    let whiteCount = 0;
+    for (let i = 0; i < width * height; i++) if (data[i * 4] > 128) whiteCount++;
+    const inkIsWhite = whiteCount < (width * height) / 2;
+    const isInk = (x, y) => {
+      const v = data[(y * width + x) * 4];
+      return inkIsWhite ? v > 128 : v <= 128;
+    };
+
+    const hasInkRow = Array.from({ length: height }, (_, y) => {
+      for (let x = 0; x < width; x++) if (isInk(x, y)) return true;
+      return false;
+    });
+
+    const lineBands = filterNoiseLines(findRuns(hasInkRow));
+    return lineBands.map(({ start: y0, end: y1 }) => {
+      // Column ink is checked only within THIS line's own row-span — checking the whole
+      // strip height would merge every line's glyphs into one meaningless column profile.
+      const hasInkCol = Array.from({ length: width }, (_, x) => {
+        for (let y = y0; y <= y1; y++) if (isInk(x, y)) return true;
+        return false;
+      });
+      const numbers = groupGlyphsIntoNumbers(findRuns(hasInkCol));
+      return { y0, y1, numbers };
+    });
+  }
+
+  // Crops [x0,x1] x [y0,y1] out of `canvas` with CROP_PADDING added on every side (clamped to
+  // the canvas bounds).
+  function padCropCanvas(canvas, x0, x1, y0, y1) {
+    const { width, height } = canvas;
+    const px0 = Math.max(0, x0 - CROP_PADDING);
+    const px1 = Math.min(width - 1, x1 + CROP_PADDING);
+    const py0 = Math.max(0, y0 - CROP_PADDING);
+    const py1 = Math.min(height - 1, y1 + CROP_PADDING);
+    const cw = px1 - px0 + 1;
+    const ch = py1 - py0 + 1;
+    const sub = document.createElement('canvas');
+    sub.width = cw;
+    sub.height = ch;
+    sub.getContext('2d').drawImage(canvas, px0, py0, cw, ch, 0, 0, cw, ch);
+    return sub;
+  }
+
+  // OCRs an already-cropped strip, line by line, joining recognized numbers with a space
+  // within a line and a newline between lines (parseClueText already treats space/comma/
+  // newline as interchangeable separators). For each line, OCRs the WHOLE line in one call
+  // rather than each number alone — recognizing a single isolated digit turns out to be
+  // measurably LESS reliable than recognizing it in context: confirmed directly against a
+  // real "4" glyph that Tesseract read correctly as part of a longer strip, but read as the
+  // *letter* "A" (rejected outright once digit-whitelisted, i.e. returned nothing) once
+  // cropped alone with no surrounding characters. What whole-line recognition can't be
+  // trusted for is *spacing* — where Tesseract cannot reliably tell "1" then "1" apart from
+  // "11" (see ocrSegment.js's own comment) — so this strips the line's OCR'd text down to
+  // just its digits and re-splits that digit stream using the REAL per-number digit counts
+  // already known from pixel geometry (`numbers[].glyphCount`, one blob per digit). That
+  // only works if the digit COUNT Tesseract found matches what geometry expects; if it
+  // doesn't (a misread that also drops or adds a digit, not just misplaces a space), this
+  // falls back to OCRing that one line's numbers individually — worse per-glyph odds, but
+  // only paid when the fast path is already known to be untrustworthy for that line.
+  async function recognizeStripSegmented(canvas) {
+    const lines = findStripLines(canvas);
+    const lineTexts = [];
+    for (const { y0, y1, numbers } of lines) {
+      if (numbers.length === 0) continue;
+      const lineCanvas = padCropCanvas(canvas, 0, canvas.width - 1, y0, y1);
+      const rawText = await recognizeClueStrip(lineCanvas);
+      const digits = rawText.replace(/\D/g, '');
+      const expectedTotal = numbers.reduce((sum, n) => sum + n.glyphCount, 0);
+
+      if (digits.length === expectedTotal) {
+        let pos = 0;
+        const numberTexts = numbers.map((n) => {
+          const chunk = digits.slice(pos, pos + n.glyphCount);
+          pos += n.glyphCount;
+          return chunk;
+        });
+        lineTexts.push(numberTexts.join(' '));
+      } else {
+        const numberTexts = [];
+        for (const n of numbers) {
+          const numCanvas = padCropCanvas(canvas, n.start, n.end, y0, y1);
+          const text = await recognizeClueStrip(numCanvas);
+          numberTexts.push(text.trim());
+        }
+        lineTexts.push(numberTexts.join(' '));
+      }
+    }
+    return lineTexts.join('\n');
+  }
+
   function buildClueRow(container, labelText, canvas, prefillText) {
     const row = document.createElement('div');
     row.className = 'scan-clue-row';
@@ -509,7 +631,7 @@ export function initScanWizard({ els, onPuzzleReady }) {
     let done = 0;
     for (let i = 0; i < rowStrips.length; i++) {
       const canvas = cropStripCanvas(rowStrips[i]);
-      const text = await recognizeClueStrip(canvas);
+      const text = await recognizeStripSegmented(canvas);
       done++;
       els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
       const input = buildClueRow(els.scanRowClueList, `Row ${i + 1}`, canvas, parseClueText(text).join(', '));
@@ -517,7 +639,7 @@ export function initScanWizard({ els, onPuzzleReady }) {
     }
     for (let i = 0; i < colStrips.length; i++) {
       const canvas = cropStripCanvas(colStrips[i]);
-      const text = await recognizeClueStrip(canvas);
+      const text = await recognizeStripSegmented(canvas);
       done++;
       els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
       const input = buildClueRow(els.scanColClueList, `Col ${i + 1}`, canvas, parseClueText(text).join(', '));

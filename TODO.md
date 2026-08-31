@@ -458,6 +458,83 @@ Completed Tasks
        puzzle, and reporting how far off — that tells us whether `countDarkRunsLocal`'s
        margin (currently 15) needs further adjustment, versus something else entirely.
 
+* **Round 3: tested against the FULL, uncropped real screenshot (the round-2 file had been
+  cropped by the OS screenshot tool, cutting off several rows) — grid detection landed
+  essentially exact, then two more real bugs surfaced and got fixed: a "Looks good"
+  mis-snap, and OCR merging adjacent clue numbers with no space (e.g. "2 5" read as "25",
+  "1 1 4 4" as "1144").**
+  1. **Grid detection validated: rows exactly 25/25, cols 26 (off by one) on the first
+     try against the complete image** — confirms round 2's fixes generalize beyond the
+     synthetic reproductions used to build them. The one remaining column miscount traced
+     to a messy, fragmented stretch of local detections (likely fill/X-mark interference)
+     in one part of the column profile — not chased further; a 1-digit correction is well
+     within what the always-editable fields are for.
+  2. **Fixed: clicking "Looks good" grew the confirmed box up past the top row and left
+     past the first column**, even though the auto-detected starting box was already
+     correct. Root cause: `snapRectToBorder`'s search radius (4% of the image's shorter
+     dimension, ~32px) was generous enough to reach this app's near-black clue-number
+     background chips, which are darker than the grid's own border — so "find the
+     darkest nearby pixel" reliably found a chip instead of confirming the already-good
+     edge. **Fix**: `scanUI.js`'s confirm-button handler now uses a much smaller search
+     radius (1% instead of 4%) — enough to smooth a few px of natural imprecision,
+     deliberately too small to ever jump a whole cell into unrelated content. Verified
+     against the real image: the box no longer grows on confirm.
+  3. **Fixed: OCR silently merging adjacent clue numbers with no separator.** Root-caused
+     in two layers, both confirmed by extracting and inspecting the wizard's own real
+     crop images directly (not synthetic guesses):
+     - Tesseract, at every page-segmentation mode tried, cannot reliably tell two
+       adjacent single-digit numbers apart from one multi-digit number when a puzzle app
+       renders every digit at a fairly uniform small gap — measuring real crops directly
+       found the gap between digits of a genuine multi-digit number ("11", "15") is
+       consistently 10-12px, while the gap between distinct numbers is consistently
+       18-27px, across four independent real examples (no overlap). New module
+       **`src/ocrSegment.js`** (pure, unit-tested per this project's convention — see
+       `test/ocrSegment.test.js`, built from these exact real measurements, not synthetic
+       ones): `findRuns` (contiguous-true-run finder, reused for both text-line-finding
+       and glyph-blob-finding), `groupGlyphsIntoNumbers` (merges glyph blobs into number
+       tokens using the calibrated ~15px gap threshold, tracking `glyphCount` per group),
+       `filterNoiseLines` (drops a line band under 40% of the tallest line band in the
+       same crop — real crops can contain a tiny few-px sliver of bleed-through ink
+       alongside their genuine line of digits, confirmed directly).
+     - **Isolating each recognized number into its own OCR call (the obvious next step)
+       traded the spacing bug for a worse one**: confirmed directly that Tesseract reads
+       a real, perfectly legible "4" glyph correctly as part of a longer strip, but reads
+       the *identical* glyph as the letter "A" once cropped alone with no surrounding
+       characters — rejected outright (empty output) once digit-whitelisted. Isolated
+       single-character recognition is measurably less reliable than recognition with
+       surrounding context, not just a minor accuracy difference.
+       **Working design** (`scanUI.js`'s `recognizeStripSegmented`): OCR each *whole
+       line* in one call (keeps Tesseract's context-driven accuracy), strip its output
+       down to just the digit characters, and re-split that digit stream using the
+       *real* per-number digit counts already known from pixel geometry
+       (`groupGlyphsIntoNumbers`'s `glyphCount`) — this only works when the digit COUNT
+       Tesseract found matches what geometry expects, which is the common case; when it
+       doesn't (a misread that drops/adds a digit, not just misplaces a space), it falls
+       back to OCRing that one line's numbers individually, accepting the isolated-crop
+       accuracy risk only where the fast path is already known untrustworthy.
+     - **Also fixed along the way**: isolated/individual number crops (used by the
+       fallback path above) were originally padded only ~4px on each side — confirmed
+       directly that Tesseract returns nothing at all (confidence 0, every PSM tried)
+       for a glyph cropped that tight, on an otherwise perfectly legible isolated digit;
+       8px was enough to reliably recognize it. `CROP_PADDING` raised to 12px for margin.
+  4. **End-to-end result against the real, uncropped screenshot, through the actual
+     wizard (not just the underlying functions): went from completely unusable merged/
+     garbled output ("25", "1144", "615", "979") to mostly-correct clue text** — roughly
+     half the rows/columns tested came back byte-for-byte matching the visible reference
+     image (including genuine two-digit numbers like "6, 15" and "1, 4, 11"), with the
+     remainder now showing *ordinary* OCR misreads (an occasional dropped or substituted
+     digit, e.g. "5 10" read as "5 1") rather than systematic merging failures. This
+     residual error rate is exactly what the correction step's editable-text-next-to-a-
+     thumbnail design has always existed to catch — not chased further into diminishing
+     returns; **npm test: 478 passed, 0 failed** (10 new tests, all built from real
+     measured crop data rather than synthetic guesses).
+  5. **Still open**: further OCR accuracy gains (the remaining occasional dropped/wrong
+     digit) would need either a different OCR engine/config or more sophisticated
+     per-glyph confidence handling — not pursued this round since the failure mode is now
+     ordinary recognition noise rather than a systematic, fixable bug. If the project
+     owner finds the remaining error rate still too high in practice, worth discussing
+     as its own follow-up rather than more blind threshold tuning.
+
 Next Steps (Do Not Start Yet)
 
 * Item 8 — Photo → puzzle generation (arbitrary photo, thresholded/downsampled grid; the
