@@ -82,6 +82,23 @@ side item — is now complete across grid detection, clue OCR, and fill-state ca
 (`src/gridDetect.js`, `src/scanPuzzle.js`, `src/ocr.js`, `src/ocrSegment.js`,
 `src/scanUI.js`, `src/cellStateDetect.js`).
 
-**No current objective** — check with the project owner on what's next. Item 8
-(arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain deferred
-pending their own design pass.
+Fill-state detection's initial ship had an iOS-only follow-up: the scan wizard couldn't be
+scrolled on a real device. Took four rounds to actually fix — three CSS-only attempts on the
+modal itself (nested-scroll conflict, then a missing background-scroll lock, then that
+lock's own `position: fixed` side effect breaking the modal's own scroll) each fixed the
+reported symptom and broke or missed the next one on-device. **The fix that actually worked
+was architectural, not another CSS property**: the scan wizard is no longer a modal overlay
+at all — it's a full-screen view that replaces the normal page content in the DOM (see
+`.scan-screen` in `styles.css`, `openWizard`/`closeWizard` in `src/scanUI.js`), so it's
+scrolled by the browser's own native page scroll instead of a nested `overflow` region
+fighting a `position: fixed` ancestor. **Confirmed working on a real iOS device by the
+project owner.** Worth remembering as a general lesson for this app: when an iOS-only
+scroll/touch bug survives a couple of targeted CSS fixes, consider removing the risky
+structural pattern (overlay + nested scroll) rather than continuing to patch it — each
+on-device re-test round has a real cost for the project owner, confirmed directly by their
+own feedback mid-fix.
+
+**Current objective**: the project owner flagged some further clean-up while testing the
+above but hasn't detailed it yet — check `TODO.md`'s Current Objective / wait for that
+follow-up before starting new work. Item 8 (arbitrary-photo puzzle generation) and item 9
+(Firestore shared library) remain deferred pending their own design pass.

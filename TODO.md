@@ -262,26 +262,30 @@ Completed Tasks
        `overflow-y` anywhere in the new styles). There is no overlay and no nested scroll
        region left to fight: the browser's own native page/document scroll — never once in
        question anywhere else in this app — is what carries the user down to "Looks good" and
-       back. `closeWizard` restores `#page-root`/`#explain-panel`. The five REMAINING modals
+       back. `closeWizard` restores `#page-root`/`#explain-panel`. The four REMAINING modals
        (confirm/complete/how-to-play/stats) are unaffected and still use the #3 fix
        (`overflow: hidden` + `overscroll-behavior: contain`), since none of them were ever
        reported broken and they don't have the scan wizard's especially tall,
        variable-height content driving the issue.
-     - Verified structurally in the Browser pane (mobile viewport): `document.body`'s own
-       `scrollHeight` exceeds `window.innerHeight` with `overflow: visible` throughout (no
-       lock, no fixed positioning anywhere) — i.e. this is now provably just an ordinary tall
-       webpage, the single most well-tested code path a browser has. **Not yet confirmed on a
-       real iOS device** — given the last three rounds, treat this as unverified until the
-       project owner confirms; if THIS still doesn't scroll on a real device, the problem is
-       almost certainly not scroll-CSS-related at all (worth checking for a global touch/
-       gesture handler, or a viewport meta-tag issue, next).
+     - **Confirmed working on a real iOS device by the project owner** — the full-screen-view
+       approach (#4) is the one that actually fixed it, after three CSS-only attempts on the
+       modal shape (#1-#3) each failed differently on-device. Take the lesson forward: for
+       this app's iOS-testing loop specifically, a structural change that removes a whole bug
+       category outperformed incremental CSS patches on the same structure, and burned real
+       cost (the project owner's own time re-testing on-device after each push) getting
+       there — prefer eliminating the risky pattern (overlay + nested scroll) over patching
+       it again if a similar iOS-only symptom shows up elsewhere in this app.
+     - **Follow-up cleanup identified by the project owner, not yet detailed** — expect a
+       summary of specific items next session before starting new work here.
 
 Current Objective (Focus Area)
 
-* None right now — item 10 (scan-existing-puzzle, including fill-state detection) is
-  complete. Check with the project owner on what's next: item 8 (photo → puzzle generation)
-  and item 9 (Firestore shared library) are both still open and undesigned, see "Next Steps"
-  below.
+* **Waiting on the project owner's cleanup list.** Item 10 (scan-existing-puzzle, fill-state
+  detection, and the iOS scroll fix) is functionally complete and confirmed working on a
+  real device, but the project owner flagged "some more clean up" while things were still
+  fresh in mind and will follow up with specifics — pick that up first, before item 8
+  (photo → puzzle generation) or item 9 (Firestore shared library), both still open and
+  undesigned (see "Next Steps" below).
 
 Next Steps (Do Not Start Yet)
 
