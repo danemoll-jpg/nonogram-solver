@@ -158,9 +158,10 @@ Completed Tasks
   one size this was originally tuned at. CSS-only, no Cloud Function deploy needed.
 
 * **Item 10 — Scan-existing-puzzle flow, v1 — built and working end-to-end (verified
-  against a synthetic test photo in the live app; not yet tried against a real
-  phone-camera photo — see caveat below).** New "Scan a puzzle" entry in the Help menu opens
-  a step-by-step wizard: upload/take a photo -> drag a box around just the grid squares ->
+  against a synthetic test image in the live app; not yet tried against a real photo or
+  screenshot — see caveat below, including a note on the project owner's actual use case).**
+  New "Scan a puzzle" entry in the Help menu opens
+  a step-by-step wizard: choose an image -> drag a box around just the grid squares ->
   detect the grid -> OCR every row's/column's clue strip -> correct any misreads -> solve and
   play. Feeds the result in as a `source: 'scan'` puzzle — the "no move history" and "never
   counts toward stats" behavior were both already designed for and stubbed in from an earlier
@@ -219,18 +220,25 @@ Completed Tasks
      strips correctly and misread `1  1` as `11` (a real OCR ambiguity — corrected by hand in
      the wizard's own correction step, which is exactly what that step is for), and the
      resulting puzzle solved to and played as the correct Heart pattern, completion modal and
-     all. **Caveat for the project owner:** this confirms the pipeline is wired correctly
-     end-to-end, but it's only been exercised against a clean synthetic image — a real
-     phone-camera photo (uneven lighting, slight skew, JPEG noise, a less print-perfect font)
-     hasn't been tried yet and may need threshold/tuning follow-up once it is.
+     all. **Caveat, updated after talking with the project owner:** their actual use case is
+     screenshots of a nonogram puzzle (from another app/site), not a physical print
+     photographed with a camera — a friendlier input than what the original caveat here
+     worried about (no lighting variation, no skew, no camera noise, crisp digital font
+     rendering), so this may need little to no follow-up tuning. Dropped the file input's
+     `capture="environment"` attribute accordingly, since it biases mobile browsers toward
+     opening the camera rather than a normal photo/file picker — wrong nudge for "pick an
+     existing screenshot." Still genuinely unverified against a real screenshot, just on
+     noticeably friendlier footing than the original photo-focused caveat implied.
 
 Current Objective (Focus Area)
 
 * None open right now — both halves of the previous objective (the clue-spacing fix and
   item 10 v1) are done, committed together, and confirmed working in the live app (against a
-  synthetic test photo — see item 10's caveat above for what's still unverified). Next up is
-  either a real-photo tuning pass for item 10, or picking up item 8 or item 9 — **check with
-  the project owner before starting either**, per their own deferred status below.
+  synthetic test photo — see item 10's caveat above for what's still unverified, and for why
+  a real screenshot is expected to be an easier case than that caveat originally implied).
+  Next up is either a real-screenshot tuning pass for item 10, or picking up item 8 or item
+  9 — **check with the project owner before starting either**, per their own deferred status
+  below.
 
 Next Steps (Do Not Start Yet)
 

@@ -52,10 +52,13 @@ completion, grid scales to fill the screen, sound-effect plumbing and real audio
 persistent mute toggle, cross-device stats + pairing via Anonymous Auth, and the Node 20→22
 runtime bump), the clue-number spacing fix, and **item 10 (scan-existing-puzzle flow, v1)**
 are all done and confirmed working — the spacing fix and item 10 in the live app locally
-(item 10 against a synthetic test photo only; a real phone-camera photo hasn't been tried
-yet), the rest also deployed. See `TODO.md`'s Completed Tasks for the full breakdown,
-including item 10's design tradeoffs (`src/gridDetect.js`, `src/scanPuzzle.js`,
-`src/ocr.js`, `src/scanUI.js`) and its real-photo-testing caveat.
+(item 10 against a synthetic test image only; not yet tried against a real photo or
+screenshot). The project owner's actual use case is screenshots of a puzzle rather than a
+camera photo of a printed one — a friendlier input (no lighting/skew/camera noise, crisp
+digital text) — so the file input no longer nudges mobile browsers toward the camera
+(`capture="environment"` removed). The rest is also deployed. See `TODO.md`'s Completed
+Tasks for the full breakdown, including item 10's design tradeoffs (`src/gridDetect.js`,
+`src/scanPuzzle.js`, `src/ocr.js`, `src/scanUI.js`) and its real-image-testing caveat.
 
 No open Current Objective right now. Item 8 (arbitrary-photo puzzle generation) and item 9
 (Firestore shared library) remain deferred pending their own design pass — check with the
