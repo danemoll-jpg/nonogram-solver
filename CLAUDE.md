@@ -44,17 +44,17 @@ up to date than this file's summary below.
 Short version: items 1–7 (solver engine, hint/mistake/contradiction logic, and a full
 playable UI with LLM-backed hint phrasing), the UI consolidation pass, a post-ship
 bug-fix/mechanics pass, and the iPad-verification follow-up pass (puzzle-name hidden until
-completion, grid scales to fill the screen, sound-effect plumbing against placeholder audio,
+completion, grid scales to fill the screen, sound-effect plumbing and real audio files,
 persistent mute toggle, cross-device stats + pairing via Anonymous Auth, and the Node 20→22
-runtime bump) are all done, deployed, and confirmed working live. A follow-up clue-number
-spacing bug (multi-number clues like `1, 1` misreading as `11`) is also fixed, and
-everything is committed/pushed — `main`/Netlify are current. See `TODO.md`'s Completed
+runtime bump) are all done, deployed, and confirmed working live. See `TODO.md`'s Completed
 Tasks for the full breakdown.
 
-Current objective is **item 10, scan-existing-puzzle flow**: read an already-printed
-puzzle from a photo/scan (grid detection + clue OCR + a user-correction step), self-contained
-rather than waiting on item 8. Real audio files are now in place in `assets/sounds/` — no
-loose ends remain from the prior pass.
+Current objective has two parts, meant to ship together in one push: a still-open
+clue-number spacing bug (multi-number clues like `1, 1` can misread as `11`, likely tied to
+the dynamic `--cell-size` scaling — CSS-only, no Cloud Function deploy needed), and **item
+10, scan-existing-puzzle flow** (read an already-printed puzzle from a photo/scan — grid
+detection + clue OCR + a user-correction step — self-contained rather than waiting on item
+8). Bundle both into the same commit/push rather than deploying the spacing fix separately.
 
 Item 8 (arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain
 deferred pending their own design pass; check with the project owner before picking either
