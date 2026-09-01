@@ -84,6 +84,48 @@ function range(a, b) {
   return out;
 }
 
+// ---- Per-number anchoring (display-only — see app.js's clue-graying) -------------------
+//
+// Current Objective (per-number clue gray-out — see TODO.md): isLineSatisfied (model.js)
+// grays out a WHOLE clue only once every one of its numbers matches, all at once. This
+// answers a finer question: which INDIVIDUAL numbers within a clue are independently
+// provable right now? It's edgeCompletionDeductions' own reasoning (a run touching a line's
+// boundary that already matches its clue number) generalized to walk the WHOLE clue inward
+// from an edge, one number at a time, instead of stopping after the first.
+//
+// A number counts as anchored only once its own run is providably fixed in place: either it
+// touches the true edge of the line, or the run immediately after (walking left-to-right) or
+// before (right-to-left) an already-anchored neighbor, with every cell in between confirmed
+// EMPTY. Deliberately requires an actual EMPTY mark, not merely "not FILLED" — a still-
+// UNKNOWN gap cell means a later move could still change where that run ends up sitting, so
+// "a run of the right length exists" alone is never enough (see TODO.md's own `5, 3, 2`
+// example: a complete run of 3 floating with neither neighbor anchored yet stays unanchored).
+function walkAnchorsFromStart(line, clue) {
+  const n = line.length;
+  const anchored = new Array(clue.length).fill(false);
+  let pos = 0;
+  for (let i = 0; i < clue.length; i++) {
+    while (pos < n && line[pos] === EMPTY) pos++; // skip a confirmed-empty gap
+    if (pos >= n || line[pos] !== FILLED) break; // no confirmed start for this run yet
+    let runEnd = pos;
+    while (runEnd < n && line[runEnd] === FILLED) runEnd++;
+    if (runEnd - pos !== clue[i]) break; // wrong length: still growing (UNKNOWN ahead) or already contradictory either way, not provable
+    if (runEnd < n && line[runEnd] !== EMPTY) break; // run's far boundary not confirmed yet
+    anchored[i] = true;
+    pos = runEnd;
+  }
+  return anchored;
+}
+
+// Walks from both ends (a number can anchor from either direction — e.g. a clue's last
+// number can anchor off the line's right edge even before anything about its first number is
+// known) and combines them; see walkAnchorsFromStart's own comment for the actual reasoning.
+export function anchoredClueNumbers(line, clue) {
+  const fromLeft = walkAnchorsFromStart(line, clue);
+  const fromRight = walkAnchorsFromStart(line.slice().reverse(), clue.slice().reverse()).reverse();
+  return clue.map((_, i) => fromLeft[i] || fromRight[i]);
+}
+
 // ---- Technique 3: general line solve (automaton / DP) ----------------------
 
 // Builds the block sequence a valid line must match: gap, run, gap, run, ..., gap.

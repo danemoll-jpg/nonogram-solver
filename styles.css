@@ -21,41 +21,62 @@
   box-sizing: border-box;
 }
 
-/* Current Objective #3: eliminate overscroll bounce/rubber-band app-wide, without disabling
-   scroll on content that's genuinely taller than the viewport. `overscroll-behavior: none` on
-   the outer scroll boundary (html + body — the scan wizard is a full-screen VIEW with no
-   nested scroll container of its own, see .scan-screen's comment below, so it scrolls via
-   this same outer boundary) stops the rubber-band glow/chain at the very top/bottom of the
-   page, which is exactly "bounce" and nothing else — it has no effect on whether the page can
-   scroll at all. Normal play shouldn't need to scroll in the first place (fitBoardToViewport
-   sizes the board to fit beneath the header down to the fixed explain panel), so this mostly
-   just kills the bounce on transient cases (e.g. a mobile browser's address bar animating
-   in/out mid-play shifting window.innerHeight by a few px before the next resize event fires)
-   rather than suppressing scroll on any real overflow. Regions that DO need their own
-   internal scroll for genuinely tall content (.modal-card__body, .scan-clue-list,
-   .scan-fillstate-grid, .explain-panel) keep `overscroll-behavior: contain` on themselves —
-   scoped to just that region, so scrolling stays intact there too. */
-html,
-body {
+/* Current Objective (app-wide scroll bug, round 2 — see TODO.md and app.js's own comment on
+   the now-removed JS scroll-lock for the full history): round 1 (magnitude-gating the resize
+   listeners) did not hold on real hardware, and the project owner asked to "just lock it
+   down" rather than another incremental patch. This is that more forceful, structural fix:
+   <html>/<body> are UNCONDITIONALLY non-scrolling — not just during transient bounce, and not
+   just while a modal is open (the old JS lock only did it conditionally; app.js explains why
+   generalizing that exact, already-proven-safe technique is what changed) — and exactly one
+   region owns real scroll at a time: #page-root during normal play, .scan-screen while the
+   scan wizard is open, each via their own `overflow-y: auto` (the same pattern
+   `.modal-card__body` already used successfully). A permanently non-scrolling document can
+   never trigger iOS's chrome (address bar/toolbar) auto-hide-on-scroll behavior, which is what
+   was driving the round-1 bug's feedback loop in the first place — routine content reflow no
+   longer has any document-level scroll for iOS to react to, so there's no viewport-height
+   blip left for fitBoardToViewport to (over)react to either. `overscroll-behavior: none` here
+   is now mostly redundant with `overflow: hidden` but kept as a second guard against rubber-
+   band chaining on browsers that honor one but not the other. */
+html {
+  height: 100%;
+  overflow: hidden;
   overscroll-behavior: none;
 }
 
 body {
   margin: 0;
-  min-height: 100vh;
+  height: 100%;
   /* iOS scroll regression fix (see TODO.md): 100vh is the LAYOUT viewport, which does not
      shrink when the on-screen keyboard opens, leaving the page reserving room for space
      that's no longer visible. 100dvh (the DYNAMIC viewport — shrinks with the keyboard)
-     overrides it in browsers that support it; unsupported browsers simply keep the 100vh
+     overrides it in browsers that support it; unsupported browsers simply keep the 100%
      line above, since an unrecognized value falls back to whatever was already set rather
-     than clearing it. */
-  min-height: 100dvh;
+     than clearing it. Deliberately an exact height now, not min-height: body must never grow
+     taller than the viewport to fit its content — that's exactly what #page-root's own
+     internal overflow-y:auto (below) exists to absorb instead. */
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: var(--text);
   background:
     radial-gradient(ellipse at top, rgba(230, 183, 63, 0.08), transparent 60%),
     linear-gradient(180deg, var(--felt-dark), var(--felt-darker));
   background-attachment: fixed;
+}
+
+.page {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 2rem;
+  /* #page-root is the one scrolling region during normal play (see the html/body comment
+     above) — fills body's now-fixed height exactly, and scrolls internally if its own content
+     (rare — fitBoardToViewport already sizes the board to avoid this in the common case) ever
+     exceeds it, rather than growing body/document. */
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   /* Reserve room for the fixed #explain-panel (see its own comment) so it never covers the
      bottom of a tall board. --explain-panel-space is written by app.js's
      syncExplainPanelSpace from the panel's own REAL rendered height (via a ResizeObserver),
@@ -65,14 +86,10 @@ body {
      viewport with no keyboard involved — see TODO.md's "baseline" symptom), and would drift
      further any time the panel's content made it taller than its own min-height. The 5.5rem
      fallback only matters for the brief window before the ResizeObserver's first callback
-     fires (or if JS fails to load at all).  */
+     fires (or if JS fails to load at all). Lives on #page-root now (moved off body, which no
+     longer scrolls at all — see above) since it's this element's own scrollable content that
+     needs to clear the fixed panel. */
   padding-bottom: var(--explain-panel-space, 5.5rem);
-}
-
-.page {
-  max-width: 72rem;
-  margin: 0 auto;
-  padding: 2.5rem 1.5rem 2rem;
 }
 
 .header {
@@ -305,9 +322,12 @@ body {
 
 .nono-clue {
   color: var(--text-dim);
-  /* Scales with the board (see --cell-size, set by app.js's fitBoardToViewport) at the same
-     ratio the original fixed 0.78rem had to the original fixed 1.9rem cell. */
-  font-size: calc(var(--cell-size, 1.9rem) * 0.41);
+  /* --clue-font-size is set by app.js's fitBoardToViewport — scales with --cell-size at the
+     same ratio the original fixed 0.78rem had to the original fixed 1.9rem cell, EXCEPT it no
+     longer follows --cell-size all the way down on a large puzzle (Current Objective #3, see
+     TODO.md and MIN_CLUE_FONT_PX's own comment in app.js) — decoupled from cell size once
+     that would shrink clue numbers past legibility. */
+  font-size: var(--clue-font-size, 0.78rem);
   font-weight: 700;
   line-height: 1.15;
   padding: 0.15rem;
@@ -342,6 +362,16 @@ body {
 }
 
 .nono-clue.satisfied {
+  color: rgba(242, 236, 221, 0.25);
+}
+
+/* Current Objective (per-number clue gray-out — see TODO.md and app.js's applyAnchoredClasses):
+   dims one number within a clue on its own, independent of the other numbers in the same
+   clue — same dimmed color .satisfied already uses for the whole-clue case (so a fully
+   satisfied clue, where every number ends up individually anchored too, looks identical to
+   how it always has), just set directly on the number's own <span> rather than inherited from
+   the parent .nono-clue, so it doesn't require every number to be done at once. */
+.nono-clue__num--anchored {
   color: rgba(242, 236, 221, 0.25);
 }
 
@@ -492,12 +522,14 @@ body {
   max-height: min(28rem, 60dvh);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch; /* smooth momentum scrolling on iOS Safari */
-  /* Stops this region's own scroll from chaining to the page behind the modal once it hits
+  /* Stops this region's own scroll from chaining to whatever's behind the modal once it hits
      its top/bottom boundary — the CSS-native replacement for a JS body-position:fixed lock
-     (see app.js's lockBodyScroll comment for why that approach was tried and reverted: it
-     also broke touch-scrolling THIS element on a real iOS device, confirmed by the project
-     owner). app.js's overflow:hidden lock handles the "no modal open" case (nothing to
-     contain scroll INTO in the first place); this handles the "modal open" case. */
+     (see app.js's comment above the removed lockBodyScroll for why that approach was tried
+     and reverted: it also broke touch-scrolling THIS element on a real iOS device, confirmed
+     by the project owner). <html>/<body> being unconditionally non-scrolling now (see the
+     html/body comment in this file) means there's nothing behind this modal TO chain into in
+     the first place, but this stays as the same belt-and-suspenders guard every other
+     internal-scroll region in the app uses. */
   overscroll-behavior: contain;
   margin-bottom: 1.25rem;
 }
@@ -717,6 +749,20 @@ body {
   max-width: 72rem;
   margin: 0 auto;
   padding: 2.5rem 1.5rem 4rem;
+  /* Superseding this rule's own comment further down (kept on .scan-screen__body, updated to
+     match): the scan wizard used to rely on native document/body scroll specifically to avoid
+     an earlier, different iOS bug where a `.modal-overlay`-style fixed overlay's nested
+     `overflow-y: auto` region fought the STILL-SCROLLABLE page behind it. That's no longer the
+     relevant comparison — <html>/<body> are now unconditionally non-scrolling everywhere (see
+     the html/body comment in this file, and app.js's), so "native page scroll" isn't even an
+     option any more. .scan-screen becomes the one scrolling region while it's the visible
+     screen, the same proven-safe `overflow-y: auto` pattern #page-root and .modal-card__body
+     already use — not a return to the old fixed-overlay-atop-a-scrollable-page pattern that
+     actually caused the earlier bug. */
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .scan-screen__panel {
@@ -741,11 +787,10 @@ body {
   text-align: left;
 }
 
-/* The whole point of this being a screen instead of a modal: NO max-height/overflow-y here.
-   Content just flows to whatever height it needs, and the browser's own native page scroll
-   (document/body — already used everywhere else in the app, never in question) handles the
-   rest. See index.html's #scan-modal comment for the three rounds of real-iOS scroll bugs
-   this sidesteps rather than re-fights. */
+/* Content just flows to whatever height it needs — .scan-screen itself (see above) is now the
+   scrolling region, not this element. See index.html's #scan-modal comment for why this is a
+   full screen rather than a modal in the first place (a separate, earlier iOS bug), and
+   .scan-screen's own comment for why ITS scroll handling changed since that was written. */
 .scan-screen__body {
   margin-bottom: 1.25rem;
 }

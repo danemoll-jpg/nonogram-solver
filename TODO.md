@@ -132,87 +132,152 @@ Completed Tasks
     21: 1,1,1,1,10       22: 4,1,3,8          23: 1,4,1,1,5       24: 1,5,1,2         25: 1,1,3
     ```
 
+* **Four items from the "latest real-device round" (2026-09-01 session) — all four
+  addressed; see each writeup below for exact scope/verification limits.**
+
+  1. **OCR content-accuracy pattern: `11` misread as `1` — root-caused, fixed, and
+     verified against the real ground-truth image.** Root cause, confirmed directly (not
+     assumed): NOT a geometry/grouping bug — `groupGlyphsIntoNumbers` (`ocrSegment.js`)
+     already measured the two `1` glyphs' real gap correctly (9-11px, well inside the
+     intra-number threshold) and correctly reported `glyphCount: 2`. It's a genuine
+     Tesseract recognition failure: even a crop containing ONLY the two `1` glyphs, with
+     nothing else in frame, still reads back as a single `"1"` character — confirmed
+     directly by isolating that exact crop and testing it, and confirmed this isn't a
+     page-segmentation-mode issue either (tried PSM 3/6/7/8/10/11/13 against the same
+     crop — every mode still returned `"1"`, several returned nothing at all). What
+     *did* fix it, confirmed directly: splitting the merged crop into one crop PER
+     GLYPH and OCRing each in isolation — but naively reusing the existing fixed
+     `CROP_PADDING` (12px) on each side reproduced the exact same bug (the padding
+     region on one glyph's crop was wide enough to pull the neighboring glyph back into
+     frame, so it read `"11"` again). Fixed by clamping each glyph's padding, on the
+     side facing a same-number neighbor, to at most half the real gap to that neighbor
+     (`glyphSidePadding`, `scanUI.js`) — full `CROP_PADDING` is still used facing away
+     from a same-number neighbor (a different, safely-distant number, or the line's own
+     edge). `groupGlyphsIntoNumbers` now also returns each group's individual glyph
+     bands (`glyphs: [...]`, not just the merged `{start,end,glyphCount}`) so this
+     per-glyph fallback has real boundaries to crop. Wired in as a THIRD fallback level
+     in `recognizeStripSegmented` (whole-line → whole-number → per-glyph), triggered
+     only when a multi-digit number's own whole-number OCR still doesn't produce the
+     right digit count — so it's paid only on the specific failure case, not on every
+     multi-digit number. **Verified against the real ground-truth image**
+     (`scratch-images/sample-mid-solve.jpg`, known size 25×25): all 6 real `11`
+     occurrences (columns 1, 2, 17, 18, 19, 20) now read correctly, plus a bonus fix —
+     column 16's `12` (a different digit pair, same underlying merge failure) also now
+     reads correctly, up from misreading as `1`. Column 21 (`1,1,1,1,10`, the no-`11`
+     contrast case) remained correct throughout, confirming this is targeted, not a
+     blanket behavior change. Zero regressions across the other 44 lines. Unit tests:
+     `groupGlyphsIntoNumbers`'s existing hand-checked cases updated for the new
+     `glyphs` field (`test/ocrSegment.test.js`).
+     - **A second, DIFFERENT OCR bug was found while re-verifying against the real
+       image, out of scope for this round and deliberately not fixed here**: on lines
+       with many numbers, a lone single-digit number sometimes drops out entirely
+       (columns 6, 11, 14, 15: e.g. ground-truth `2,1,2,2,2` reads as `2,1,2,2`), and
+       row 4 shows the opposite — a spurious extra digit appears (`3,1,1,3` reads as
+       `3,1,1,7,3`, traced directly to `findStripLines` detecting 5 glyph blobs where
+       only 4 real digits exist — a geometry false-positive, not a misread). Neither
+       involves a multi-digit merge, so neither is fixed by the change above. Flagged
+       as its own follow-up task (not yet started) rather than folded into this fix.
+
+  2. **App-wide scroll bug, round 2 — re-diagnosed and given a structural fix per the
+     project owner's "just lock it down" request, but NOT YET CONFIRMED on real
+     hardware — this needs real-device verification before being treated as done.**
+     Re-diagnosis: round 1's fix (magnitude-gating the resize listeners) only gated
+     *reactions* to the underlying mechanism, it didn't remove the mechanism itself —
+     `<html>`/`<body>` could still genuinely scroll (the normal, intended way this app
+     always worked), which is exactly the precondition for iOS's chrome (address bar/
+     toolbar) auto-hide-on-scroll behavior to trigger from ordinary content reflow.
+     Structural fix: `<html>`/`<body>` are now UNCONDITIONALLY non-scrolling (fixed
+     `height: 100dvh` + `overflow: hidden`, permanently, not just while a modal is
+     open), and exactly one region owns real scroll at a time — `#page-root` during
+     normal play, `.scan-screen` while the scan wizard is open — each via their own
+     `overflow-y: auto`, the same pattern `.modal-card__body` already used
+     successfully (confirmed real-iOS-safe previously — see that CSS rule's own
+     comment for why the more forceful `position: fixed` alternative was tried and
+     reverted). This is a generalization of a technique already proven in this exact
+     codebase (the old JS `lockBodyScroll`/`syncBodyScrollLock`, which did the same
+     `overflow: hidden` toggle but only conditionally while a modal was open), not a
+     new unproven idea — the JS toggle is gone now since the lock is permanent and
+     needs no toggling. A permanently non-scrolling document can never trigger iOS's
+     chrome auto-hide from routine reflow, which removes round 1's whole feedback-loop
+     mechanism rather than just gating reactions to it. **Verification performed**:
+     full regression pass in the Claude Code browser-preview tool (mobile and desktop
+     viewport emulation) — normal play, Help dropdown, every modal (how-to-play,
+     stats, confirm), and the scan wizard all confirmed to keep the document's
+     `scrollHeight` pinned exactly to the viewport height with no document-level
+     scroll possible, while content genuinely taller than the viewport (tested with a
+     synthetic 25×25 puzzle with deep 7-9-number clue stacks, and a forced 2000px-tall
+     scan-wizard body) still scrolls correctly within its own contained region. **This
+     is NOT a substitute for real-device verification** — this project's own history
+     is explicit that a fix confirmed only in browser preview has already failed real
+     iOS hardware twice for this exact bug, and the browser-preview tool cannot
+     reproduce the actual iOS chrome-collapse mechanism at all. Test on the real
+     device across all screens before considering this resolved.
+
+  3. **Larger, more legible clue numbers on large puzzles — done.** Clue font-size is
+     now decoupled from `--cell-size` once cell size would shrink it below
+     `MIN_CLUE_FONT_PX` (13px) — it still scales proportionally with cell size exactly
+     as before ABOVE that floor (unchanged behavior for every puzzle size that was
+     already fine), so this only changes behavior on large puzzles where cells shrink
+     a lot. `fitBoardToViewport` (`app.js`) now solves cell size in two passes: an
+     estimate (the old formula, treating clue-margin space as scaling with cell size)
+     decides whether the floor is active; the real clue-margin pixel size is then
+     computed off the (possibly floored) clue font size directly — not cell size — via
+     `CLUE_DIGIT_PER_FONT`/`CLUE_BASE_PER_FONT` (re-derived against the original fixed
+     0.78rem clue font, not the original fixed 1.9rem cell, since the margin only ever
+     needed to fit the rendered TEXT), and cell size is solved against whatever space
+     remains. `--clue-font-size` is a new CSS variable driving `.nono-clue`'s
+     font-size directly, alongside the existing `--cell-size`. Verified with a
+     synthetic 25×25 puzzle (deep 7-9-number clue stacks, deliberately harder than the
+     30×30/max-5 reference screenshot) rendered in-browser at both mobile and desktop
+     viewport sizes: cell size correctly floors at `MIN_CELL_PX` (18px) while clue
+     font correctly holds at 13px instead of continuing to shrink to ~7px — legible
+     and non-overlapping in both cases. Reference used for the target proportions
+     (not a pixel-exact match): `scratch-images/reference-30x30-legible.png`.
+
+  4. **Per-number gray-out within a multi-number clue — done, shipped as
+     `anchoredClueNumbers` (`lineSolver.js`).** Implements exactly the confirmed rule:
+     a number anchors once its run touches the line's true edge, or (walking inward
+     from an already-anchored neighbor toward the edge) every cell between it and that
+     neighbor is confirmed EMPTY — never merely "a run of the right length exists
+     somewhere," and deliberately requires an actual EMPTY mark, not just "not
+     FILLED" (an UNKNOWN gap cell doesn't confirm anything, since a later move could
+     still change where that run ends up). Walked from both ends independently and
+     combined, since a number can anchor from either direction. This generalizes
+     `edgeCompletionDeductions`' own reasoning (a boundary-touching run that already
+     matches its clue number) to walk the WHOLE clue inward one number at a time,
+     rather than stopping after the first — per the TODO's own suggestion, reusing
+     that established reasoning rather than a separate algorithm. Wired into
+     `app.js`'s `syncAllCellVisuals` via a new `applyAnchoredClasses` helper, toggling
+     a `.nono-clue__num--anchored` class per `<span>` (not the whole `.nono-clue`
+     parent) — skipped entirely when the line is in genuine contradiction, so a red
+     contradiction line never shows a confusing partial-gray underneath it. Verified
+     two ways: (1) a brute-force **soundness** differential test (300 random trials,
+     `test/lineSolver.test.js`) — for every random (line, clue) pair, enumerates every
+     valid completion consistent with the current marks and the clue, and asserts that
+     whenever `anchoredClueNumbers` claims a number is anchored, that number's
+     position is proven invariant across every remaining possibility; (2) hand-checked
+     cases straight from the spec, including the TODO's own worked `5, 3, 2` example
+     (a complete, correctly-bounded run of 3 stays un-grayed while neither neighbor is
+     anchored) and the more subtle case that a run touching the line's true edge is
+     NOT sufficient alone if its FAR boundary is still unconfirmed. Also verified live
+     in the browser (real pointer-event interaction on an actual puzzle): a `[1, 1]`
+     row grays its first number the moment it's individually confirmed while the
+     second stays ungrayed, then both gray together once the whole line is satisfied
+     (auto-X included) — and a forced contradiction correctly suppresses all
+     per-number graying on that line.
+
 Current Objective (Focus Area)
 
-* **Four items from the latest real-device round.**
-
-  1. **OCR content-accuracy pattern, distinct from the (now-fixed) geometry bug: `11`
-     is being consistently misread as `1`, while `12` reads correctly.** Reported after
-     the column-band geometry fix — cropping is now clean, but this specific digit
-     pattern still misreads. Likely cause: two identical, tightly-kerned `1` glyphs can
-     visually collapse into something Tesseract reads as a single `1` stroke, in a way
-     that a `1` next to a differently-shaped `2` doesn't. **Directly testable against the
-     confirmed ground truth above** — columns 17 (`1,1,11`), 18 (`1,4,11`), 19
-     (`1,2,2,11`), 20 (`1,1,1,1,11`), and 21 (`1,1,1,1,10`, for contrast — no `11`) all
-     contain a real `11` to check against. Investigate whether this is a Tesseract
-     recognition issue (worth trying a different PSM mode or explicit digit-pair
-     handling) or a glyph-geometry grouping issue (`groupGlyphsIntoNumbers` in
-     `ocrSegment.js` — check whether two adjacent `1` glyphs' actual measured gap is
-     landing too close to the intra- vs. inter-number gap threshold). Verify against the
-     real image and the ground truth above, per this feature's established practice.
-
-  2. **Scroll bug: the project owner's real-device test after the magnitude-gating fix
-     (round 1, in Completed Tasks above) shows it is still NOT resolved — re-diagnose
-     before attempting another fix, since the reported symptom this round ("scrolling
-     into whitespace") doesn't clearly match round 1's diagnosis ("the screen shifts
-     with nothing on screen to justify it").** These may be the same bug described two
-     different ways, or two different bugs that have been conflated across rounds — do
-     not assume either without re-confirming directly on the real device that showed it.
-     The project owner has asked, in their own words, to "just lock it down" — worth
-     treating that as license to consider a more forceful structural fix (e.g.
-     genuinely preventing `html`/`body`-level scroll entirely except in the specific
-     regions that need it, rather than continuing to gate individual event listeners)
-     if the root cause continues to prove elusive, rather than another incremental
-     patch. **Given this bug class's history in this project (the original scan-wizard
-     fix took four rounds; this app-wide attempt is now on its second failed real-device
-     round), use the existing `?debug=scroll` diagnostic tool (`initScrollDiagnostics`
-     in `app.js`) to get real, on-device measurements this time before proposing a fix**
-     — don't reason from a plausible mechanism alone again. Test across all screens
-     (main play, Help dropdown, each scan-wizard step, stats/pairing modal,
-     how-to-play modal).
-
-  3. **New request: larger, more legible clue numbers on large puzzles (e.g. 25×25),
-     comparable to a competing app the project owner uses that fits a 30×30 puzzle
-     legibly on one screen with no scrolling.** Current clue-number font size is tied
-     directly to the dynamic `--cell-size` (`fitBoardToViewport`), so on a large puzzle
-     where cell size shrinks to fit the viewport, clue text shrinks proportionally and
-     becomes hard to read. This needs real design investigation, not just "make the
-     font bigger" — options worth weighing: decoupling clue-font-size scaling from
-     cell-size so text has its own, higher minimum legible size even as cells shrink
-     further; reserving proportionally more layout space for the clue margins on large
-     puzzles; or a different overall layout approach for the clue area at large grid
-     sizes. **Reference screenshot now provided** —
-     `scratch-images/reference-30x30-legible.png` (a competing app, "Nonogram 999",
-     showing a real 30×30 puzzle fitting on one screen with legible clue numbers).
-     Worth noting from it: the clue-number font looks roughly fixed-size regardless of
-     how many numbers stack in a column, rather than scaling down with cell size — the
-     column-clue margin area is allowed real vertical space (tall for columns with 4-5
-     stacked numbers) instead of everything being squeezed to one shared scale. That's
-     concrete support for the "decouple clue-font-size from cell-size" option above,
-     not just a general "make it bigger" ask — worth using this image as the actual
-     layout-proportion target, not only a vague inspiration reference.
-
-  4. **New feature, now precisely specified with the project owner: per-number
-     gray-out within a multi-number clue, not just whole-clue graying.** A single
-     number within a clue like `5, 3, 2` should gray out on its own, independent of the
-     other numbers in that clue, once its own run is *provably* the one it claims to
-     be — not merely "a run of the right length exists somewhere in the line."
-     Confirmed rule: a number's run counts as confirmed only if it's properly
-     *anchored* — either it touches the true edge of the line, or every cell between it
-     and an already-confirmed neighbor (or the edge) is X'd/empty. A technically
-     correct-length run floating in still-ambiguous space does not gray out. Concretely,
-     for `5, 3, 2`: if the `3` (middle number) has a complete run of 3 filled cells but
-     neither the `5` nor the `2` has yet been confirmed/anchored, the `3` stays
-     un-grayed, since its position in the sequence isn't yet provably fixed — at least
-     one neighboring number must be independently anchored first (to the edge, or via
-     X's reaching to a further-anchored number) before an adjacent number can be
-     confirmed relative to it. **This is the same kind of reasoning the solver's
-     edge-completion technique already performs for hints** (`lineSolver.js`) — worth
-     checking whether that logic can be reused or adapted for this display-only
-     purpose (scanning inward from both ends of a line, confirming one number at a
-     time as each becomes anchored) rather than building an entirely separate
-     algorithm from scratch. This is a real feature addition, not a quick tweak —
-     scope it accordingly.
+* **Real-device verification of item 2 above (the app-wide scroll fix) is the one
+  open item from this round** — everything else is done and verified as far as this
+  project's own tooling allows. Test on the actual iOS device that showed the bug,
+  across all screens (main play, Help dropdown, each scan-wizard step, stats/pairing
+  modal, how-to-play modal), using `?debug=scroll` if anything still looks off. If it
+  still doesn't hold, the `?debug=scroll` tool's report is the next real lead, not
+  another guess.
+* A follow-up OCR bug (dropped single-digit clue numbers on long, many-number lines —
+  see item 1's own writeup above) was found but deliberately not fixed this round;
+  it's a distinct failure mode from the `11`-merge bug just shipped.
 
 Next Steps (Do Not Start Yet)
 
@@ -257,14 +322,18 @@ Technical Notes / Blockers
   plausible synthetic pixel values.
 * **iOS scroll/touch bugs in this app have proven resistant to incremental CSS/JS fixes,
   repeatedly, across two separate scroll bugs now (the original scan-wizard-specific one,
-  four rounds; the current app-wide one, at least two failed real-device rounds so far).**
-  Consider measuring the actual real-device behavior directly (the `?debug=scroll` tool)
-  before proposing another fix, and consider a more forceful structural approach (fully
-  preventing page-level scroll except where genuinely needed) if incremental fixes keep
-  not holding — see Current Objective above.
+  four rounds; the current app-wide one, two failed real-device rounds before round 2's
+  structural fix — see Completed Tasks item 2).** Round 2 (2026-09-01) took the
+  structural approach explicitly (permanently non-scrolling `<html>`/`<body>`, generalizing
+  the same technique already proven safe for modals in this exact codebase) rather than
+  another incremental patch — **but is still NOT confirmed on real hardware** (see Current
+  Objective). If it doesn't hold either, don't reach for another guess — use `?debug=scroll`
+  for real on-device numbers first, same as this round did.
 * **`countGridLines` (gridDetect.js) miscounting is understood and mitigated via the
   known-count override** (see Completed Tasks) rather than by retuning the underlying
   heuristic.
-* **Clue-number legibility on large puzzles is a known, unaddressed gap** (see Current
-  Objective above) — the current font scales directly with `--cell-size`, which
-  shrinks proportionally on large grids.
+* Clue-number legibility on large puzzles — fixed (see Completed Tasks item 3): font size
+  now floors at `MIN_CLUE_FONT_PX` instead of continuing to shrink with `--cell-size`.
+* A second OCR bug distinct from the fixed `11`-merge one — single-digit clue numbers
+  occasionally dropping out entirely on long, many-number lines — was found but not yet
+  fixed; see Completed Tasks item 1's own writeup for the confirmed repro cases.

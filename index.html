@@ -178,10 +178,13 @@
        real-iOS bug spanning three failed fix attempts (see TODO.md): a `position: fixed`
        overlay with an internal `overflow-y: auto` scroll region kept fighting iOS Safari
        one way or another (background scrolling through it, or the region itself refusing to
-       scroll once background-scroll was blocked). A full-screen view has no overlay and no
-       nested scroll region to fight — it's normal in-flow page content, scrolled by the
-       browser's own native page scroll exactly like the rest of the app already is, which
-       sidesteps the whole bug category instead of chasing another fix for it. -->
+       scroll once background-scroll was blocked) — that fight was specifically against a
+       still-scrollable page underneath the overlay. Being a full-screen view (not an overlay
+       stacked on top of other visible content) is still what matters; how it itself scrolls
+       has since changed again — see .scan-screen's own comment in styles.css (Current
+       Objective, app-wide scroll bug round 2): the whole document is now permanently
+       non-scrolling, and .scan-screen owns its own internal overflow-y:auto region the same
+       way #page-root and every modal's .modal-card__body already did. -->
   <div id="scan-modal" class="scan-screen hidden">
     <div class="scan-screen__panel">
       <h2 id="scan-title" class="scan-screen__title">Scan a puzzle</h2>

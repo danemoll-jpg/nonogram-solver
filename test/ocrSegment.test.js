@@ -72,7 +72,7 @@ describe('groupGlyphsIntoNumbers', () => {
     ];
     assertEqual(
       groupGlyphsIntoNumbers(bands),
-      bands.map((b) => ({ ...b, glyphCount: 1 }))
+      bands.map((b) => ({ ...b, glyphCount: 1, glyphs: [{ start: b.start, end: b.end }] }))
     );
   });
 
@@ -85,8 +85,8 @@ describe('groupGlyphsIntoNumbers', () => {
       { start: 273, end: 291 }, // "5" of "15"
     ];
     assertEqual(groupGlyphsIntoNumbers(bands), [
-      { start: 204, end: 231, glyphCount: 1 },
-      { start: 249, end: 291, glyphCount: 2 }, // "1" and "5" merged into one "15" token
+      { start: 204, end: 231, glyphCount: 1, glyphs: [{ start: 204, end: 231 }] },
+      { start: 249, end: 291, glyphCount: 2, glyphs: [{ start: 249, end: 261 }, { start: 273, end: 291 }] }, // "1" and "5" merged into one "15" token
     ]);
   });
 
@@ -98,8 +98,8 @@ describe('groupGlyphsIntoNumbers', () => {
       { start: 42, end: 43 }, // second "1" of "11" (clipped short by the crop's own edge — still real ink, not noise)
     ];
     assertEqual(groupGlyphsIntoNumbers(bands), [
-      { start: 0, end: 6, glyphCount: 1 },
-      { start: 24, end: 43, glyphCount: 2 },
+      { start: 0, end: 6, glyphCount: 1, glyphs: [{ start: 0, end: 6 }] },
+      { start: 24, end: 43, glyphCount: 2, glyphs: [{ start: 24, end: 32 }, { start: 42, end: 43 }] },
     ]);
   });
 
@@ -110,8 +110,8 @@ describe('groupGlyphsIntoNumbers', () => {
       { start: 40, end: 55 },
     ];
     assertEqual(groupGlyphsIntoNumbers(bands), [
-      { start: 0, end: 10, glyphCount: 1 },
-      { start: 40, end: 55, glyphCount: 1 },
+      { start: 0, end: 10, glyphCount: 1, glyphs: [{ start: 0, end: 10 }] },
+      { start: 40, end: 55, glyphCount: 1, glyphs: [{ start: 40, end: 55 }] },
     ]);
   });
 
@@ -120,7 +120,9 @@ describe('groupGlyphsIntoNumbers', () => {
   });
 
   test('a single glyph is its own group', () => {
-    assertEqual(groupGlyphsIntoNumbers([{ start: 5, end: 12 }]), [{ start: 5, end: 12, glyphCount: 1 }]);
+    assertEqual(groupGlyphsIntoNumbers([{ start: 5, end: 12 }]), [
+      { start: 5, end: 12, glyphCount: 1, glyphs: [{ start: 5, end: 12 }] },
+    ]);
   });
 });
 

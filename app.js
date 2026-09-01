@@ -6,7 +6,7 @@
 import { Board, UNKNOWN, FILLED, EMPTY, isLineSatisfied, isLineLocked } from './src/model.js';
 import { getNextHint } from './src/solver.js';
 import { findContradictionHint } from './src/contradiction.js';
-import { isLineConsistent } from './src/lineSolver.js';
+import { isLineConsistent, anchoredClueNumbers } from './src/lineSolver.js';
 import { phraseDeduction } from './src/hintPhrasing.js';
 import { autoCheckMark, checkForMistakes, removeBadMarks } from './src/mistakes.js';
 import { SAMPLE_PUZZLES } from './src/puzzles.js';
@@ -112,73 +112,34 @@ const els = {
   scanBtnCancel: document.getElementById('scan-btn-cancel'),
 };
 
-// ---- background-scroll lock while any full-screen modal is open ----
+// ---- background-scroll lock (formerly JS-toggled per modal, now permanent — see styles.css) ----
 //
-// Real iOS bug report: opening the scan wizard (or any .modal-overlay) and trying to scroll
-// its content instead scrolled the PAGE BEHIND it. None of this app's modals ever locked
-// background scroll — .modal-overlay is `position: fixed` and covers the viewport, but a
-// fixed overlay with no scrollable content of its own doesn't stop iOS Safari from walking
-// up to the next scrollable ancestor (the page body) for a touch-drag that starts on it, so
-// the visible page kept scrolling underneath the modal. Desktop never showed this because a
-// mouse wheel only scrolls whatever's directly under the cursor, not "the nearest scrollable
-// ancestor" the way an iOS touch-pan gesture does — hence "works fine on PC".
+// Real iOS bug report that originally motivated this: opening the scan wizard (or any
+// .modal-overlay) and trying to scroll its content instead scrolled the PAGE BEHIND it — a
+// fixed overlay with no scrollable content of its own doesn't stop iOS Safari from walking up
+// to the next scrollable ancestor (the page body) for a touch-drag that starts on it. That got
+// fixed here via a MutationObserver toggling `overflow: hidden` on <html>/<body> only while a
+// modal was open (confirming first that `position: fixed` on <body> — the older, more forceful
+// technique — overshot: it also broke touch-scrolling the modal's own `.modal-card__body` on a
+// real iOS device, since taking <body> out of normal flow changes how iOS hit-tests a nested
+// `overflow: auto` region's touch-scroll gesture).
 //
-// Fixed generically for every .modal-overlay (confirm/complete/how-to-play/stats/scan) via
-// one MutationObserver watching all of them, rather than hand-wiring a lock/unlock call into
-// each modal's own scattered show/hide call sites — safer against a future modal forgetting
-// to wire it in, and there's nothing modal-specific about the fix itself.
-//
-// First attempt used `position: fixed` on <body> (the older, more forceful lock technique,
-// needed on pre-iOS-13 Safari) — confirmed BY THE PROJECT OWNER directly that it overshot:
-// it stopped the background from scrolling, but also broke touch-scrolling the modal's own
-// content (`.modal-card__body`)  — no visible scrollbar, no scroll at all, on a real iOS
-// device. Root cause: taking <body> out of normal flow with `position: fixed` changes how
-// iOS Safari hit-tests a nested `overflow: auto` region's touch-scroll gesture, and it can
-// simply stop recognizing the inner region as scrollable. Switched to the modern
-// `overflow: hidden` + `overscroll-behavior: contain` combination instead (the latter is on
-// .modal-card__body itself, see styles.css) — `overscroll-behavior: contain` is the
-// CSS-native way to stop a scrollable region's OWN scroll from chaining to whatever's behind
-// it once it hits its boundary, which is the actual thing a body-lock hack was trying to
-// fake, without body ever leaving normal document flow or interfering with its descendants'
-// own scroll regions. Still needs a manual scroll-position save/restore, though, same as the
-// position:fixed version did: setting `overflow: hidden` on the page collapses its current
-// scrollTop to 0 immediately (confirmed directly — there's no longer any overflow left to be
-// scrolled to), so without saving it first, closing a modal opened partway down the page
-// would jump the page back to the top.
-let bodyScrollLocked = false;
-let savedBodyScrollY = 0;
-
-function lockBodyScroll() {
-  savedBodyScrollY = window.scrollY;
-  document.documentElement.style.overflow = 'hidden';
-  document.body.style.overflow = 'hidden';
-}
-
-function unlockBodyScroll() {
-  document.documentElement.style.overflow = '';
-  document.body.style.overflow = '';
-  window.scrollTo(0, savedBodyScrollY);
-}
-
-function anyModalOpen() {
-  return [...document.querySelectorAll('.modal-overlay')].some((el) => !el.classList.contains('hidden'));
-}
-
-function syncBodyScrollLock() {
-  const shouldLock = anyModalOpen();
-  if (shouldLock && !bodyScrollLocked) {
-    lockBodyScroll();
-    bodyScrollLocked = true;
-  } else if (!shouldLock && bodyScrollLocked) {
-    unlockBodyScroll();
-    bodyScrollLocked = false;
-  }
-}
-
-const modalOverlayEls = document.querySelectorAll('.modal-overlay');
-const modalVisibilityObserver = new MutationObserver(syncBodyScrollLock);
-modalOverlayEls.forEach((el) => modalVisibilityObserver.observe(el, { attributes: true, attributeFilter: ['class'] }));
-syncBodyScrollLock(); // covers the (currently theoretical) case one starts already visible
+// Current Objective (app-wide scroll bug, round 2 — see TODO.md): the round-1 fix (magnitude-
+// gating the resize listeners below) did not hold on real hardware, and the project owner asked
+// to "just lock it down" rather than chase another incremental patch. Since `overflow: hidden`
+// on <html>/<body> was ALREADY confirmed iOS-safe here (just conditionally, only while a modal
+// was open), this generalizes it: <html>/<body> are now UNCONDITIONALLY non-scrolling (see
+// styles.css), and #page-root / .scan-screen each own their own internal
+// `overflow-y: auto` region instead — the exact same proven-safe pattern `.modal-card__body`
+// already used, just applied to the whole screen instead of only a modal card. This removes the
+// scroll-position feedback loop the round-1 fix could only gate, not eliminate: iOS's chrome
+// (address bar/toolbar) auto-hide is driven by scrolling the top-level DOCUMENT specifically,
+// not by an inner `overflow: auto` element's own scroll — with the document itself permanently
+// non-scrollable, routine content reflow can no longer trigger a chrome collapse/expand at all,
+// so there's no viewport-height blip left for fitBoardToViewport to (over)react to. No JS lock
+// toggling, scroll-position save/restore, or MutationObserver is needed any more: a modal
+// opening on top of a permanently-non-scrolling document doesn't change anything underneath it,
+// so there's nothing to save or restore.
 
 const EXPLAIN_IDLE_HTML =
   '<p class="explain-panel__idle">Use the <strong>Help</strong> menu above to get a hint or check your work — the explanation shows up here.</p>';
@@ -330,7 +291,9 @@ function renderBoard() {
 
 function clueHtml(clue) {
   const nums = clue.length ? clue : [0];
-  return nums.map((n) => `<span>${n}</span>`).join('');
+  // class + no anchored/satisfied state yet: syncAllCellVisuals sets that per render, live —
+  // see its own comment for why (a fresh puzzle load has no marks yet to compute against).
+  return nums.map((n) => `<span class="nono-clue__num">${n}</span>`).join('');
 }
 
 // ---- responsive board sizing (item: grid should scale to fill available screen space) ----
@@ -343,12 +306,31 @@ function clueHtml(clue) {
 // without needing separate hardcoded cases for either. See --cell-size in styles.css for
 // where the result actually gets applied (grid template sizing here, cell/clue/mark sizing
 // there, all driven off the one CSS variable).
-const MIN_CELL_PX = 18; // below this, clue numbers and the ✕ mark stop being legible
+const MIN_CELL_PX = 18; // below this, the ✕ mark and cell tap targets stop being usable
 const MAX_CELL_PX = 64; // caps how large cells get on a big screen with a tiny puzzle
-// Clue-column-width-to-cell-size ratio, carried over from the original fixed sizing
-// (maxClueLen * 1.1rem + 0.3rem against a fixed 1.9rem cell) so clue legibility is unchanged.
-const CLUE_PER_DIGIT = 1.1 / 1.9;
-const CLUE_BASE = 0.3 / 1.9;
+
+// Current Objective #3 (see TODO.md): clue-number legibility on large puzzles. Clue font-size
+// used to be a straight `--cell-size * 0.41` — fine for small/medium puzzles, but on a large
+// one (e.g. 25x25+) where fitBoardToViewport has to shrink cellPx a lot just to fit the CELLS
+// in the viewport, the clue text shrank right along with it and became hard to read, even
+// though legible clue numbers don't actually need to be as large as the cells themselves.
+// MIN_CLUE_FONT_PX decouples the floor: clue font-size still scales proportionally with cell
+// size same as before ABOVE this floor (unchanged behavior for every puzzle size that was
+// already fine), but never drops below it once a big grid would otherwise push it there.
+// Reference: scratch-images/reference-30x30-legible.png (a competing app, "Nonogram 999")
+// fits a real 30x30 puzzle on one screen with clue numbers that read as roughly FIXED size
+// regardless of how small the cells get, rather than scaling all the way down with them —
+// this is the same idea, not a literal pixel match to that screenshot.
+const MIN_CLUE_FONT_PX = 13;
+// Per-number clue-margin width/height, relative to the CLUE FONT SIZE (not cell size) —
+// carried over from the original fixed sizing (1.1rem per number + 0.3rem base, against the
+// original fixed 0.78rem clue font) so clue-margin proportions are unchanged from before this
+// decoupling. Deliberately re-derived against clueFontPx rather than cellPx (see below): the
+// margin only needs to be big enough to fit the rendered TEXT, and once font-size and cell-size
+// can diverge (see MIN_CLUE_FONT_PX), sizing the margin off cellPx would clip the now-larger-
+// than-cellPx-implies text on exactly the large puzzles this fix targets.
+const CLUE_DIGIT_PER_FONT = 1.1 / 0.78;
+const CLUE_BASE_PER_FONT = 0.3 / 0.78;
 
 // Last viewport height fitBoardToViewport actually computed against — see
 // handleViewportResize below for why this is tracked.
@@ -362,8 +344,6 @@ function fitBoardToViewport() {
 
   const maxRowClueLen = Math.max(1, ...puzzle.rowClues.map((c) => c.length));
   const maxColClueLen = Math.max(1, ...puzzle.colClues.map((c) => c.length));
-  const widthUnits = puzzle.cols + maxRowClueLen * CLUE_PER_DIGIT + CLUE_BASE;
-  const heightUnits = puzzle.rows + maxColClueLen * CLUE_PER_DIGIT + CLUE_BASE;
 
   const rootRect = els.boardRoot.getBoundingClientRect();
   const rootStyle = getComputedStyle(els.boardRoot);
@@ -412,14 +392,40 @@ function fitBoardToViewport() {
   const availableHeight =
     viewportHeight - rootRect.top - rootVerticalPadding - belowBoardRoot - explainPanelHeight - BUFFER_PX;
 
+  // Pass 1: an initial cell-size estimate, treating the clue margin as if it still scaled
+  // directly with cell size — the same approximation this function used before clue-font-size
+  // decoupling existed. Only used below to decide whether that decoupling actually kicks in
+  // (i.e. whether cellPx * 0.41 would fall under MIN_CLUE_FONT_PX); the REAL cellPx is solved
+  // in pass 2 against the clue margin's actual (possibly now-larger) pixel size.
+  const widthUnitsEstimate = puzzle.cols + maxRowClueLen * (CLUE_DIGIT_PER_FONT * 0.41) + CLUE_BASE_PER_FONT * 0.41;
+  const heightUnitsEstimate = puzzle.rows + maxColClueLen * (CLUE_DIGIT_PER_FONT * 0.41) + CLUE_BASE_PER_FONT * 0.41;
+  const cellPxEstimate = Math.max(
+    MIN_CELL_PX,
+    Math.min(MAX_CELL_PX, Math.floor(Math.min(availableWidth / widthUnitsEstimate, availableHeight / heightUnitsEstimate)))
+  );
+
+  // Current Objective #3 (see MIN_CLUE_FONT_PX's own comment): the clue font keeps scaling
+  // proportionally with the estimated cell size above the floor (unchanged from before), and
+  // sticks at the floor once a large puzzle would otherwise shrink it past legibility.
+  const clueFontPx = Math.max(MIN_CLUE_FONT_PX, cellPxEstimate * 0.41);
+
+  // Pass 2: the real clue-margin pixel size, off the (possibly decoupled) clue font rather
+  // than cell size — see CLUE_DIGIT_PER_FONT/CLUE_BASE_PER_FONT's own comment. Subtracted from
+  // the available space directly (in px, not "cell units") before dividing the REMAINDER by
+  // rows/cols, since the margin no longer scales in lockstep with the cells once the floor is
+  // active.
+  const clueColWidth = (maxRowClueLen * CLUE_DIGIT_PER_FONT + CLUE_BASE_PER_FONT) * clueFontPx;
+  const clueRowHeight = (maxColClueLen * CLUE_DIGIT_PER_FONT + CLUE_BASE_PER_FONT) * clueFontPx;
   const cellPx = Math.max(
     MIN_CELL_PX,
-    Math.min(MAX_CELL_PX, Math.floor(Math.min(availableWidth / widthUnits, availableHeight / heightUnits)))
+    Math.min(
+      MAX_CELL_PX,
+      Math.floor(Math.min((availableWidth - clueColWidth) / puzzle.cols, (availableHeight - clueRowHeight) / puzzle.rows))
+    )
   );
 
   document.documentElement.style.setProperty('--cell-size', `${cellPx}px`);
-  const clueColWidth = (maxRowClueLen * CLUE_PER_DIGIT + CLUE_BASE) * cellPx;
-  const clueRowHeight = (maxColClueLen * CLUE_PER_DIGIT + CLUE_BASE) * cellPx;
+  document.documentElement.style.setProperty('--clue-font-size', `${clueFontPx}px`);
   grid.style.gridTemplateColumns = `${clueColWidth}px repeat(${puzzle.cols}, ${cellPx}px)`;
   grid.style.gridTemplateRows = `${clueRowHeight}px repeat(${puzzle.rows}, ${cellPx}px)`;
 }
@@ -477,6 +483,24 @@ function colLockedNow(c) {
   return isLineLocked(board.getCol(c), puzzle.colClues[c]);
 }
 
+// Current Objective (per-number clue gray-out — see TODO.md): grays individual number spans
+// within a clue independently, via anchoredClueNumbers (lineSolver.js) — see that function's
+// own comment for the actual reasoning. Skipped entirely (nothing grayed) when the line is in
+// genuine contradiction: anchoredClueNumbers' walk assumes a board state that's at least
+// internally consistent, and a contradictory line already shows red at the whole-clue level
+// (.contradiction, set by the caller) — graying individual numbers on top of that would be a
+// confusing, unearned signal on marks the player still needs to fix. clueHtml renders exactly
+// one .nono-clue__num span per clue number (or one placeholder span for an empty clue, which
+// anchoredClueNumbers never touches — see clueHtml), in the same order as `clue`/`line`, so
+// children[i] always lines up with anchored[i].
+function applyAnchoredClasses(clueEl, line, clue, consistent) {
+  const anchored = consistent ? anchoredClueNumbers(line, clue) : [];
+  const spans = clueEl.children;
+  for (let i = 0; i < spans.length; i++) {
+    spans[i].classList.toggle('nono-clue__num--anchored', anchored[i] === true);
+  }
+}
+
 function syncAllCellVisuals() {
   const rowLocked = Array.from({ length: puzzle.rows }, (_, r) => rowLockedNow(r));
   const colLocked = Array.from({ length: puzzle.cols }, (_, c) => colLockedNow(c));
@@ -492,13 +516,17 @@ function syncAllCellVisuals() {
   }
   for (let r = 0; r < puzzle.rows; r++) {
     const row = board.getRow(r);
+    const consistent = isLineConsistent(row, puzzle.rowClues[r]);
     rowClueEls[r].classList.toggle('satisfied', isLineSatisfied(row, puzzle.rowClues[r]));
-    rowClueEls[r].classList.toggle('contradiction', !isLineConsistent(row, puzzle.rowClues[r]));
+    rowClueEls[r].classList.toggle('contradiction', !consistent);
+    applyAnchoredClasses(rowClueEls[r], row, puzzle.rowClues[r], consistent);
   }
   for (let c = 0; c < puzzle.cols; c++) {
     const col = board.getCol(c);
+    const consistent = isLineConsistent(col, puzzle.colClues[c]);
     colClueEls[c].classList.toggle('satisfied', isLineSatisfied(col, puzzle.colClues[c]));
-    colClueEls[c].classList.toggle('contradiction', !isLineConsistent(col, puzzle.colClues[c]));
+    colClueEls[c].classList.toggle('contradiction', !consistent);
+    applyAnchoredClasses(colClueEls[c], col, puzzle.colClues[c], consistent);
   }
   applyHighlightClasses();
 

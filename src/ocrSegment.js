@@ -85,7 +85,9 @@ const DEFAULT_MIN_GLYPH_WIDTH = 2;
 // 0-9 glyphs, which are always a single connected stroke) that recognizeStripSegmented uses
 // to re-split a whole line's OCR'd digit stream back into individual numbers — see that
 // function's own comment in scanUI.js for why it OCRs a whole line rather than each number
-// alone.
+// alone. Also keeps the individual glyph bands that merged into each group (`glyphs`) — see
+// scanUI.js's per-glyph OCR fallback (Current Objective #1, TODO.md's "11 misreads as 1")
+// for why the ORIGINAL boundaries need to survive the merge, not just the combined span.
 export function groupGlyphsIntoNumbers(
   glyphBands,
   { maxSameNumberGap = DEFAULT_MAX_SAME_NUMBER_GAP, minGlyphWidth = DEFAULT_MIN_GLYPH_WIDTH } = {}
@@ -93,15 +95,16 @@ export function groupGlyphsIntoNumbers(
   const real = glyphBands.filter((b) => b.end - b.start + 1 >= minGlyphWidth);
   if (real.length === 0) return [];
 
-  const groups = [{ start: real[0].start, end: real[0].end, glyphCount: 1 }];
+  const groups = [{ start: real[0].start, end: real[0].end, glyphCount: 1, glyphs: [{ start: real[0].start, end: real[0].end }] }];
   for (let i = 1; i < real.length; i++) {
     const gap = real[i].start - real[i - 1].end;
     if (gap <= maxSameNumberGap) {
       const g = groups[groups.length - 1];
       g.end = real[i].end;
       g.glyphCount += 1;
+      g.glyphs.push({ start: real[i].start, end: real[i].end });
     } else {
-      groups.push({ start: real[i].start, end: real[i].end, glyphCount: 1 });
+      groups.push({ start: real[i].start, end: real[i].end, glyphCount: 1, glyphs: [{ start: real[i].start, end: real[i].end }] });
     }
   }
   return groups;

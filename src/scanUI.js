@@ -143,7 +143,12 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     els.pageRoot.classList.add('hidden');
     els.explainPanel.classList.add('hidden');
     els.scanModal.classList.remove('hidden');
-    window.scrollTo(0, 0); // start at the top of the fresh screen, not wherever the page was scrolled to
+    // Current Objective (app-wide scroll bug, round 2 — see TODO.md/styles.css's html/body
+    // comment): .scan-modal (.scan-screen) is now its own overflow-y:auto region rather than
+    // scrolling via the document, so resetting to "the top of the fresh screen" means resetting
+    // THIS element's own scrollTop, not window.scrollTo — the document itself no longer scrolls
+    // at all, so window.scrollTo(0, 0) would be a silent no-op here now.
+    els.scanModal.scrollTop = 0;
     // iOS scroll regression fix (see TODO.md): body's padding-bottom now tracks the explain
     // panel's REAL height via app.js's syncExplainPanelSpace (--explain-panel-space), rather
     // than a static reservation — hiding the panel here needs that recalculated too (down to
@@ -660,14 +665,16 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     });
   }
 
-  // Crops [x0,x1] x [y0,y1] out of `canvas` with CROP_PADDING added on every side (clamped to
-  // the canvas bounds).
-  function padCropCanvas(canvas, x0, x1, y0, y1) {
+  // Crops [x0,x1] x [y0,y1] out of `canvas`, with independent left/right/vertical padding
+  // (each clamped to the canvas bounds) — the general form padCropCanvas below (symmetric
+  // CROP_PADDING on every side, the normal case) and the per-glyph fallback's clamped side
+  // padding (see glyphSidePadding) both build on.
+  function padCropCanvasAsym(canvas, x0, x1, y0, y1, padLeft, padRight, padY) {
     const { width, height } = canvas;
-    const px0 = Math.max(0, x0 - CROP_PADDING);
-    const px1 = Math.min(width - 1, x1 + CROP_PADDING);
-    const py0 = Math.max(0, y0 - CROP_PADDING);
-    const py1 = Math.min(height - 1, y1 + CROP_PADDING);
+    const px0 = Math.max(0, x0 - padLeft);
+    const px1 = Math.min(width - 1, x1 + padRight);
+    const py0 = Math.max(0, y0 - padY);
+    const py1 = Math.min(height - 1, y1 + padY);
     const cw = px1 - px0 + 1;
     const ch = py1 - py0 + 1;
     const sub = document.createElement('canvas');
@@ -675,6 +682,65 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     sub.height = ch;
     sub.getContext('2d').drawImage(canvas, px0, py0, cw, ch, 0, 0, cw, ch);
     return sub;
+  }
+
+  // Crops [x0,x1] x [y0,y1] out of `canvas` with CROP_PADDING added on every side (clamped to
+  // the canvas bounds).
+  function padCropCanvas(canvas, x0, x1, y0, y1) {
+    return padCropCanvasAsym(canvas, x0, x1, y0, y1, CROP_PADDING, CROP_PADDING, CROP_PADDING);
+  }
+
+  // Current Objective #1 (see TODO.md — "11 misreads as 1"): how much horizontal padding an
+  // individual glyph's per-glyph fallback crop (see recognizeStripSegmented below) can safely
+  // use on one side. A glyph WITHIN a multi-digit number can sit closer to its neighbor than
+  // CROP_PADDING itself — that's the entire point of groupGlyphsIntoNumbers' own gap
+  // threshold, same-number gaps are deliberately allowed to be small (10-12px measured, see
+  // that function's own comment) — so padding a single glyph's crop by the normal CROP_PADDING
+  // (12px) on the side facing a same-number neighbor can pull that neighbor right back into
+  // frame, silently reproducing the exact merge this fallback exists to undo (confirmed
+  // directly: see TODO.md's own investigation, where an isolated "1" crop padded this way came
+  // back "11" again from Tesseract — the SAME misread, just shifted to the wrong glyph). Full
+  // CROP_PADDING is still used on the side facing away from a same-number neighbor (the line's
+  // own edge, or a genuinely different number — see groupGlyphsIntoNumbers, those gaps are
+  // always well past this threshold by construction).
+  function glyphSidePadding(glyphs, i, side) {
+    const neighbor = side === 'left' ? glyphs[i - 1] : glyphs[i + 1];
+    if (!neighbor) return CROP_PADDING;
+    const gap = side === 'left' ? glyphs[i].start - neighbor.end - 1 : neighbor.start - glyphs[i].end - 1;
+    return Math.max(1, Math.min(CROP_PADDING, Math.floor(gap / 2)));
+  }
+
+  // Current Objective #1 (see TODO.md): OCRs one multi-digit number's glyphs INDIVIDUALLY —
+  // the last-resort fallback below this, used only once both the whole-line AND whole-number
+  // attempts have already failed to produce `n.glyphCount` digits for this specific number.
+  // Root-caused directly against the real 25x25 test screenshot (see TODO.md): a tightly-
+  // kerned repeated digit — "11" specifically, confirmed with columns 17-20's real `_,_,11`
+  // clues — reads back as a single "1" from Tesseract at EVERY page-segmentation mode tried,
+  // even when already cropped to just that one number with nothing else in frame (so this
+  // isn't the same "OCR can't tell spacing" issue ocrSegment.js's own comment already
+  // documents and recognizeStripSegmented's digit-count re-split already handles — Tesseract
+  // is glyph-count-blind here even given an unambiguous crop). Isolating each glyph on its
+  // own is the one thing that was confirmed, directly against this exact image, to actually
+  // fix it — at the cost of the same "isolated single digit is less reliable than digit-in-
+  // context" risk recognizeStripSegmented's own top comment already accepts elsewhere, which
+  // is exactly why this is the LAST resort, not the first.
+  async function recognizeGlyphsIndividually(canvas, n, y0, y1) {
+    const glyphTexts = [];
+    for (let gi = 0; gi < n.glyphs.length; gi++) {
+      const g = n.glyphs[gi];
+      const padLeft = glyphSidePadding(n.glyphs, gi, 'left');
+      const padRight = glyphSidePadding(n.glyphs, gi, 'right');
+      const glyphCanvas = padCropCanvasAsym(canvas, g.start, g.end, y0, y1, padLeft, padRight, CROP_PADDING);
+      const text = await recognizeClueStrip(glyphCanvas);
+      const glyphDigit = text.replace(/\D/g, '');
+      // A single glyph should read as exactly one digit; if Tesseract still returns something
+      // else (empty, or more than one character) there's nothing more localized left to try —
+      // '?' surfaces plainly in the correction step's text box rather than silently guessing,
+      // matching this feature's practice of flagging uncertainty for the player to resolve
+      // rather than picking a number that might be wrong.
+      glyphTexts.push(glyphDigit.length === 1 ? glyphDigit : '?');
+    }
+    return glyphTexts.join('');
   }
 
   // OCRs an already-cropped strip, line by line, joining recognized numbers with a space
@@ -692,7 +758,10 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   // only works if the digit COUNT Tesseract found matches what geometry expects; if it
   // doesn't (a misread that also drops or adds a digit, not just misplaces a space), this
   // falls back to OCRing that one line's numbers individually — worse per-glyph odds, but
-  // only paid when the fast path is already known to be untrustworthy for that line.
+  // only paid when the fast path is already known to be untrustworthy for that line. And if
+  // THAT still doesn't produce the right digit count for a specific multi-digit number (see
+  // recognizeGlyphsIndividually above), one more fallback level OCRs that number's own glyphs
+  // one at a time.
   async function recognizeStripSegmented(canvas) {
     const lines = findStripLines(canvas);
     const lineTexts = [];
@@ -716,7 +785,12 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
         for (const n of numbers) {
           const numCanvas = padCropCanvas(canvas, n.start, n.end, y0, y1);
           const text = await recognizeClueStrip(numCanvas);
-          numberTexts.push(text.trim());
+          const numDigits = text.replace(/\D/g, '');
+          if (n.glyphCount > 1 && numDigits.length !== n.glyphCount) {
+            numberTexts.push(await recognizeGlyphsIndividually(canvas, n, y0, y1));
+          } else {
+            numberTexts.push(text.trim());
+          }
         }
         lineTexts.push(numberTexts.join(' '));
       }

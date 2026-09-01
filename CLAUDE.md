@@ -38,13 +38,16 @@
   (`scratch-images/sample-mid-solve.jpg`) reusable for future OCR-accuracy verification.
 - **iOS scroll/touch bugs in this app have proven resistant to incremental CSS/JS
   fixes, across two separate bugs now.** The original scan-wizard scroll bug took four
-  rounds; a subsequent app-wide scroll regression has now failed real-device
-  verification at least twice, even after a specific, plausible-sounding root cause was
-  found and fixed in the browser preview. When investigating this class of bug: use the
-  `?debug=scroll` diagnostic tool (`initScrollDiagnostics` in `app.js`) to get real
-  on-device measurements rather than reasoning from a plausible mechanism alone, and
-  don't assume a preview-verified fix holds on real hardware. If incremental fixes keep
-  failing, consider a more forceful structural approach over another targeted patch.
+  rounds; a subsequent app-wide scroll regression failed real-device verification
+  twice, even after a specific, plausible-sounding root cause was found and fixed in
+  the browser preview. Round 2 (see `TODO.md`) switched to a structural fix —
+  `<html>`/`<body>` permanently non-scrolling, one region owning real scroll at a
+  time — but **that fix is still only verified in browser preview, not on real
+  hardware**; this project's history says that gap has mattered before, so don't treat
+  it as resolved until it's actually tested on the device. When investigating this
+  class of bug: use the `?debug=scroll` diagnostic tool (`initScrollDiagnostics` in
+  `app.js`) to get real on-device measurements rather than reasoning from a plausible
+  mechanism alone.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -69,24 +72,20 @@ clue-lines, tightened after catching its own false positive, and shipped. See
 `src/scanUI.js`, `src/cellStateDetect.js`), and the confirmed ground-truth reference
 puzzle.
 
-**Current objective has four items from the latest real-device round**:
-1. A specific OCR content-accuracy pattern (distinct from the now-fixed geometry bug):
-   `11` is consistently misread as `1`, while `12` reads correctly — directly testable
-   against several `11`s in the confirmed ground truth.
-2. The app-wide scroll bug is confirmed still NOT fixed on real hardware, and this
-   round's symptom description doesn't clearly match the previous round's diagnosis —
-   re-diagnose using the `?debug=scroll` tool before attempting another fix, and
-   consider the project owner's request to "just lock it down" as license for a more
-   forceful structural fix if incremental patches keep not holding.
-3. A new request: larger, more legible clue numbers on large puzzles (e.g. 25×25),
-   since font size currently scales directly with the shrinking `--cell-size` —
-   needs real design investigation (decoupling clue-font scaling from cell size,
-   reserving more layout space, etc.), not just a quick font-size bump.
-4. A new, now-precisely-specified feature: per-number gray-out within a multi-number
-   clue, where an individual number grays out only once its run is provably anchored
-   (to the line's edge, or via X's reaching a further-anchored neighbor) — not merely
-   "a run of the right length exists somewhere." Worth checking whether the solver's
-   existing edge-completion reasoning can be adapted for this display-only purpose.
+**The four items from that "latest real-device round" are now all addressed** (see
+`TODO.md`'s Completed Tasks for full writeups): the `11`→`1` OCR misread is root-caused
+and fixed (a genuine Tesseract recognition failure, not the geometry — fixed via a
+per-glyph OCR fallback with neighbor-clamped padding); clue-number legibility on large
+puzzles is fixed (font size now floors independently of shrinking `--cell-size`);
+per-number clue gray-out is shipped (`anchoredClueNumbers`, `lineSolver.js`, verified
+by a brute-force soundness differential test). **The app-wide scroll bug got a
+structural fix (`<html>`/`<body>` now permanently non-scrolling, generalizing the same
+technique already proven safe for modals in this codebase) but is the one item NOT yet
+confirmed on real hardware** — this project's own history is explicit that a fix
+verified only in browser preview has already failed real iOS hardware twice for this
+exact bug, so treat it as unresolved until tested on the actual device. A second,
+distinct OCR bug (single-digit clue numbers dropping out on long lines) was found
+during this round's verification but deliberately left unfixed — see `TODO.md`.
 
 Item 8 (arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain
 deferred pending their own design pass.

@@ -5,7 +5,13 @@
 
 import { describe, test, assert, assertEqual } from './harness.js';
 import { UNKNOWN, FILLED, EMPTY, cluesFromLine } from '../src/model.js';
-import { generalLineSolve, overlapForcedCells, edgeCompletionDeductions, isLineConsistent } from '../src/lineSolver.js';
+import {
+  generalLineSolve,
+  overlapForcedCells,
+  edgeCompletionDeductions,
+  isLineConsistent,
+  anchoredClueNumbers,
+} from '../src/lineSolver.js';
 
 function randomBoolLine(n, density) {
   return Array.from({ length: n }, () => Math.random() < density);
@@ -141,4 +147,133 @@ describe('edge completion technique (hand-checked cases)', () => {
     const result = edgeCompletionDeductions(line, [3]);
     assertEqual(result, []);
   });
+});
+
+// Current Objective (per-number clue gray-out — see TODO.md): hand-checked cases straight
+// from the feature's own spec, plus the differential/property test below (per CLAUDE.md's
+// "prefer differential/property-style tests... when correctness is subtle").
+describe('anchoredClueNumbers (hand-checked cases)', () => {
+  test("TODO.md's own `5, 3, 2` example: a complete, correctly-bounded run of 3 stays " +
+    'unanchored while neither neighbor is anchored yet', () => {
+    const line = [
+      UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, // still deciding the "5"
+      EMPTY,
+      FILLED, FILLED, FILLED, // the "3" — complete and bounded, but floating
+      EMPTY,
+      UNKNOWN, UNKNOWN, // still deciding the "2"
+    ];
+    assertEqual(anchoredClueNumbers(line, [5, 3, 2]), [false, false, false]);
+  });
+
+  test('once the "5" anchors to the left edge with a confirmed empty gap, the "3" anchors relative to it', () => {
+    const line = [
+      FILLED, FILLED, FILLED, FILLED, FILLED, // "5", touches the left edge
+      EMPTY,
+      FILLED, FILLED, FILLED, // "3"
+      EMPTY,
+      UNKNOWN, UNKNOWN, // "2" still undecided
+    ];
+    assertEqual(anchoredClueNumbers(line, [5, 3, 2]), [true, true, false]);
+  });
+
+  test('a run touching the true edge is NOT anchored on its own if its far boundary is still unknown', () => {
+    // clue [2]: the run starts at the line's own edge, but nothing confirms it stops at
+    // length 2 rather than growing into the still-UNKNOWN cell right after it.
+    const line = [FILLED, FILLED, UNKNOWN, UNKNOWN];
+    assertEqual(anchoredClueNumbers(line, [2]), [false]);
+  });
+
+  test('a run touching the true edge IS anchored once its far boundary is confirmed empty', () => {
+    const line = [FILLED, FILLED, EMPTY, UNKNOWN];
+    assertEqual(anchoredClueNumbers(line, [2]), [true]);
+  });
+
+  test('a run that fills the whole line touches both edges at once and anchors', () => {
+    assertEqual(anchoredClueNumbers([FILLED, FILLED, FILLED], [3]), [true]);
+  });
+
+  test('touching the true edge alone does not anchor a number whose far boundary is still unknown, even when a different number elsewhere is fully anchored', () => {
+    const line = [
+      FILLED, FILLED, FILLED, FILLED, FILLED, // "5", anchors: left edge + confirmed empty after
+      EMPTY,
+      UNKNOWN, // breaks the chain toward the "3"
+      FILLED, FILLED, FILLED, // "3" — floating, not reachable from either anchored end
+      UNKNOWN, // breaks the chain from the "2" side too
+      FILLED, FILLED, // "2", touches the right edge, but its far (left-facing) boundary is UNKNOWN
+    ];
+    assertEqual(anchoredClueNumbers(line, [5, 3, 2]), [true, false, false]);
+  });
+
+  test('an empty clue has no numbers to anchor', () => {
+    assertEqual(anchoredClueNumbers([EMPTY, EMPTY], []), []);
+  });
+});
+
+function runPositions(candidate) {
+  const positions = [];
+  let start = -1;
+  for (let i = 0; i <= candidate.length; i++) {
+    const on = i < candidate.length && candidate[i];
+    if (on && start === -1) start = i;
+    else if (!on && start !== -1) {
+      positions.push([start, i - 1]);
+      start = -1;
+    }
+  }
+  return positions;
+}
+
+// For every completion of `masked` consistent with both the existing marks and `clue`,
+// collect the [start, end] each clue NUMBER (by index) actually occupies — used below to
+// check anchoredClueNumbers never claims a number is anchored unless its position is
+// genuinely invariant across every remaining possibility, i.e. a soundness check, brute-force
+// verified, mirroring generalLineSolve's own differential test above.
+function bruteForceRunPositionsPerNumber(masked, clue) {
+  const n = masked.length;
+  const perNumber = Array.from({ length: clue.length }, () => []);
+  for (let bits = 0; bits < 1 << n; bits++) {
+    const candidate = new Array(n);
+    let consistent = true;
+    for (let i = 0; i < n; i++) {
+      const filled = (bits & (1 << i)) !== 0;
+      candidate[i] = filled;
+      if (masked[i] === FILLED && !filled) { consistent = false; break; }
+      if (masked[i] === EMPTY && filled) { consistent = false; break; }
+    }
+    if (!consistent) continue;
+    const positions = runPositions(candidate);
+    if (positions.length !== clue.length) continue;
+    if (!positions.every(([s, e], i) => e - s + 1 === clue[i])) continue;
+    positions.forEach((pos, i) => perNumber[i].push(pos));
+  }
+  return perNumber;
+}
+
+describe('anchoredClueNumbers vs brute force (soundness — never claims an unproven position)', () => {
+  const trials = 300;
+  for (let t = 0; t < trials; t++) {
+    test(`random trial ${t}`, () => {
+      const n = 2 + Math.floor(Math.random() * 6); // 2-7 cells: small enough for exhaustive 2^n brute force
+      const solution = randomBoolLine(n, 0.5);
+      const clue = cluesFromLine(solution);
+      if (clue.length === 0) return; // nothing to anchor
+      const masked = maskLine(solution, 0.6);
+      if (!isLineConsistent(masked, clue)) return; // app.js never calls anchoredClueNumbers on an inconsistent line either
+
+      const anchored = anchoredClueNumbers(masked, clue);
+      const perNumber = bruteForceRunPositionsPerNumber(masked, clue);
+      for (let i = 0; i < clue.length; i++) {
+        if (!anchored[i]) continue; // only checking that every POSITIVE claim is actually proven
+        const positions = perNumber[i];
+        assert(positions.length > 0, `trial ${t}: number ${i} claimed anchored but has no valid completion`);
+        const [s0, e0] = positions[0];
+        const invariant = positions.every(([s, e]) => s === s0 && e === e0);
+        assert(
+          invariant,
+          `trial ${t}: number ${i} claimed anchored but its position varies across valid completions ` +
+            `(line=${JSON.stringify(masked)}, clue=${JSON.stringify(clue)}, positions=${JSON.stringify(positions)})`
+        );
+      }
+    });
+  }
 });
