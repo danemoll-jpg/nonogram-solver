@@ -234,7 +234,23 @@ Current Objective (Focus Area)
      `#btn-save-progress` button in the `.library-entry-group` toolbar row
      (`index.html`), next to Library/Stats; removed from the Help dropdown. `app.js`
      renamed `els.menuSaveProgress` → `els.btnSaveProgress` and dropped the
-     now-inapplicable `closeHelpMenu()` call from its click handler.
+     now-inapplicable `closeHelpMenu()` call from its click handler. Trimmed to an
+     icon-only 💾 button (`.btn--icon`, `aria-label`/`title` carry the accessible
+     name) per a follow-up request — the label was pure toolbar clutter once the
+     glyph alone reads fine, same reasoning that already trimmed Help to a bare "?".
+  4. **Toolbar button height mismatch — found and fixed, not part of the original
+     three follow-ups but caught while placing the new button.** The project owner
+     noticed "Puzzle library" looked out of alignment with its neighbors; root-caused
+     (not guessed) to a real Chromium quirk — with every computed style otherwise
+     identical, the 📚 glyph alone was inflating that button's rendered height 8px
+     past its 📊/💾/❓ siblings' (42.9px vs 34.9px), because a color-emoji glyph's own
+     font metrics can push a text button's height past its specified `line-height`.
+     Fixed in `styles.css` by pinning `.btn` to an explicit `height: 2.2rem` with
+     flex centering instead of relying on `line-height` + `padding` to imply one, so
+     no single button's box can be pushed around by whichever glyph it contains;
+     trimmed the now-redundant vertical padding from `.btn--icon`, `.mute-toggle`,
+     and `.help-menu__trigger`. Verified: all five toolbar buttons now measure
+     exactly 35.2px tall.
 
   **Real-device verification is the only remaining step here** — for round 1's fix
   AND all three follow-ups above. Use `?debug=scroll` on the actual iPhone:

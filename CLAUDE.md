@@ -76,7 +76,14 @@ done, until confirmed on the actual iPhone:
    in `app.js`, alongside the main correction.
 3. **"Save progress" moved to its own main-toolbar button — implemented.** New
    `#btn-save-progress` in `index.html`'s `.library-entry-group`, removed from the
-   Help dropdown.
+   Help dropdown; later trimmed to an icon-only 💾 button per a follow-up request.
+
+Also fixed along the way (not part of the original three, caught while placing the
+new button): a real toolbar button height mismatch — "Puzzle library" was rendering
+8px taller than its neighbors, root-caused to a Chromium quirk where a color-emoji
+glyph's own font metrics can inflate a text button's height past its specified
+`line-height`. Fixed in `styles.css` by pinning `.btn` to an explicit height with
+flex centering instead of relying on `line-height` + `padding` to imply one.
 
 Real-device verification (of round 1's fix AND all three round-2 items above) is
 the only remaining step — this bug class has failed that check multiple times
