@@ -112,13 +112,13 @@ Completed Tasks
      full-screen view that replaces the normal page content in the DOM (`.scan-screen` in
      `styles.css`, `openWizard`/`closeWizard` in `scanUI.js`), scrolled by the browser's
      own native page scroll instead of a nested `overflow` region fighting a
-     `position: fixed` ancestor. **Confirmed working on a real iOS device.** General
+     `position: fixed` ancestor. **Confirmed working on a real iOS device** at the time,
+     though see the follow-up scroll regression noted in Current Objective below. General
      lesson for this app: when an iOS-only scroll/touch bug survives a couple of targeted
      CSS fixes, consider removing the risky structural pattern (overlay + nested scroll)
      rather than continuing to patch it — each on-device retest round has a real cost.
-  8. **Status: functionally complete, confirmed working on a real device.** 493+ tests
-     passing (all real-data-driven). See below for a post-ship feedback round covering
-     five more items from further real-world use.
+  8. **Status: functionally complete, confirmed working on a real device at the time.**
+     493+ tests passing (all real-data-driven).
 
 * **Five items from real-world play, after item 10 shipped — all done.** All found by the
   project owner using the app for real, not synthetic testing.
@@ -146,67 +146,106 @@ Completed Tasks
      into plausible multi-number reads). With 26 dividing a 25-column-wide rect, every
      even-subdivided cell/column-band was slightly too narrow, and the error compounds with
      column index — negligible near the left edge, bad enough by column ~13 to misclassify
-     fill state and badly mis-slice OCR strips. This is exactly the "column running along
-     more of the image... seems like the likely trigger" suspicion from this item's
-     original notes, except the trigger was the confirmed **column count**, not the
-     column-band crop's coordinate math itself (`computeClueBands`/`sliceVertical` are
-     correct given a correct count and rect).
-     `countGridLines`'s line-counting heuristics were NOT changed — they're already been
+     fill state and badly mis-slice OCR strips.
+     `countGridLines`'s line-counting heuristics were NOT changed — they've already been
      through several fragile real-image tuning rounds (see item 10 above), and one more
      real image isn't enough to safely retune them without risking a regression on the
      images that already work. Instead, added a cheap, high-value safety net that reuses
      the same per-line flagging: `updateRecheckWarning` in `scanUI.js` shows a banner in
      the correction step when ≥30% of either axis's lines are flagged
      (`RECHECK_WARN_FRACTION`) — a wall of flags like that is the signature of a wrong
-     row/col count confirmed a step earlier, not many independent OCR misreads, so the
-     banner points the player back at that instead of leaving them to hand-fix a wall of
-     red boxes one number at a time. **Next step if this recurs**: investigate whether
-     `countGridLines` systematically miscounts when clue-number chip widths vary a lot
-     (single-digit "1" vs. double-digit "12"/"15" chips, as in the test image) — needs
-     another real image with the same property to confirm before touching the algorithm.
-     The specific digit-confusion pairs (1↔7, 3↔5/2↔5) weren't re-confirmable against this
-     particular image's misreads (a 2→9 misread turned up instead) — worth re-collecting
-     against a real image where the column geometry is already known-good, so genuine OCR
-     misreads aren't mixed in with count-miscount noise.
+     row/col count confirmed a step earlier, not many independent OCR misreads. **See
+     Current Objective below — this whole approach is being upgraded rather than left as
+     the final answer, since it still requires cancel-and-blindly-rescan with no way to
+     act on the warning.**
   2. **Bug: board stays undersized after closing the scan wizard — fixed.** `closeWizard`
      (`scanUI.js`) now calls an `onClose` callback (app.js passes `fitBoardToViewport`)
      after restoring `#page-root`, the same fit logic puzzle selection already ran.
   3. **Page overscroll bounce — eliminated app-wide, scroll left intact.** `overscroll-
      behavior: none` on `html, body` (styles.css) kills the rubber-band at the outer
-     scroll boundary — covers both normal play and the scan wizard's full-screen view,
-     since the latter has no nested scroll container of its own and scrolls via this same
-     boundary. `overscroll-behavior: contain` added to the other regions with genuinely
-     tall content that stay independently scrollable on purpose: `.explain-panel`,
-     `.scan-clue-list` (the correction step's per-line list), `.scan-fillstate-grid`
-     (horizontal-only) — same treatment `.modal-card__body` already had from item 10.7's
-     iOS fix. Audited whether normal play scrolls at all: it shouldn't, since
-     `fitBoardToViewport` sizes the board to fit below the header down to the fixed
-     explain panel — no separate root-cause bug found; the bounce-suppression alone is the
-     fix, matching this item's own note about mobile browser chrome (address bar
-     show/hide) causing brief `window.innerHeight` mismatches rather than a real overflow.
+     scroll boundary — covers both normal play and the scan wizard's full-screen view.
+     `overscroll-behavior: contain` added to regions with genuinely tall content that stay
+     independently scrollable on purpose: `.explain-panel`, `.scan-clue-list`,
+     `.scan-fillstate-grid` (horizontal-only). **See Current Objective below — a scroll
+     regression has since been reported, specifically worse when the iOS keyboard opens.**
   4. **Bug: drag painting overwrote already-marked cells — fixed.** `paintCell` in app.js
      now skips any cell that isn't UNKNOWN when the call is a drag-sweep step
-     (`dragStep: true`), regardless of the drag's mode — a drag only ever paints blank
-     cells now. Single-click toggle-off-if-same-state (`dragStep: false`) is unchanged.
-     Verified in-browser: dragging in Fill mode across a pre-marked EMPTY cell no longer
-     clears it.
+     (`dragStep: true`), regardless of the drag's mode. Single-click toggle-off-if-
+     same-state (`dragStep: false`) is unchanged. Verified in-browser.
   5. **"Remove bad marks" now counts as hint usage — fixed.** `removeBadMarks`
      (mistakes.js) batches its clears into one `board.setBatch(..., { source: 'hint' })`
-     call instead of per-cell `board.set` — one click now counts as one hint use (same as
-     a multi-cell hint deduction already did), picked up automatically by both
-     `computeCompletionStats` (app.js) and `recordCompletion`'s cross-device stat (both
-     already derive "hints used" from `source: 'hint'` history entries, no separate
-     counter to keep in sync). New test in `test/mistakes.test.js` covers the batching and
-     the hint tag.
+     call — one click now counts as one hint use, picked up automatically by both
+     `computeCompletionStats` and `recordCompletion`'s cross-device stat.
 
   All five verified in-browser; items 1/2 specifically re-verified end-to-end against the
-  real 25x25 mid-solve screenshot per this project's established real-image-testing
-  practice for this feature area (see item 10's file-level notes). 494 tests passing.
+  real 25x25 mid-solve screenshot. 494 tests passing.
 
 Current Objective (Focus Area)
 
-* None open right now — the five real-world-play items above are done. Awaiting the next
-  round of real-world feedback, or pick up an item from Next Steps below.
+* **Two more items from continued real-world use — the recheck-warning UX from item 1
+  above, and a scroll regression on iOS.**
+
+  1. **Replace the "wrong column count, cancel and rescan" warning with something
+     actionable — let the player supply the known row/col count up front, and detect
+     truncated/cut-off clue digits as a real signal, not just a flag-count heuristic.**
+     Current behavior is a dead end: the banner tells the player *that* the count is
+     probably wrong but not *what* the right count is or *why* detection keeps landing on
+     the same wrong number — so canceling and rescanning the same image with the same
+     detection logic just reproduces the same error, with no way for the player to break
+     the loop. Two concrete improvements, both from the project owner's own suggestions:
+     - **Let the player enter the known row/col count *before* the scan commits to a
+       guess**, when they already know it (as in the 25×25 case that surfaced this whole
+       investigation). This turns detection from "guess, then ask the player to somehow
+       fix the image if wrong" into "guess, then reconcile against known ground truth" —
+       e.g. if auto-detection or `countGridLines` finds 26 line-positions but the player
+       says 25 columns, that's a concrete, checkable discrepancy to resolve (which
+       line-detection is the spurious one) rather than an unexplained mismatch after the
+       fact. The already-editable rows/cols fields are the natural place for this — the
+       open question is only *when* the player can supply it (before vs. only after a
+       first auto-attempt) and how detection actually uses a known count to adjust its
+       line search, which needs a real implementation approach, not just a UI change.
+     - **Detect visually truncated/half-cut-off clue-number crops as a first-class
+       signal**, distinct from and more specific than the existing "too many lines flagged
+       inconsistent" heuristic. If a clue-number glyph is touching or crossing a crop
+       boundary rather than being fully contained within it, that's a direct, localized
+       signal that a *specific* line's band boundary is misplaced — pointing at where the
+       error is, not just that something in aggregate seems off. This is closer to (and
+       may be able to reuse groundwork from) `ocrSegment.js`'s existing glyph/run-finding
+       work, which was already built to reason about glyph boundaries precisely for a
+       different purpose (digit-merging).
+     - Per this feature's established practice, prototype and verify against a real
+       image (the same 25×25 mid-solve screenshot that surfaced the original off-by-one is
+       a natural first test case) rather than synthetic mockups.
+
+  2. **iOS scroll regression: unnecessary scrolling still happening, and it gets worse —
+     specifically introducing extra whitespace — once the on-screen keyboard opens.**
+     Reported after the overscroll-bounce fix (item 3 above) shipped. Two distinct
+     symptoms worth investigating separately rather than assuming one root cause:
+     - **Baseline: some scrolling happens even without the keyboard involved at all**,
+       which per the overscroll-bounce fix's own verification note shouldn't be
+       happening if the board is correctly sized — worth first confirming directly
+       whether this is genuine content overflow (something is actually taller than the
+       viewport) versus a `window.innerHeight` mismatch from mobile browser chrome
+       show/hide (which the prior fix's notes flagged as a known, different, and likely
+       harmless cause) versus something else entirely. Don't assume it's the same root
+       cause as the keyboard issue below without checking.
+     - **Worse with the keyboard open, specifically introducing whitespace.** This points
+       at the classic mobile-web keyboard-resize problem: the on-screen keyboard opening
+       shrinks the visual viewport, and depending on how layout responds to that
+       (`100vh`-based sizing is a common culprit, since `100vh` on many mobile browsers
+       doesn't shrink when the keyboard appears, leaving a gap where the keyboard now
+       covers content) that can manifest as exactly this symptom — extra blank space
+       appearing and more scroll becoming possible/necessary than before. Worth checking
+       `visualViewport` API usage (or lack of it) in the layout/fit logic, and which
+       specific elements use `vh`-based sizing versus dynamic viewport units
+       (`dvh`) or JS-measured heights.
+     - **Given this project's specific history with iOS scroll bugs (item 10.7 above —
+       four rounds, three CSS-only attempts each fixing one symptom while breaking or
+       missing the next), don't assume a first attempted fix here is complete.** Verify
+       on a real device specifically, including with an input actually focused and the
+       keyboard actually open, not just judged from a simulator or desktop responsive
+       view — this class of bug has consistently not reproduced reliably outside real
+       hardware in this project so far.
 
 Next Steps (Do Not Start Yet)
 
@@ -254,23 +293,26 @@ Technical Notes / Blockers
   mockups alone** — real images have consistently surfaced failure modes synthetic mockups
   missed across this feature's whole history (a swamped global threshold, a three-tier
   line-darkness scheme, filled-cell brightness drift, a scrollbar-like false positive,
-  digit-merging OCR, a thick-border cell-boundary offset). When extending or debugging this
-  area further (including the OCR-accuracy objective above), prefer testing against a real
-  image file over guessing at plausible synthetic pixel values.
+  digit-merging OCR, a thick-border cell-boundary offset, an off-by-one line-count on a
+  varying-clue-chip-width image). When extending or debugging this area further, prefer
+  testing against a real image file over guessing at plausible synthetic pixel values.
 * **iOS scroll/touch bugs in this app have proven resistant to incremental CSS fixes** —
   the scan wizard's scroll bug took four rounds, with the first three each fixing the
-  reported symptom while breaking or missing the next one on a real device. If a similar
-  iOS-only symptom appears elsewhere, consider whether the underlying structural pattern
-  (an overlay with its own nested scroll region) is the actual problem before continuing to
-  patch CSS properties on it.
+  reported symptom while breaking or missing the next one on a real device. A scroll
+  regression has now recurred post-fix (see Current Objective above). If a similar
+  iOS-only symptom appears anywhere in this app, consider whether the underlying
+  structural pattern (an overlay with its own nested scroll region, `100vh`-based sizing
+  that doesn't respond to the keyboard, etc.) is the actual problem before continuing to
+  patch individual CSS properties on it — and always verify on real hardware with the
+  keyboard genuinely open, not just a simulator.
 * **`countGridLines` (gridDetect.js) can miscount a real photo's column count by one** —
   confirmed against a real 25x25 mid-solve screenshot (25 rows correct, 26 columns
-  suggested where the true count is 25). Not yet fixed — see item 1 above for the full
-  writeup and the recheck-warning mitigation that ships instead. If picking this up:
-  the test image's columns have widely varying clue-chip widths (single-digit "1" next to
-  double-digit "12"/"15" chips) — that's the leading suspect for what confuses the
-  line-counting heuristic, but isn't confirmed as the mechanism, only as a property the
-  one failing real image happens to have. Get another real image with the same property
-  before changing the algorithm — this file's whole line-counting history (see item 10
-  above) is a sequence of "fixed against one real image, needed a different fix for the
-  next" rounds, so one repro isn't enough to safely retune it.
+  suggested where the true count is 25). The line-counting heuristic itself was
+  deliberately NOT changed (see Completed Tasks above — too fragile to retune on one
+  repro without risking other real images that already work); instead a recheck-warning
+  banner was added as a stopgap, which is itself being upgraded in Current Objective above
+  (manual known-count input + truncated-glyph detection). If revisiting the underlying
+  heuristic itself: this test image's columns have widely varying clue-chip widths
+  (single-digit "1" next to double-digit "12"/"15" chips) — a leading suspect, not
+  confirmed as the mechanism. Get another real image with the same property before
+  changing the algorithm.

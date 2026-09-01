@@ -42,8 +42,9 @@
 - **iOS scroll/touch bugs in this app have proven resistant to incremental CSS fixes.** The
   scan wizard's scroll bug took four rounds; the working fix removed the risky structural
   pattern (an overlay with its own nested scroll region) rather than continuing to patch CSS
-  properties on it. Consider that lesson before repeating the same patch-and-retest cycle on
-  a similar iOS-only symptom elsewhere.
+  properties on it — and a scroll regression has since recurred post-fix (see `TODO.md`'s
+  Current Objective). Always verify on real hardware, including with an on-screen keyboard
+  genuinely open where relevant, not just a simulator or desktop responsive view.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -55,27 +56,24 @@
 up to date than this file's summary below.
 
 Short version: items 1–7, the UI consolidation pass, a post-ship bug-fix pass, the
-iPad-verification follow-up pass, the clue-number spacing fix, and **item 10
-(scan-existing-puzzle flow)** are all done, deployed, and confirmed working. Item 10 — the
-project's primary current feature — is complete across grid detection, clue OCR, and
-fill-state capture (a new `src/cellStateDetect.js` module restores which cells were already
-filled/X-marked in a mid-solve scan, rather than always handing back a blank board), plus a
-structural iOS-scroll fix (the wizard is now a full-screen view, not a modal overlay). All
-of this was built and repeatedly hardened against the project owner's own real screenshots,
-not synthetic mockups alone — see `TODO.md`'s Completed Tasks for the full round-by-round
-history and every design tradeoff (`src/gridDetect.js`, `src/scanPuzzle.js`, `src/ocr.js`,
-`src/ocrSegment.js`, `src/scanUI.js`, `src/cellStateDetect.js`).
+iPad-verification follow-up pass, the clue-number spacing fix, item 10 (scan-existing-
+puzzle flow, complete across grid detection/clue OCR/fill-state capture), and a
+five-item real-world-feedback round (OCR-vs-fill-state cross-check flagging, an
+undersized-board-on-return bug, app-wide overscroll-bounce removal, a drag-overwrite bug,
+and "Remove bad marks" counting as hint usage) are all done and deployed. See `TODO.md`'s
+Completed Tasks for the full round-by-round history and every design tradeoff
+(`src/gridDetect.js`, `src/scanPuzzle.js`, `src/ocr.js`, `src/ocrSegment.js`,
+`src/scanUI.js`, `src/cellStateDetect.js`).
 
-**Current objective is five items from real-world play**, found after item 10 shipped:
-(1) clue OCR accuracy and correction tedium — including an idea to cross-check OCR'd clues
-against the separately-detected fill state to flag likely-wrong lines automatically; (2) a
-bug where the main board stays undersized after returning from the scan wizard until a
-puzzle is reselected; (3) eliminating page overscroll bounce app-wide (confirmed: bounce
-specifically, not disabling scroll on genuinely-tall content like the scan wizard's
-correction list); (4) a bug where dragging to mark cells overwrites already-marked cells it
-crosses over, instead of only painting blank ones; and (5) making "Remove bad marks" count
-as hint usage in stats, same as an actual hint. See `TODO.md`'s Current Objective for full
-detail on each.
+**Current objective is two more items from continued real-world use**: (1) replacing the
+current "wrong column count, cancel and rescan" dead-end warning with something actionable
+— letting the player supply a known row/col count up front to reconcile against, and
+detecting visually truncated/cut-off clue-number crops as a direct, localized signal
+instead of only an aggregate flag-count heuristic; and (2) a scroll regression on iOS,
+worse specifically when the on-screen keyboard opens (introducing extra whitespace) — see
+`TODO.md`'s Current Objective for the two symptoms to investigate separately (baseline
+scroll vs. keyboard-triggered) and the classic `100vh`/`visualViewport` mobile-keyboard
+culprit worth checking first.
 
 Item 8 (arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain
 deferred pending their own design pass.
