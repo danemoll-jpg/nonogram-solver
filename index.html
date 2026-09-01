@@ -45,6 +45,7 @@
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-check">Check my work</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-remove-bad">Remove bad marks</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-scan">Scan a puzzle</button></li>
+              <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-library">Puzzle library</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-stats">Stats & pairing</button></li>
               <li class="help-menu__divider" role="none" aria-hidden="true"></li>
               <li role="none"><button class="help-menu__item help-menu__item--danger" role="menuitem" type="button" id="menu-clear-all">Clear all</button></li>
@@ -257,10 +258,39 @@
           normally, but (being a scan rather than a saved puzzle) it won't count toward your
           stats and there's no move-by-move undo, only "Check my work".</p>
         <button id="scan-btn-play" class="btn btn--primary" type="button">Play it</button>
+
+        <div class="scan-save-library">
+          <p class="scan-save-library__hint">Add this puzzle to the public shared library so
+            anyone can browse and play it? This always saves the blank grid and clues only —
+            never whatever's currently filled in — and is separate from playing it yourself
+            above; you can do both.</p>
+          <label class="scan-save-library__field">Title
+            <input id="scan-library-title-input" type="text" maxlength="80" placeholder="Give this puzzle a name" autocomplete="off" />
+          </label>
+          <button id="scan-btn-save-library" class="btn" type="button">Save to library</button>
+          <p id="scan-library-save-status" class="stats-status" aria-live="polite"></p>
+        </div>
       </div>
       </div>
 
       <button id="scan-btn-cancel" class="btn btn--ghost" type="button">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Puzzle library (item 9's save-to-library slice) — public, most-recent-first list of
+       puzzles saved from the scan wizard's "done" step (see src/scanUI.js and
+       src/puzzleLibrary.js). Tap a puzzle to play it as a real, permanent puzzle (full move
+       history, counts toward stats — not a scan snapshot). A puzzle's creator additionally
+       gets a rename affordance, shown only on their own saved puzzles; renaming edits the
+       row in place instead of opening another modal. -->
+  <div id="library-modal" class="modal-overlay hidden">
+    <div class="modal-card modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="library-title">
+      <h2 id="library-title" class="modal-card__title">Puzzle library</h2>
+      <div class="modal-card__body">
+        <p id="library-status" class="stats-status">Loading…</p>
+        <ul id="library-list" class="library-list"></ul>
+      </div>
+      <button id="btn-library-close" class="btn btn--primary" type="button">Close</button>
     </div>
   </div>
 

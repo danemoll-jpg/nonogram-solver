@@ -1075,6 +1075,92 @@ body {
   margin-top: 1rem;
 }
 
+/* ---- Save to library (item 9's save-to-library slice — scan wizard's "done" step) ---- */
+
+.scan-save-library {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(230, 183, 63, 0.25);
+}
+
+.scan-save-library__hint {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 0 0 0.75rem;
+}
+
+.scan-save-library__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-bottom: 0.75rem;
+}
+
+.scan-save-library__field input {
+  background: var(--panel-bg);
+  color: var(--text);
+  border: 1px solid rgba(230, 183, 63, 0.3);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.95rem;
+}
+
+/* ---- Puzzle library browse modal (item 9's save-to-library slice) ---- */
+
+.library-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.library-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid rgba(230, 183, 63, 0.2);
+  border-radius: 0.5rem;
+}
+
+.library-row__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.library-row__size {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.library-row__rename-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-bg);
+  color: var(--text);
+  border: 1px solid rgba(230, 183, 63, 0.3);
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.9rem;
+}
+
+.library-row .btn {
+  margin-top: 0;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
 /* Scroll diagnostics (Current Objective — see TODO.md and app.js's initScrollDiagnostics
    comment): investigative instrumentation for the app-wide iOS scroll bug, not a player-facing
    feature — only created at all behind `?debug=scroll`. z-index deliberately higher than

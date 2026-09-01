@@ -14,6 +14,14 @@ rules_version = '2';
 //     createPairingCode/redeemPairingCode Cloud Functions via the Admin SDK, which bypasses
 //     these rules entirely — so client access is locked down completely rather than given
 //     its own (harder to get right) rule.
+//
+//   puzzles/{puzzleId} — the public shared puzzle library (item 9's save-to-library slice,
+//     see src/puzzleLibrary.js and TODO.md). Public read for this first version (no
+//     friends-only/private sharing yet). create is open to any authenticated (including
+//     anonymous) user, but only as the doc's own creator, with light shape validation since
+//     this is a public write-open collection. update is restricted to the original creator
+//     AND scoped to only the `title` field — dimensions, clues, and creatorUid must never
+//     change after creation. No delete yet (not needed for this round).
 service cloud.firestore {
   match /databases/{database}/documents {
     match /users/{uid}/stats/{size} {
@@ -22,6 +30,24 @@ service cloud.firestore {
 
     match /pairingCodes/{code} {
       allow read, write: if false;
+    }
+
+    match /puzzles/{puzzleId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.creatorUid == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.rows is int
+        && request.resource.data.cols is int
+        && request.resource.data.rowClues is list
+        && request.resource.data.colClues is list;
+      allow update: if request.auth != null
+        && request.auth.uid == resource.data.creatorUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title'])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0;
+      allow delete: if false;
     }
   }
 }

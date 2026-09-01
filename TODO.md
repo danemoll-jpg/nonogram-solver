@@ -165,68 +165,44 @@ Current Objective (Focus Area)
   case) and the dropped-single-digit case are the two concrete repro leads already on
   record.
 
-* **New feature, scoped and design-approved by the project owner: save a scanned
-  puzzle to a public shared library, reusing the existing "Scan a puzzle" wizard as
-  the puzzle-authoring tool rather than building a separate creation flow.** This
-  pulls forward a scoped first slice of item 9 (below), ahead of item 8, which the
-  project owner has explicitly deprioritized (not a current priority — keep it in
-  Next Steps but no longer positioned as the next thing after item 9's remaining
-  scope).
-  - **Design, confirmed with the project owner:**
-    1. **Saving always saves a blank puzzle — grid + clues only, never the current
-       fill/X marks**, even if the scan came from a mid-solve photo. This is a
-       one-way snapshot of the puzzle *definition*, not a copy of the player's
-       progress.
-    2. **Saving is fully decoupled from the player's own current session.** The
-       "Save to library" action does not replace, interrupt, or link to whatever the
-       player is doing in their own in-progress (possibly mid-solve) scan session —
-       both continue to exist independently. The player can save a clean copy AND
-       keep playing their own detected-fill-state version, with no interaction
-       between the two.
-    3. **Public visibility for this first version** — any user of the app can browse
-       and play a saved puzzle. (Friends-only/private sharing explicitly deferred to
-       a later version, not this round.)
-  - **Scope for this round:**
-    - A "Save to library" option added to the scan wizard's existing "Puzzle ready"
-      step (alongside "Play it"/"Cancel"), extracting just the confirmed grid
-      dimensions + row/col clues (ignoring whatever `initialMarks` the current scan
-      session detected) and writing a new document to a new Firestore collection
-      (e.g. `puzzles/{puzzleId}`).
-    - New Firestore schema fields needed, minimum viable: dimensions, row clues, col
-      clues, `title`, creator uid (Anonymous Auth, already in use elsewhere in this
-      app), `createdAt`. **Confirmed with the project owner: the save action prompts
-      for a title up front (required, not auto-generated/optional), and the creator
-      can edit that title later** — this is real, additional scope beyond a
-      write-once save.
-    - **Title editing means the library browse UI (below) needs an edit affordance
-      for puzzles the current user created** — not just a read-only list. Simplest
-      reasonable approach: an edit control (pencil icon, or tap-to-rename) visible
-      only on the current user's own saved puzzles in the library view, opening a
-      small rename prompt that writes the updated `title` back to that puzzle's
-      Firestore document.
-    - New Firestore security rules, updated for editability: public read on the new
-      collection; **create** restricted to an authenticated (including anonymous)
-      user creating their own document; **update** restricted to the original
-      creator (`request.auth.uid == resource.data.creatorUid`) AND scoped to only
-      allow changing the `title` field — grid dimensions, clues, and creator should
-      never be editable after creation. No delete needed for this first version
-      unless the project owner wants creators to be able to remove their own saved
-      puzzles — worth confirming, otherwise assume not needed yet.
-    - New "browse the library" UI — likely a new Help-menu entry (matching the
-      existing pattern for "Scan a puzzle"/"Stats & pairing"), listing public saved
-      puzzles, tap to play, with the rename affordance above for the current user's
-      own puzzles. Pagination/sorting/filtering can start minimal (e.g. most recent
-      first) — this doesn't need to be a polished library experience yet, just
-      functional browsing, play, and title editing.
-    - **A puzzle played from the library behaves like any other authored puzzle, NOT
-      like a scan-session puzzle**: real move history, undo-to-point, and normal
-      stats counting — this is a genuine, permanent puzzle now, not an ephemeral
-      scan snapshot. This should fall out naturally from not setting `source: 'scan'`
-      on puzzles loaded this way, reusing the existing distinction already built for
-      `Board`'s snapshot-origin vs. normal-origin behavior.
-    - The existing solvability check in `scanPuzzle.js` (a puzzle must actually solve
-      before the wizard lets it proceed) already guarantees only solvable puzzles
-      reach the save step — no new uniqueness/validity work needed for this round.
+* **Save-to-library feature — client-side implementation done this round; NOT yet
+  usable in production because the updated `firestore.rules` haven't been deployed.**
+  New module `src/puzzleLibrary.js` (savePuzzleToLibrary/fetchLibraryPuzzles/
+  loadLibraryPuzzle/renamePuzzleInLibrary) backs a new "Save to library" section on
+  the scan wizard's existing "done" step (`src/scanUI.js`, `index.html`) and a new
+  "Puzzle library" Help-menu entry opening a browse/play/rename modal (`app.js`).
+  Verified in browser preview: the UI renders correctly and the library modal fails
+  soft with a clear message (confirmed via console: `permission-denied`, expected
+  since the live project's deployed rules don't have the `puzzles` collection yet).
+  **Before this is actually live: deploy the updated `firestore.rules`** —
+  `firebase deploy --only firestore:rules` — which the project owner needs to run
+  themselves (security-rule changes to a live project aren't something to do
+  unattended). No Firestore composite index needed (a single-field `orderBy` doesn't
+  require one). After deploying, worth a real end-to-end pass: save a puzzle from a
+  real scan, confirm it shows up in the library, play it (check it behaves like a
+  normal authored puzzle — real move history, counts toward stats), and rename it as
+  its creator.
+  - Schema (`puzzles/{puzzleId}`): `rows`, `cols` (numbers); `rowClues`, `colClues`
+    (arrays of comma-joined strings, e.g. `"2,5"` — Firestore has no array-of-arrays
+    type, and this round-trips through `scanPuzzle.js`'s existing `parseClueText`
+    rather than inventing a new format); `title`; `creatorUid`; `createdAt`
+    (serverTimestamp). No solution is stored — `loadLibraryPuzzle` re-solves the
+    clues via the same `buildScannedPuzzle` path a fresh scan already uses, since the
+    save step already proved they solve.
+  - Design this pulls forward a scoped first slice of item 9 (below), ahead of item
+    8, which the project owner has explicitly deprioritized (not a current priority
+    — keep it in Next Steps but no longer positioned as the next thing after item
+    9's remaining scope).
+  - **Design (confirmed with the project owner) and this round's scope are both now
+    implemented as described** — blank-puzzle-only saves decoupled from the player's
+    own scan session, public read for this first version, required title with
+    later creator-only editing, and library-sourced puzzles behaving as real
+    authored puzzles (full history, counts toward stats). No further design
+    decisions open here; what's left is purely the deploy + verification step
+    called out above. Pagination/sorting/filtering intentionally stayed minimal
+    (most-recent-first, no search) per the original "doesn't need to be a polished
+    library experience yet" scope call — a candidate for later polish, not a gap in
+    this round.
 
 Next Steps (Do Not Start Yet)
 

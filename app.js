@@ -13,6 +13,8 @@ import { SAMPLE_PUZZLES } from './src/puzzles.js';
 import { playSound, isMuted, toggleMuted, onDragSweepCell, startDragSweep, stopDragSweep } from './src/sounds.js';
 import { recordCompletion, fetchAllStats, generatePairingCode, redeemPairingCode } from './src/stats.js';
 import { initScanWizard } from './src/scanUI.js';
+import { fetchLibraryPuzzles, loadLibraryPuzzle, renamePuzzleInLibrary } from './src/puzzleLibrary.js';
+import { ensureSignedIn } from './src/firebase.js';
 
 let puzzle = null;
 let board = null;
@@ -52,6 +54,7 @@ const els = {
   menuCheck: document.getElementById('menu-check'),
   menuRemoveBad: document.getElementById('menu-remove-bad'),
   menuScan: document.getElementById('menu-scan'),
+  menuLibrary: document.getElementById('menu-library'),
   menuStats: document.getElementById('menu-stats'),
   menuClearAll: document.getElementById('menu-clear-all'),
   explainBody: document.getElementById('explain-panel-body'),
@@ -110,6 +113,13 @@ const els = {
   scanBtnConfirmState: document.getElementById('scan-btn-confirm-state'),
   scanBtnPlay: document.getElementById('scan-btn-play'),
   scanBtnCancel: document.getElementById('scan-btn-cancel'),
+  scanLibraryTitleInput: document.getElementById('scan-library-title-input'),
+  scanBtnSaveLibrary: document.getElementById('scan-btn-save-library'),
+  scanLibrarySaveStatus: document.getElementById('scan-library-save-status'),
+  libraryModal: document.getElementById('library-modal'),
+  libraryStatus: document.getElementById('library-status'),
+  libraryList: document.getElementById('library-list'),
+  btnLibraryClose: document.getElementById('btn-library-close'),
 };
 
 // ---- background-scroll lock (formerly JS-toggled per modal, now permanent — see styles.css) ----
@@ -181,11 +191,18 @@ function populatePuzzleSelect() {
 // this session). Re-selecting its entry in the puzzle picker routes back through here.
 let scannedPuzzle = null;
 
+// The most recently played library puzzle this session (item 9's save-to-library slice),
+// mirroring scannedPuzzle's pattern above so re-selecting its picker entry works the same
+// way — except a library puzzle is a real, permanent puzzle (source stays 'authored', see
+// src/puzzleLibrary.js's loadLibraryPuzzle), not a session-only scan snapshot.
+let libraryPuzzle = null;
+
 function loadPuzzle(id) {
   const p =
-    scannedPuzzle && scannedPuzzle.id === id
-      ? scannedPuzzle
-      : SAMPLE_PUZZLES.find((p) => p.id === id) ?? SAMPLE_PUZZLES[0];
+    (scannedPuzzle && scannedPuzzle.id === id && scannedPuzzle) ||
+    (libraryPuzzle && libraryPuzzle.id === id && libraryPuzzle) ||
+    SAMPLE_PUZZLES.find((p) => p.id === id) ||
+    SAMPLE_PUZZLES[0];
   startPuzzle(p);
 }
 
@@ -232,6 +249,23 @@ function startScannedPuzzle(p) {
   }
   opt.value = p.id;
   opt.textContent = `Scanned puzzle — ${p.rows}x${p.cols}`;
+  startPuzzle(p);
+}
+
+// Called when the player picks a puzzle to play from the library browse modal (below). A
+// library puzzle's real title isn't spoiler-sensitive the way SAMPLE_PUZZLES' curated-shape
+// names are (see populatePuzzleSelect's comment) — browsing by title is the whole point — so
+// unlike that picker convention, this shows the puzzle's actual name.
+function startLibraryPuzzle(p) {
+  libraryPuzzle = p;
+  let opt = els.puzzleSelect.querySelector('option[data-library]');
+  if (!opt) {
+    opt = document.createElement('option');
+    opt.dataset.library = 'true';
+    els.puzzleSelect.insertBefore(opt, els.puzzleSelect.firstChild);
+  }
+  opt.value = p.id;
+  opt.textContent = `${p.name} — ${p.rows}x${p.cols}`;
   startPuzzle(p);
 }
 
@@ -1103,6 +1137,130 @@ els.menuScan.addEventListener('click', () => {
   scanWizard.open();
 });
 
+// ---- puzzle library browse (item 9's save-to-library slice — see TODO.md, src/puzzleLibrary.js) ----
+
+// Renders one row per library puzzle. `myUid`, resolved once per open (below) rather than per
+// row, decides whether that row's rename affordance shows at all — the Firestore rule is what
+// actually enforces who can rename (see firestore.rules), this just avoids showing a control
+// that would fail for everyone but the creator.
+function renderLibraryList(puzzles, myUid) {
+  els.libraryList.innerHTML = '';
+  for (const entry of puzzles) {
+    const li = document.createElement('li');
+    li.className = 'library-row';
+
+    const title = document.createElement('span');
+    title.className = 'library-row__title';
+    title.textContent = entry.title;
+
+    const size = document.createElement('span');
+    size.className = 'library-row__size';
+    size.textContent = `${entry.rows}x${entry.cols}`;
+
+    const playBtn = document.createElement('button');
+    playBtn.className = 'btn btn--primary';
+    playBtn.type = 'button';
+    playBtn.textContent = 'Play';
+    playBtn.addEventListener('click', async () => {
+      playBtn.disabled = true;
+      els.libraryStatus.textContent = '';
+      try {
+        const p = await loadLibraryPuzzle(entry.id);
+        els.libraryModal.classList.add('hidden');
+        startLibraryPuzzle(p);
+      } catch (err) {
+        console.warn('loadLibraryPuzzle failed:', err);
+        els.libraryStatus.textContent = `Couldn't load "${entry.title}" — ${err?.message || 'try again.'}`;
+        playBtn.disabled = false;
+      }
+    });
+
+    li.append(title, size, playBtn);
+
+    if (entry.creatorUid === myUid) {
+      const renameBtn = document.createElement('button');
+      renameBtn.className = 'btn btn--ghost';
+      renameBtn.type = 'button';
+      renameBtn.textContent = 'Rename';
+      renameBtn.addEventListener('click', () => {
+        // Swap the row into an inline edit state — a text input pre-filled with the current
+        // title plus Save/Cancel — rather than opening yet another modal on top of this one.
+        const input = document.createElement('input');
+        input.className = 'library-row__rename-input';
+        input.type = 'text';
+        input.maxLength = 80;
+        input.value = entry.title;
+
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn btn--primary';
+        saveBtn.type = 'button';
+        saveBtn.textContent = 'Save';
+        saveBtn.addEventListener('click', async () => {
+          const newTitle = input.value.trim();
+          if (!newTitle) return;
+          saveBtn.disabled = true;
+          try {
+            await renamePuzzleInLibrary(entry.id, newTitle);
+            entry.title = newTitle;
+            title.textContent = newTitle;
+            li.replaceChildren(title, size, playBtn, renameBtn);
+          } catch (err) {
+            console.warn('renamePuzzleInLibrary failed:', err);
+            els.libraryStatus.textContent = `Couldn't rename — ${err?.message || 'try again.'}`;
+            saveBtn.disabled = false;
+          }
+        });
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn btn--ghost';
+        cancelBtn.type = 'button';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => {
+          li.replaceChildren(title, size, playBtn, renameBtn);
+        });
+
+        li.replaceChildren(input, saveBtn, cancelBtn);
+        input.focus();
+      });
+      li.appendChild(renameBtn);
+    }
+
+    els.libraryList.appendChild(li);
+  }
+}
+
+async function refreshLibraryList() {
+  els.libraryStatus.textContent = 'Loading…';
+  els.libraryList.innerHTML = '';
+  try {
+    // Anonymous sign-in only (no UI, no prompt) — needed just to know "is this my own
+    // puzzle" for the rename affordance; browsing/reading the library itself is public and
+    // doesn't require it (see firestore.rules), but ensureSignedIn() is already how every
+    // other Firebase-backed feature here resolves "the current uid" (see src/stats.js).
+    const [puzzles, user] = await Promise.all([fetchLibraryPuzzles(), ensureSignedIn().catch(() => null)]);
+    if (puzzles.length === 0) {
+      els.libraryStatus.textContent = 'No puzzles saved to the library yet — save one from the scan wizard.';
+      return;
+    }
+    els.libraryStatus.textContent = '';
+    renderLibraryList(puzzles, user?.uid ?? null);
+  } catch (err) {
+    console.warn('fetchLibraryPuzzles failed:', err);
+    els.libraryStatus.textContent =
+      "Couldn't load the library — this needs Firestore rules deployed and a network connection.";
+  }
+}
+
+els.menuLibrary.addEventListener('click', () => {
+  closeHelpMenu();
+  els.libraryModal.classList.remove('hidden');
+  refreshLibraryList();
+});
+
+els.btnLibraryClose.addEventListener('click', () => {
+  els.libraryModal.classList.add('hidden');
+});
+
 // "Clear all" is the old always-visible Reset button, relocated into the Help menu — since
 // it wipes the board and move history with no undo, it asks for confirmation first (via
 // showConfirm, not window.confirm — see that function's comment for why).
@@ -1331,6 +1489,7 @@ function initScrollDiagnostics() {
     ['complete-modal', els.completeModal],
     ['confirm-modal', els.confirmModal],
     ['stats-modal', els.statsModal],
+    ['library-modal (puzzle library)', els.libraryModal],
     ['scan-modal (scan wizard)', els.scanModal],
     ['help-menu-list (Help dropdown)', els.helpMenuList],
   ];

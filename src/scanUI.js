@@ -30,6 +30,7 @@ import {
   detectBestGrid,
 } from './gridDetect.js';
 import { parseClueText, buildScannedPuzzle } from './scanPuzzle.js';
+import { savePuzzleToLibrary } from './puzzleLibrary.js';
 import { recognizeClueStrip, terminateOcr } from './ocr.js';
 import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines, findRepeatedDigitOutlier } from './ocrSegment.js';
 import { classifyGridCells } from './cellStateDetect.js';
@@ -120,6 +121,10 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     state.pendingPuzzle = null;
     state.fillMarks = null;
     els.scanFileInput.value = '';
+    els.scanLibraryTitleInput.value = '';
+    els.scanLibraryTitleInput.disabled = false;
+    els.scanBtnSaveLibrary.disabled = false;
+    els.scanLibrarySaveStatus.textContent = '';
     els.scanGridHint.textContent = '';
     els.scanKnownRowsInput.value = '';
     els.scanKnownColsInput.value = '';
@@ -1098,6 +1103,35 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   });
 
   els.scanBtnCancel.addEventListener('click', () => closeWizard());
+
+  // ---- save to library (item 9's save-to-library slice — see TODO.md, src/puzzleLibrary.js) ----
+  //
+  // Deliberately independent of scanBtnPlay above: this writes a new public library doc from
+  // the confirmed grid + clues only (never state.fillMarks — a save is always a blank-puzzle
+  // snapshot of the definition, per the design), and does nothing to the wizard's own
+  // pendingPuzzle or the player's ability to also play their own detected-fill-state copy via
+  // "Play it". Either button, both, or neither can be used from this same step.
+  els.scanBtnSaveLibrary.addEventListener('click', async () => {
+    const p = state.pendingPuzzle;
+    if (!p) return;
+    const title = els.scanLibraryTitleInput.value.trim();
+    if (!title) {
+      els.scanLibrarySaveStatus.textContent = 'Enter a title first.';
+      return;
+    }
+    els.scanBtnSaveLibrary.disabled = true;
+    els.scanLibrarySaveStatus.textContent = 'Saving…';
+    try {
+      await savePuzzleToLibrary({ rows: p.rows, cols: p.cols, rowClues: p.rowClues, colClues: p.colClues, title });
+      els.scanLibrarySaveStatus.textContent = 'Saved to the library!';
+      els.scanLibraryTitleInput.disabled = true;
+    } catch (err) {
+      console.warn('savePuzzleToLibrary failed:', err);
+      els.scanLibrarySaveStatus.textContent =
+        "Couldn't save — this needs Firestore rules/network access (see functions/README.md).";
+      els.scanBtnSaveLibrary.disabled = false;
+    }
+  });
 
   return { open: openWizard };
 }

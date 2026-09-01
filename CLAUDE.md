@@ -72,19 +72,17 @@ puzzle.
    testing. Ask the project owner directly whether the current (much-improved, mostly
    correct) accuracy is acceptable given the correction step already catches
    remaining errors, rather than assuming further chasing is automatically worthwhile.
-4. **New feature, design-approved: save a scanned puzzle to a public shared
-   library**, reusing the scan wizard as the authoring tool. Saving always writes a
-   blank puzzle (grid + clues only, never current fill marks) as a new Firestore
-   document, fully decoupled from whatever the player's own current scan session is
-   doing. Public read for this first version; a puzzle played from the library
-   behaves like a normal authored puzzle (real move history, counts toward stats),
-   not like an ephemeral scan session. Confirmed: saving prompts for a required
-   title, and the creator can edit that title later (needs an update-permission
-   Firestore rule scoped to just the `title` field, plus a rename affordance in the
-   library browse UI for the current user's own puzzles). This pulls a scoped first
-   slice of item 9 forward, ahead of item 8, which is now explicitly deprioritized by
-   the project owner (kept in Next Steps, not dropped). See `TODO.md` for the full
-   scope.
+4. **Save-to-library feature — client-side implementation done, NOT yet deployed.**
+   Save a scanned puzzle to a public shared library, reusing the scan wizard as the
+   authoring tool (`src/puzzleLibrary.js`, plus wiring in `src/scanUI.js`/`app.js`/
+   `index.html`). Saving always writes a blank puzzle (grid + clues only, never
+   current fill marks), fully decoupled from the player's own current scan session.
+   A puzzle played from the library behaves like a normal authored puzzle (real move
+   history, counts toward stats). Required title at save time; creator-only
+   title-edit rename affordance in the library browse UI. **Blocking step before
+   this is live: deploy the updated `firestore.rules`** (`firebase deploy --only
+   firestore:rules`) — the project owner needs to run this themselves. See
+   `TODO.md` for the full writeup and post-deploy verification checklist.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9 is no longer fully deferred — its save-to-library slice
