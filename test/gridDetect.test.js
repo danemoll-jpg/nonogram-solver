@@ -6,6 +6,7 @@ import {
   countDarkRuns,
   countGridLines,
   snapRectToBorder,
+  centerRectOnBorders,
   computeClueBands,
   sliceHorizontal,
   sliceVertical,
@@ -312,5 +313,73 @@ describe('sliceHorizontal / sliceVertical', () => {
     assertEqual(strips[0], { left: 0, right: 10, top: 0, bottom: 10 });
     assertEqual(strips[1], { left: 10, right: 20, top: 0, bottom: 10 });
     assertEqual(strips[2], { left: 20, right: 30, top: 0, bottom: 10 });
+  });
+});
+
+// Regression test for the column-crop bleed bug (TODO.md's "Current Objective" item 1 at the
+// time this test was added): confirmed against the real 25x25 test screenshot
+// (scratch-images/sample-mid-solve.jpg) that computeClueBands, fed the plain border-SNAPPED
+// grid rect (snapRectToBorder's output — what src/scanUI.js used to pass it), produced column
+// bands whose per-column width was measurably wider than the true cell pitch: the outer border
+// stroke is thicker than the grid's internal lines, so snapRectToBorder's darkest-single-pixel
+// search lands on the border's OUTER edge, not the true inner cell-grid boundary (exactly the
+// failure centerRectOnBorders exists to fix — see its own comment — previously applied only to
+// cell-slicing, not clue-band slicing). That small per-column error is tiny on its own, but
+// computeClueBands divides the SAME oversized width evenly across every column, so the error
+// compounds linearly: by the last handful of columns of a 25-wide grid, the accumulated drift
+// approached a full cell width, pulling each OCR crop into its neighbor and producing the
+// doubled/garbled digit-stack reads the project owner spotted directly in the real crop pixels.
+// src/scanUI.js now feeds computeClueBands the same border-CENTERED rect (centerRectOnBorders'
+// output) already used for cell-slicing, rather than each call site computing its own drifted
+// rect independently -- this test pins that fix's core numeric property using a synthetic image
+// shaped like the real one (thick outer border, no internal lines needed since
+// centerRectOnBorders only reasons about the border stroke itself -- see its own comment), so a
+// future change to either function can't silently reintroduce the drift.
+describe('computeClueBands + centerRectOnBorders (column-band drift regression)', () => {
+  test('border-centered rect keeps per-column drift small across many columns; the plain snapped rect does not', () => {
+    const width = 220, height = 220;
+    const gray = blankImage(width, height, 245);
+    // A 12px-thick dark border ring, drawn as a filled square with a lighter square cut out of
+    // its middle -- outer edge at [20,199], true inner (cell-grid) edge at [32,187], matching
+    // the real test image's own proportions (a border noticeably thicker than 1-2px internal
+    // lines -- see gridDetect.js's centerRectOnBorders comment for the real measurement).
+    for (let y = 20; y <= 199; y++) {
+      for (let x = 20; x <= 199; x++) gray[y * width + x] = 15;
+    }
+    for (let y = 32; y <= 187; y++) {
+      for (let x = 32; x <= 187; x++) gray[y * width + x] = 245;
+    }
+    const trueInner = { left: 32, top: 32, right: 187, bottom: 187 };
+
+    // A rough rect a few px outside the true outer border edge, as auto-detection/manual-drag
+    // would hand off -- both snapRectToBorder and centerRectOnBorders are meant to refine this.
+    const rough = { left: 18, top: 18, right: 201, bottom: 201 };
+    const snapped = snapRectToBorder(gray, width, height, rough, { searchPx: 15 });
+    const centered = centerRectOnBorders(gray, width, height, rough, { searchPx: 15 });
+
+    const fullRect = { left: 0, top: 0, right: width, bottom: height };
+    const cols = 25;
+    const trueColWidth = (trueInner.right - trueInner.left) / cols;
+
+    function maxColDriftPx(gridRect) {
+      const { colBand } = computeClueBands(fullRect, gridRect);
+      const strips = sliceVertical(colBand, cols);
+      // Drift of each column's LEFT edge from where the true even subdivision of the real
+      // inner cell rect would put it -- this is exactly what accumulates column over column.
+      let maxDrift = 0;
+      for (let i = 0; i < cols; i++) {
+        const trueLeft = trueInner.left + i * trueColWidth;
+        maxDrift = Math.max(maxDrift, Math.abs(strips[i].left - trueLeft));
+      }
+      return maxDrift;
+    }
+
+    const rawDrift = maxColDriftPx(snapped);
+    const centeredDrift = maxColDriftPx(centered);
+
+    assert(rawDrift > trueColWidth * 0.5,
+      `plain snapped rect should drift by more than half a column width by the far columns (got ${rawDrift}px vs a ${trueColWidth}px column) -- this is the bug being guarded against`);
+    assert(centeredDrift < trueColWidth * 0.1,
+      `border-centered rect should keep drift under 10% of a column width across all ${cols} columns (got ${centeredDrift}px vs a ${trueColWidth}px column)`);
   });
 });

@@ -900,6 +900,23 @@ body {
   background: rgba(224, 101, 79, 0.12);
 }
 
+/* Current Objective #3: the repeated-digit consistency check (scanUI.js's
+   repeatedDigitSuspect / ocrSegment.js's findRepeatedDigitOutlier) — a plausibility GUESS
+   ("this might be a misread"), not a proof of contradiction the way --flagged above is.
+   Styled in --warn (amber), not --danger (red), so the two read as different confidence
+   levels rather than the same "this is wrong" alarm — see the row's own `title` for the
+   specific reason, set alongside this class in scanUI.js. */
+.scan-clue-row--suspect {
+  border-color: var(--warn);
+  background: rgba(217, 154, 60, 0.12);
+}
+
+/* A line can be both provably wrong (red) and a repeated-digit suspect (amber) at once --
+   the danger border should win visually, since it's the stronger signal. */
+.scan-clue-row--flagged.scan-clue-row--suspect {
+  border-color: var(--danger);
+}
+
 /* Current Objective #1: shown only when a large fraction of lines end up flagged — see
    scanUI.js's updateRecheckWarning. That pattern (rather than one or two isolated misreads)
    is a much stronger signal of a wrong row/column COUNT confirmed a step earlier than of many
@@ -1011,4 +1028,62 @@ body {
 
 #scan-modal .btn--ghost {
   margin-top: 1rem;
+}
+
+/* Scroll diagnostics (Current Objective — see TODO.md and app.js's initScrollDiagnostics
+   comment): investigative instrumentation for the app-wide iOS scroll bug, not a player-facing
+   feature — only created at all behind `?debug=scroll`. z-index deliberately higher than
+   .modal-overlay's 100 so the trigger button stays usable over every screen, open modals
+   included (per TODO.md's "test across all screens"). */
+.scroll-diag-btn {
+  position: fixed;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 99999;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  border: 2px solid var(--gold);
+  background: var(--panel-bg-raised);
+  color: var(--text);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.4);
+}
+
+.scroll-diag-panel {
+  position: fixed;
+  inset: 0.5rem;
+  z-index: 99998;
+  background: var(--panel-bg-raised);
+  border: 2px solid var(--gold);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.5);
+}
+
+.scroll-diag-panel__text {
+  flex: 1;
+  margin: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.scroll-diag-panel__actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  flex-shrink: 0;
 }

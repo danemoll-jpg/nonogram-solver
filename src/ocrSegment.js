@@ -106,3 +106,68 @@ export function groupGlyphsIntoNumbers(
   }
   return groups;
 }
+
+// ---- repeated-digit consistency check (Current Objective — see TODO.md) ---------------
+
+// Minimum number of matching single-digit clue numbers required before a differing one among
+// them counts as a suspicious outlier rather than a genuinely varied clue. TODO.md is explicit
+// that this must stay conservative: "a column genuinely meant to read `1, 7` must not get
+// flagged just because the digits differ" — a 2-number clue has nowhere near enough repetition
+// to tell a real difference from a misread. Tested directly against this feature's real 25x25
+// ground-truth puzzle (all 25 rows' and 25 columns' CONFIRMED-correct clues — see TODO.md):
+// starting at 4 (matching the reported "four or five repeated 1s" case) produced one real false
+// positive on this exact puzzle's own confirmed-correct column 14 clue (`2,1,2,2,2` — four
+// genuine 2s and one genuine, correctly-read 1, not a misread) — exactly the kind of
+// doesn't-discriminate-well-enough finding that determined the truncated-glyph signal got
+// dropped rather than shipped (see scanUI.js's own comment on that). Raising this to 5 clears
+// that false positive with room to spare (col 14 stops at 4-in-a-row) while every other line in
+// the ground-truth set still passes clean, so unlike the truncated-glyph idea this one survives
+// real-data verification once tightened, rather than needing to be dropped outright.
+const DEFAULT_MIN_RUN_LENGTH = 5;
+
+// Flags a single-digit clue NUMBER that looks like a misread glyph sitting among an otherwise-
+// uniform run of the same digit elsewhere in the same line — a genuinely more specific signal
+// than the existing feasibility check (isLineConsistent, lineSolver.js), which only catches a
+// misread that makes the clue geometrically IMPOSSIBLE against the detected fill state; a
+// single wrong digit in an otherwise-plausible clue usually still passes that check (see
+// TODO.md's own observation on isLineConsistent's limits). OCR reads each glyph purely from its
+// own pixel shape and has no notion that "the rest of this line's numbers were all the same
+// digit, so this one probably should be too" — a `1`<->`7` confusion in particular is visually
+// plausible at small crop sizes (anti-aliasing near a `1`'s stroke can read as a `7`'s top bar).
+//
+// Deliberately restricted to SINGLE-DIGIT clue numbers only (values 0-9): a misread multi-digit
+// number (e.g. "11" read as "1") is a different, already-tracked failure mode (see the
+// column-crop bleed bug's real-image diff in TODO.md) — collapsing two entries into a
+// different-VALUED one isn't "one glyph among a uniform run", it's a whole number going
+// missing, and conflating the two here would misfire constantly on completely healthy lines
+// that just happen to also contain an unrelated two-digit clue.
+//
+// Requires EXACTLY one differing position: two or more differing single-digit numbers is either
+// a genuinely varied clue (not this signal's job) or too ambiguous a misread pattern to call
+// with any confidence — per this feature's practice of only shipping a heuristic once real-data
+// testing shows it doesn't misfire, staying conservative here is the safer failure mode (a
+// missed misread the player can still catch by eye vs. a healthy line flagged as wrong).
+export function findRepeatedDigitOutlier(clue, { minRunLength = DEFAULT_MIN_RUN_LENGTH } = {}) {
+  const singleDigitIdx = [];
+  for (let i = 0; i < clue.length; i++) {
+    if (Number.isInteger(clue[i]) && clue[i] >= 0 && clue[i] <= 9) singleDigitIdx.push(i);
+  }
+  if (singleDigitIdx.length < minRunLength + 1) return null; // not enough single-digit numbers for a run + one outlier
+
+  const counts = new Map();
+  for (const i of singleDigitIdx) counts.set(clue[i], (counts.get(clue[i]) || 0) + 1);
+  let dominant = null;
+  let dominantCount = 0;
+  for (const [value, count] of counts) {
+    if (count > dominantCount) {
+      dominant = value;
+      dominantCount = count;
+    }
+  }
+  if (dominantCount < minRunLength) return null;
+
+  const others = singleDigitIdx.filter((i) => clue[i] !== dominant);
+  if (others.length !== 1) return null;
+
+  return { index: others[0], suspectedValue: clue[others[0]], expectedValue: dominant };
+}

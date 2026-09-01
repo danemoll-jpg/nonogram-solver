@@ -31,7 +31,7 @@ import {
 } from './gridDetect.js';
 import { parseClueText, buildScannedPuzzle } from './scanPuzzle.js';
 import { recognizeClueStrip, terminateOcr } from './ocr.js';
-import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines } from './ocrSegment.js';
+import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines, findRepeatedDigitOutlier } from './ocrSegment.js';
 import { classifyGridCells } from './cellStateDetect.js';
 import { isLineConsistent } from './lineSolver.js';
 import { FILLED, EMPTY, UNKNOWN } from './model.js';
@@ -745,6 +745,18 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     return !isLineConsistent(fillLine, clue);
   }
 
+  // Current Objective #3's repeated-digit consistency check (see ocrSegment.js's
+  // findRepeatedDigitOutlier for the detection logic and why its default threshold is 5, not
+  // 4 — tightened after real-image testing on this exact puzzle found 4 misfired on a genuine
+  // confirmed-correct clue). Deliberately a SEPARATE, distinctly-styled signal from
+  // lineLooksWrong above rather than folded into the same red flag: this one is a plausibility
+  // guess ("this looks like it could be a misread"), not a proof of contradiction the way
+  // isLineConsistent's feasibility check is — conflating the two would misrepresent this
+  // signal's confidence level to the player.
+  function repeatedDigitSuspect(clue) {
+    return findRepeatedDigitOutlier(clue);
+  }
+
   // A LOT of flagged lines (rather than one or two) is a different situation from a handful
   // of independent OCR misreads — it's the signature of a wrong row/column COUNT confirmed a
   // step earlier (every line downstream of the miscount ends up sliced against the wrong cell
@@ -800,7 +812,13 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     // clear the flag immediately (the same feedback loop the flag exists to speed up),
     // without waiting for a later re-render of the whole correction step.
     function refreshFlag() {
-      row.classList.toggle('scan-clue-row--flagged', lineLooksWrong(parseClueText(input.value), fillLine));
+      const clue = parseClueText(input.value);
+      row.classList.toggle('scan-clue-row--flagged', lineLooksWrong(clue, fillLine));
+      const suspect = repeatedDigitSuspect(clue);
+      row.classList.toggle('scan-clue-row--suspect', suspect !== null);
+      row.title = suspect
+        ? `This might have a misread digit: most numbers here read ${suspect.expectedValue}, but one reads ${suspect.suspectedValue}.`
+        : '';
       updateRecheckWarning();
     }
     input.addEventListener('input', refreshFlag);
@@ -810,31 +828,44 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   }
 
   // ---- fill-state detection (Current Objective — see TODO.md) ----
-  //
+
+  // Re-centers the confirmed grid rect on the true INNER edge of its own border stroke — see
+  // gridDetect.js's centerRectOnBorders for why this matters: a border noticeably thicker than
+  // the grid's own internal lines makes the plain border-SNAPPED state.gridRect land several px
+  // outside where the grid's actual cell area begins (confirmed directly against this feature's
+  // real test screenshot — see TODO.md). Used for BOTH even-subdivisions built on the confirmed
+  // grid rect: cell-slicing below (sliceGridCells) AND clue-band slicing (computeClueBands, see
+  // the scan-clues handler) — both were originally believed to tolerate the plain snapped rect's
+  // few px of slop, but real-crop verification (see TODO.md's Current Objective item 1) found
+  // that assumption wrong for clue bands specifically: the snapped rect's left/right error is
+  // asymmetric (a thick border catches snapRectToBorder's darkest-pixel search unevenly), so
+  // dividing its width evenly by column count bakes a small per-column pitch error that COMPOUNDS
+  // linearly across the strip — a few px off column 1 becomes most of a cell's width off by
+  // column 20+, pulling each OCR crop into its neighbor and producing exactly the doubled/
+  // garbled digit-stack reads the project owner spotted. Sharing this one centered rect between
+  // both call sites (rather than each computing its own) fixes both at once and keeps them from
+  // silently drifting apart again. Same small searchPx as the grid-confirm handler below
+  // (gridBorderSearchPx) — centerRectOnBorders' own default is far too generous (confirmed
+  // directly: it snapped clean past the true border onto nearby clue-number text on a test
+  // image), for exactly the reason that handler's own comment documents.
+  function computeCellsRect() {
+    const { width, height } = state.analysisCanvas;
+    const gray = analysisGrayscale();
+    return centerRectOnBorders(gray, width, height, state.gridRect, {
+      searchPx: gridBorderSearchPx(width, height),
+    });
+  }
+
   // Classifies every confirmed grid cell's fill/X/blank state from the analysis canvas — see
   // src/cellStateDetect.js for the actual per-cell classification. Runs on the ANALYSIS
   // canvas (not the higher-resolution full canvas OCR strip crops use, see FULL_MAX_DIM):
   // unlike OCR, this only needs to tell "a large block of non-background color" from "thin
   // diagonal strokes" apart, which the analysis canvas's own resolution is already comfortably
   // enough for — no need to pay for a second higher-res crop pass the way cropStripCanvas
-  // does for legibility-sensitive clue digits.
-  function detectFillState() {
-    const { width, height } = state.analysisCanvas;
-    const gray = analysisGrayscale();
-    // Re-centers the confirmed grid rect on the true INNER edge of its own border stroke
-    // before subdividing into cells — see gridDetect.js's centerRectOnBorders for why this
-    // matters here specifically, unlike the clue-band slicing below (computeClueBands),
-    // which only needs a rough margin and tolerates a few px of slop: a border noticeably
-    // thicker than the grid's own internal lines would otherwise offset every even-subdivided
-    // cell boundary, leaving real internal grid lines running through what should be blank
-    // cell interiors (confirmed directly against this feature's real test screenshot — see
-    // TODO.md). Same small searchPx as the grid-confirm handler below (gridBorderSearchPx) —
-    // centerRectOnBorders' own default is far too generous (confirmed directly: it snapped
-    // clean past the true border onto nearby clue-number text on a test image), for exactly
-    // the reason that handler's own comment documents.
-    const cellsRect = centerRectOnBorders(gray, width, height, state.gridRect, {
-      searchPx: gridBorderSearchPx(width, height),
-    });
+  // does for legibility-sensitive clue digits. Takes the border-centered cells rect (see
+  // computeCellsRect) rather than computing its own, so it stays in exact agreement with the
+  // clue-band geometry the scan-clues handler slices from the same rect.
+  function detectFillState(cellsRect) {
     const cellRects = sliceGridCells(cellsRect, state.rows, state.cols);
     const cellData = cellRects.map((row) =>
       row.map((r) => {
@@ -898,13 +929,17 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     }
     state.rows = rows;
     state.cols = cols;
-    detectFillState();
+    // One shared border-centered rect for both the fill-state cell grid and the clue-band
+    // slicing below (see computeCellsRect's own comment for why using two different rects
+    // here was the root cause of a column-crop bleed bug).
+    const cellsRect = computeCellsRect();
+    detectFillState(cellsRect);
     showStep('ocr');
     els.scanOcrStatus.textContent = 'Reading clue numbers…';
 
     const { width, height } = state.analysisCanvas;
     const fullRect = { left: 0, top: 0, right: width, bottom: height };
-    const { rowBand, colBand } = computeClueBands(fullRect, state.gridRect);
+    const { rowBand, colBand } = computeClueBands(fullRect, cellsRect);
     const rowStrips = sliceHorizontal(rowBand, rows);
     const colStrips = sliceVertical(colBand, cols);
 

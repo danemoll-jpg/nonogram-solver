@@ -1,5 +1,5 @@
 import { describe, test, assert, assertEqual } from './harness.js';
-import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines } from '../src/ocrSegment.js';
+import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines, findRepeatedDigitOutlier } from '../src/ocrSegment.js';
 
 describe('findRuns', () => {
   test('finds contiguous true runs as inclusive [start,end] bands', () => {
@@ -121,5 +121,55 @@ describe('groupGlyphsIntoNumbers', () => {
 
   test('a single glyph is its own group', () => {
     assertEqual(groupGlyphsIntoNumbers([{ start: 5, end: 12 }]), [{ start: 5, end: 12, glyphCount: 1 }]);
+  });
+});
+
+describe('findRepeatedDigitOutlier', () => {
+  test('flags a lone misread digit among five repeated 1s (the motivating real-world case)', () => {
+    assertEqual(findRepeatedDigitOutlier([1, 1, 7, 1, 1, 1]), { index: 2, suspectedValue: 7, expectedValue: 1 });
+  });
+
+  test('does not flag a genuinely varied 2-number clue ("1, 7") — not enough repetition to call it', () => {
+    assertEqual(findRepeatedDigitOutlier([1, 7]), null);
+  });
+
+  test('does not flag a real confirmed puzzle line with four matching digits and one different one (real ground-truth column 14 clue: 2,1,2,2,2) — the exact case that determined the default threshold', () => {
+    assertEqual(findRepeatedDigitOutlier([2, 1, 2, 2, 2]), null);
+  });
+
+  test('flags when the run is stretched to five matching digits plus one outlier', () => {
+    assertEqual(findRepeatedDigitOutlier([2, 2, 9, 2, 2, 2]), { index: 2, suspectedValue: 9, expectedValue: 2 });
+  });
+
+  test('does not flag two or more differing digits — too ambiguous to call', () => {
+    assertEqual(findRepeatedDigitOutlier([1, 7, 1, 1, 3, 1]), null);
+  });
+
+  test('does not flag a multi-digit number sitting among repeated single digits — a different, already-tracked failure mode', () => {
+    assertEqual(findRepeatedDigitOutlier([1, 1, 1, 1, 11]), null);
+  });
+
+  test('does not flag a uniform run with no outlier at all', () => {
+    assertEqual(findRepeatedDigitOutlier([1, 1, 1, 1, 1]), null);
+  });
+
+  test('every row and column clue in the real 25x25 ground-truth test puzzle passes clean (see TODO.md)', () => {
+    const rows = [
+      [2, 5], [1, 4], [1, 1, 4, 4], [3, 1, 1, 3], [2, 7, 2],
+      [1, 1, 8], [2, 1, 1, 2], [2, 1, 7], [1, 1, 1, 1], [2, 1, 6],
+      [3, 1, 1, 1], [5, 2, 4], [2, 2], [2, 2], [3, 5],
+      [3, 6], [4, 1, 8], [6, 15], [4, 7, 8], [4, 1, 8],
+      [5, 6, 9], [5, 10], [6, 12], [4, 2, 4, 10], [3, 1, 2, 10],
+    ];
+    const cols = [
+      [11], [11], [12], [2, 8], [2, 1, 3],
+      [1, 1, 1, 2], [2, 1, 1, 1, 2], [1, 2, 2, 2, 1], [2, 2, 2, 1], [1, 5, 2, 2, 1, 1],
+      [1, 4, 3, 1, 2], [2, 2, 1, 3], [12, 2, 2], [2, 1, 2, 2, 2], [1, 2, 2, 9],
+      [1, 1, 12], [1, 1, 11], [1, 4, 11], [1, 2, 2, 11], [1, 1, 1, 1, 11],
+      [1, 1, 1, 1, 10], [4, 1, 3, 8], [1, 4, 1, 1, 5], [1, 5, 1, 2], [1, 1, 3],
+    ];
+    for (const [i, clue] of [...rows, ...cols].entries()) {
+      assertEqual(findRepeatedDigitOutlier(clue), null, `line ${i} (${JSON.stringify(clue)}) should not be flagged`);
+    }
   });
 });

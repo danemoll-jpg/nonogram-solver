@@ -108,73 +108,161 @@ Completed Tasks
     since resurfaced app-wide — see Current Objective below; this original fix's
     "confirmed on real hardware" status was for the wizard specifically, at that time,
     not the newer whole-app symptom.**
+* **Column-crop double-read bug (was Current Objective item 1, as of the
+  known-count-override testing round) — confirmed, root-caused, fixed, and verified
+  against the real 25×25 test image (`scratch-images/sample-mid-solve.jpg`), not a
+  synthetic reproduction.**
+  - **Root cause**: `computeClueBands` (in the scan-clues click handler, `src/scanUI.js`)
+    was fed the plain border-SNAPPED grid rect (`snapRectToBorder`'s output), not the
+    border-CENTERED rect (`centerRectOnBorders`'s output) that cell-slicing
+    (`detectFillState`) already used. The outer border stroke is thicker than the grid's
+    internal lines, so `snapRectToBorder`'s darkest-single-pixel search lands on the
+    border's OUTER edge rather than the true inner cell-grid boundary — exactly the
+    failure `centerRectOnBorders` exists to fix (see its own comment in `gridDetect.js`),
+    previously applied only to cell-slicing. Dividing that oversized rect evenly across N
+    columns bakes in a small per-column pitch error that COMPOUNDS linearly — real
+    measured numbers from this image: raw snapped rect (analysis-space)
+    `{left:123,top:141,right:755,bottom:768}` vs. border-centered rect
+    `{left:131.5,top:149.5,right:741.5,bottom:758.5}`, an asymmetric +8.5px/−13.5px error
+    that inflated per-column pitch by ~3.5% (25.28px vs. the true 24.40px), compounding to
+    ~21px of rightward drift (most of a cell width) by the last few columns — exactly
+    matching the doubled/garbled digit-stack crops the project owner spotted directly,
+    starting around column 16 and worst by column 20-23.
+  - **Verification method**: loaded the real image in a live browser session, dynamically
+    imported the actual `src/gridDetect.js`/`src/scanUI.js`-equivalent pipeline (not a
+    mockup), ran the real known-count-override flow (25×25), and rendered actual
+    full-resolution OCR crops for all 25 columns — confirmed the double-stack bleed
+    visually in the raw/buggy crops (dramatic by column ~19-23) and confirmed it
+    disappeared completely once column bands were sliced from the border-centered rect
+    instead.
+  - **Real OCR diff, before vs. after, run through the actual production pipeline**
+    (`recognizeStripSegmented` + `parseClueText`, real Tesseract calls, not synthetic):
+    - Before (raw/buggy geometry) — concrete garbled reads: col 19 OCR'd as `1 2 2 11 1`
+      (a stray digit bled in from col 20); col 20 as `1 7 1 7 1 7 11 1` (fully interleaved
+      with a neighboring stack, spurious `7`s that don't belong at all); col 21 as `1 1 1`
+      (real clue `1,1,1,1,10` — numbers dropped outright); col 22 as `1 4 1 1 3 1 3`
+      (badly garbled, real clue `4,1,3,8`).
+    - After (fixed geometry): **all 25/25 columns are free of cross-column
+      contamination.** 14/25 read exactly correct; the other 11/25 have a small, clearly
+      DIFFERENT and already-documented class of error — Tesseract collapsing a repeated
+      `11` into a single `1` glyph, or dropping one instance of a repeated digit within a
+      longer run (e.g. col 15's true `1,2,2,9` read as `1,2,9`) — not cross-column bleed.
+      This residual is exactly the gap the repeated-digit consistency check idea (below)
+      targets, not a geometry bug.
+    - All 6 rows checked (20-25) came back exactly correct post-fix. Rows turned out to
+      have the SAME underlying geometry bug, just milder — a partial next-row sliver
+      bleeding into the bottom margin of each row crop (row text runs horizontally rather
+      than stacking, so the bleed doesn't interleave two number sequences the way columns
+      did) — consistent with the "rows more reliable" report all along, and the fix
+      cleans this up too.
+  - **Fix**: `src/scanUI.js` now computes ONE border-centered rect
+    (`computeCellsRect()`) shared by both cell-slicing (`detectFillState`) and clue-band
+    slicing (`computeClueBands`), instead of each call site computing/using its own rect.
+  - **Regression test**: `test/gridDetect.test.js`'s new "computeClueBands +
+    centerRectOnBorders (column-band drift regression)" test pins the compounding-drift
+    math property using a synthetic image shaped like the real one (thick outer border,
+    same proportions) — synthetic because the plain Node test harness has no image
+    decoder for the real JPEG and no network access for real Tesseract OCR, so this guards
+    the root-cause geometry math itself rather than re-running the real image end-to-end.
+    497 tests passing.
+* **Repeated-digit consistency check — prototyped, tested against real ground truth,
+  tightened, and shipped** (`findRepeatedDigitOutlier`, `src/ocrSegment.js`). Same
+  treatment as the reverted truncated-glyph signal: build it, test it against real data,
+  keep only what survives — this one survived, unlike that one.
+  - **What it does**: flags a single-digit clue NUMBER that looks like a misread glyph
+    sitting among an otherwise-uniform run of the same digit elsewhere in the same line
+    (e.g. `1,1,7,1,1,1` — the motivating real-world case was "four or five repeated 1s
+    with one misread as a 7"). A genuinely more specific signal than the existing
+    `isLineConsistent` feasibility check, which only catches a misread that makes the
+    clue geometrically IMPOSSIBLE against the detected fill state — a single wrong digit
+    in an otherwise-plausible clue usually still passes that check (see the red-flag
+    reliability observation, Current Objective below).
+  - **Real-data verification found a real false positive, and fixed it**: tested the
+    function against all 50 real, CONFIRMED-correct row/column clues from this feature's
+    25×25 ground-truth test puzzle (see the reference block below). At the threshold
+    matching the original report ("four or five repeated" → `minRunLength = 4`), it
+    incorrectly flagged this exact puzzle's own genuine column 14 clue (`2,1,2,2,2` —
+    four real 2s and one real, correctly-read 1, not a misread) — exactly the kind of
+    doesn't-discriminate-well-enough finding that sank the truncated-glyph signal.
+    Raising the threshold to `minRunLength = 5` clears that false positive with room to
+    spare while every other one of the 50 real ground-truth lines still passes clean —
+    unlike the truncated-glyph idea, this one survives real-data verification once
+    tightened, rather than needing to be dropped outright.
+  - **Shipped as a distinct, separately-styled signal**: `src/scanUI.js`'s
+    `repeatedDigitSuspect` wires it into the correction step's per-line flagging
+    alongside the existing `lineLooksWrong` check, but as its own
+    `scan-clue-row--suspect` CSS class (amber/`--warn`, with a `title` explaining which
+    digit looks off and what it's expected to match) rather than reusing the red
+    `--flagged` class — this is a plausibility guess, not a proof of contradiction the
+    way the feasibility check is, and conflating the two would misrepresent this
+    signal's confidence to the player. A line flagged by both shows red (the stronger
+    signal wins).
+  - **Tests**: `test/ocrSegment.test.js`'s new `findRepeatedDigitOutlier` block,
+    including a test that runs the function against all 50 real ground-truth lines and
+    asserts none of them are flagged. 505 tests passing.
 
 Current Objective (Focus Area)
 
-* **Two active items from real-device testing of the known-count override — a likely
-  column-crop double-read bug, and confirmation that the app-wide scroll problem is
-  still NOT fixed on real hardware.**
+* **One active item from real-device testing of the known-count override — the
+  app-wide scroll problem is still NOT fixed on real hardware.** (The column-crop
+  double-read bug that was the other active item here has since been confirmed,
+  root-caused, fixed, and verified against the real image, and the repeated-digit
+  consistency check idea has since been built, verified against the real ground truth,
+  and shipped — see Completed Tasks above.)
 
-  1. **Bug hypothesis, from the project owner's own direct observation of the crop
-     images: column clue-strip crops appear to sometimes contain two overlapping
-     columns of digits side-by-side, not one clean vertical stack — likely explaining
-     both symptoms at once (dropped numbers, garbled/merged reads).** Reviewing the
-     screenshots from this test session, several column crops visibly show what looks
-     like a second, offset stack of digits ghosting alongside the correct column's own
-     numbers. If the column-band crop is wider than one column's true pitch, it would
-     pull in a sliver of the *neighboring* column's clue digits along with the correct
-     column — and OCR, faced with two interleaved digit stacks it has no way to tell
-     apart, would predictably both drop numbers (giving up on the confusing combined
-     shape) and merge/garble others (reading pieces of both stacks as one number).
-     **This is a much sharper, more checkable lead than general "OCR accuracy is still
-     imperfect"** — it points at a specific column-band width/positioning bug in
-     `computeClueBands`/`sliceVertical` (`gridDetect.js`) rather than an OCR-quality
-     problem to keep throwing heuristics at.
-     - **Verify first, against the real image**: crop and inspect several of the
-       columns that showed doubled/garbled reads directly (not the downscaled analysis
-       canvas the wizard itself uses for detection — the full-resolution OCR crop) and
-       confirm whether adjacent-column bleed is actually visible in the raw crop
-       pixels, before changing any band-width math on a guess.
-     - **If confirmed**: the fix is almost certainly tightening the column-band crop
-       width to match the *confirmed* per-column pitch exactly (this is now known
-       precisely once the known-count override sets the real column count and
-       therefore the true pitch), rather than whatever margin/width the crop currently
-       uses. Re-verify specifically that rows aren't affected the same way (the project
-       owner's report says rows have been comparatively much more reliable this whole
-       investigation) — if row bands are narrower/tighter by construction already,
-       that itself would support this exact theory (columns bleeding, rows not).
-     - Per this feature's established practice, verify directly against the real 25×25
-       image, not a synthetic reproduction.
+  1. **App-wide scroll bug — root cause corrected and a targeted fix implemented this
+     round; still needs real-device confirmation before calling it done, given this
+     class of bug has failed that confirmation twice already.**
+     - **Diagnosis corrected by the project owner directly**: this is NOT extra
+       scrollable space (the earlier "genuinely blank whitespace beyond real content"
+       framing, and the `?debug=scroll` measurement tool built to chase it, were aimed
+       at the wrong hypothesis) — **the real, more specific symptom is the screen
+       moving up and down on its own with nothing on screen to justify it**, while real
+       scrollbars (a tall modal, the explain panel) were fine whenever content actually
+       needed them. That's a page-stability bug (something reactively shifting layout),
+       not a height-miscalculation bug.
+     - **Root cause found from that corrected description**: `fitBoardToViewport`
+       (`app.js`) recomputes `--cell-size` from the current `visualViewport.height`/
+       `window.innerHeight` AND the board's current on-screen position
+       (`getBoundingClientRect().top`, itself dependent on scroll position) — and it
+       was wired to run on EVERY `resize` and `visualViewport` `resize` event. iOS
+       Safari's chrome (address bar + bottom toolbar) collapses/expands in response to
+       perfectly ordinary scrolling, firing exactly those events with a ~40-100px
+       height change and nothing else going on. Each one recomputed the board's cell
+       size, nudging the page's total rendered height by a few px — which iOS can react
+       to by adjusting scroll position to compensate. That's the loop: scroll a little
+       -> chrome collapses -> app recomputes layout -> page height changes -> scroll
+       position gets nudged -> reads as the screen moving for no reason, exactly as
+       described.
+     - **Fix**: `handleViewportResize` (`app.js`) now gates both listeners behind a
+       magnitude threshold (`VIEWPORT_CHANGE_THRESHOLD_PX = 120`) — a real iPhone
+       on-screen keyboard changes the visual viewport by 250-350px, comfortably above
+       the threshold, so a genuine keyboard open/close still re-fits the board; routine
+       iOS chrome noise (well under 120px) no longer does. `orientationchange` is left
+       unfiltered (an unambiguous, always-intentional signal). `setExplain`'s direct
+       `fitBoardToViewport()` call (panel content genuinely changed height) is also left
+       unfiltered, since that's a real reason to re-fit, not chrome noise.
+     - **Verified in the browser preview** (this project's own tooling can't reproduce
+       the real iOS chrome-collapse trigger itself, so this only confirms the gating
+       LOGIC is correct, not that the bug is gone on a real device): manually dispatched
+       `resize` events at a 60px viewport-height delta (below threshold) left
+       `--cell-size` unchanged; the same at a 320px delta (above threshold, keyboard-
+       scale) recomputed it correctly. (Also confirmed the preview tool's own
+       `resize_window` doesn't dispatch a real `resize` event on its own — a tooling
+       quirk, not relevant to the real device.)
+     - **Still needs real hardware confirmation** — per this bug class's history (the
+       original scan-wizard fix took four rounds; the previous app-wide attempt's own
+       multi-part fix didn't hold), don't treat browser-preview verification as done
+       here. Test across **all screens** (main play, Help dropdown open, the scan
+       wizard at each of its steps, the stats/pairing modal, the how-to-play modal) on
+       the real iPhone that showed the bug, specifically checking whether the screen
+       still shifts on its own during ordinary scrolling with nothing else happening.
+     - The `?debug=scroll` measurement tool (`app.js`'s `initScrollDiagnostics`) is
+       still in place as a fallback — if the screen still moves after this fix, it can
+       help rule extra-scrollable-space back in as a contributing factor, but it's no
+       longer the primary lead.
 
-  2. **App-wide scroll bug: NOT fixed — confirmed still present on real iOS hardware,
-     on every screen, not just where the keyboard is involved.** The previous round's
-     fix (three separate baseline causes addressed — explain-panel `padding-bottom`
-     drift, `.page` bottom padding, `#board-root`'s own padding — plus a
-     `visualViewport`/`dvh` keyboard-specific fix) was explicitly shipped as "verified
-     only in the browser preview, still needs real iOS hardware confirmation" — that
-     confirmation has now come back negative. **New, more specific detail from this
-     round**: every screen can be scrolled into genuine blank whitespace beyond where
-     real content ends — not just "too much scroll," but scrollable area that
-     shouldn't exist at all. This is a stronger clue than before: it means something is
-     still contributing extra height to the page's total scrollable area beyond its
-     real visible content, on every screen (not isolated to the scan wizard or to
-     keyboard interactions specifically).
-     - **Given this bug class's now-extensive history in this project** (the original
-       scan-wizard-specific fix took four rounds; the app-wide attempt's own fixes were
-       multi-part and still didn't hold on real hardware), don't assume another
-       incremental patch is likely to be the last one needed. Worth deliberately
-       measuring the actual gap directly on a real device this time before proposing
-       a fix — e.g. compare real measured `document.scrollHeight` against
-       `window.visualViewport.height` (or `innerHeight`) per-screen, to find exactly
-       which element(s) are still contributing the extra height, rather than
-       re-guessing at another plausible CSS cause.
-     - Test across **all screens** explicitly (main play, Help dropdown open, the scan
-       wizard at each of its steps, the stats/pairing modal, the how-to-play modal) —
-       the report that this is universal, not scan-wizard-specific, means a
-       single-screen fix verification isn't sufficient evidence of a real fix this
-       time.
-
-  3. **Red-flag (`lineLooksWrong`/`isLineConsistent`) reliability observation: it isn't
+  2. **Red-flag (`lineLooksWrong`/`isLineConsistent`) reliability observation: it isn't
      catching the errors that actually occur, and it's flagging some lines that turn out
      fine.** This is expected given what the check actually tests, not a bug to silently
      fix — `isLineConsistent` is a pure feasibility check (does *any* valid fill
@@ -185,27 +273,11 @@ Current Objective (Focus Area)
      only whether it's impossible. This should be stated plainly to the project owner as
      a real limitation of this signal, not something worth chasing further on its own.
 
-  4. **New idea, same family as the reverted truncated-glyph signal — a genuinely
-     specific gap: nothing currently cross-checks a digit against its neighbors within
-     the same line for plausibility.** Concrete example hit this round: a column clue
-     that should have been four or five repeated `1`s had one single digit misread as a
-     `7`, with nothing in the pipeline flagging it. OCR reads each glyph purely from its
-     own pixel shape — Tesseract has no notion of "the rest of this column's numbers were
-     all the same digit, so this one probably should be too." A `1`↔`7` confusion is
-     visually plausible at small crop sizes (anti-aliasing near a `1`'s stroke can read
-     as a `7`'s top bar). **Worth prototyping a repeated-digit consistency check**: flag a
-     single outlier digit sitting among an otherwise-uniform run of the same digit within
-     one line (e.g. four `1`s and one `7`) as a distinct, more specific signal than the
-     existing feasibility check. **Treat this exactly like the truncated-glyph idea**:
-     build it, test it against the real image, and only keep it if it doesn't misfire on
-     lines that are legitimately varied (a column genuinely meant to read `1, 7` must not
-     get flagged just because the digits differ) — per this feature's history, a
-     heuristic that sounds reasonable in the abstract has repeatedly needed real-image
-     verification before it's trustworthy enough to ship.
-
-  5. **Ground truth for this exact puzzle, transcribed and confirmed line-by-line with
-     the project owner — use this to write a real regression test, not just to eyeball
-     whether output "looks more plausible."**
+  **Reference: ground truth for this exact test puzzle**, transcribed and confirmed
+  line-by-line with the project owner. Already used once (see the column-crop bug entry
+  in Completed Tasks above, which diffed real OCR output against this line-by-line and
+  confirmed the fix). Kept here for the next round of real-image verification — e.g.
+  testing item 3's repeated-digit consistency check once it's built.
      ```
      Rows (1-25):
      1: 2,5        2: 1,4         3: 1,1,4,4     4: 3,1,1,3     5: 2,7,2
@@ -221,15 +293,14 @@ Current Objective (Focus Area)
      16: 1,1,12           17: 1,1,11           18: 1,4,11          19: 1,2,2,11        20: 1,1,1,1,11
      21: 1,1,1,1,10       22: 4,1,3,8          23: 1,4,1,1,5       24: 1,5,1,2         25: 1,1,3
      ```
-     Rows are already known to read close to correctly on this image (per prior rounds).
-     Columns 15-25 especially are exactly the region under investigation for the
-     column-band double-read bug (item 1 above) — a real diff against this ground truth
-     should make it obvious which specific columns are actually wrong and by how much,
-     rather than relying on visual impression. Use this to write an actual regression
-     test (per this project's established real-data-driven testing practice) once the
-     underlying image file is available to test against directly, and to precisely
-     confirm whether the column-band fix (if the item 1 hypothesis holds) actually
-     closes the gap, line by line.
+     **Test image file**: `scratch-images/sample-mid-solve.jpg` (local path on the
+     project owner's machine: `C:\Users\danmo\nonogram\scratch-images\sample-mid-solve.jpg`).
+     No image decoder or network-dependent Tesseract is available inside the plain
+     `npm test` Node harness, so diffing real OCR output against this ground truth has to
+     be done interactively (load the real image in a live browser, dynamically import the
+     actual `src/` modules, run the real pipeline) rather than as an automated test — see
+     the column-crop bug entry above for exactly how that was done, reusable as a template
+     for future rounds.
 
 Next Steps (Do Not Start Yet)
 

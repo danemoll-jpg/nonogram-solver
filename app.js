@@ -350,6 +350,10 @@ const MAX_CELL_PX = 64; // caps how large cells get on a big screen with a tiny 
 const CLUE_PER_DIGIT = 1.1 / 1.9;
 const CLUE_BASE = 0.3 / 1.9;
 
+// Last viewport height fitBoardToViewport actually computed against — see
+// handleViewportResize below for why this is tracked.
+let lastFitViewportHeight = null;
+
 function fitBoardToViewport() {
   syncExplainPanelSpace();
   if (!puzzle) return;
@@ -396,6 +400,7 @@ function fitBoardToViewport() {
   // room that's no longer actually visible once the keyboard covers part of the screen,
   // exactly the "extra whitespace becomes scrollable" symptom this fixes (see TODO.md).
   const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+  lastFitViewportHeight = viewportHeight;
   // Bug fix (iOS scroll regression, "baseline" symptom — see TODO.md): rootRect.top is
   // board-root's OUTER edge, before ITS OWN padding (.board-root { padding: 0.5rem } —
   // availableWidth above already subtracts the left/right half of this, but nothing
@@ -1221,14 +1226,163 @@ setMode('fill');
 syncMuteButton();
 populatePuzzleSelect();
 loadPuzzle(SAMPLE_PUZZLES[0].id);
-window.addEventListener('resize', debounce(fitBoardToViewport, 100));
+// Current Objective (see TODO.md): the app-wide "screen moves up and down for no reason on
+// iOS" report turned out NOT to be about extra scrollable space (the scrollbar itself was
+// fine whenever real content needed one, per the project owner directly) — it's iOS Safari's
+// chrome (address bar + bottom toolbar) collapsing/expanding in response to perfectly
+// ordinary scrolling, which changes `visualViewport.height`/`window.innerHeight` by roughly
+// 40-100px with nothing the player did warranting a re-layout. Both listeners below used to
+// call fitBoardToViewport on EVERY one of those, and fitBoardToViewport recomputes
+// `--cell-size` off the current viewport height AND the board's current on-screen position
+// (`rootRect.top`, itself dependent on scroll position) — a routine chrome-collapse blip could
+// therefore nudge the board's rendered size by a px, changing the page's total height, which
+// iOS can react to by adjusting scroll position to compensate: a small feedback loop that
+// reads to a player as the screen moving on its own, with nothing on screen actually
+// warranting it. handleViewportResize filters this out by ignoring viewport-height changes
+// too small to be a real keyboard open/close (a real iPhone keyboard changes the visual
+// viewport by 250-350px, comfortably clearing the threshold below) — a genuine keyboard
+// event, desktop window resize, or device rotation still re-fits the board; routine chrome
+// noise no longer does.
+const VIEWPORT_CHANGE_THRESHOLD_PX = 120;
+
+function handleViewportResize() {
+  const currentHeight = window.visualViewport?.height ?? window.innerHeight;
+  if (lastFitViewportHeight !== null && Math.abs(currentHeight - lastFitViewportHeight) < VIEWPORT_CHANGE_THRESHOLD_PX) {
+    return; // routine iOS chrome show/hide, not a real reason to re-lay-out the board
+  }
+  fitBoardToViewport();
+}
+
+window.addEventListener('resize', debounce(handleViewportResize, 100));
+// A real device rotation is an unambiguous, intentional viewport change — always re-fit,
+// unfiltered by the threshold above (unlike ordinary resize/visualViewport noise, this event
+// only ever fires for a genuine orientation change).
 window.addEventListener('orientationchange', () => setTimeout(fitBoardToViewport, 50));
 // iOS scroll regression, "keyboard" symptom (see TODO.md): the on-screen keyboard opening
 // shrinks the VISUAL viewport but does not reliably fire a plain `window` 'resize' event on
 // iOS Safari, so fitBoardToViewport (which reads window.innerHeight — the LAYOUT viewport,
 // unaffected by the keyboard either way) could stay sized for the pre-keyboard viewport.
-// visualViewport's own 'resize' event is the one iOS actually fires for this. Listened for
-// in addition to (not instead of) the window listener above, since visualViewport isn't
-// universally available and the window listener already covers ordinary
-// desktop/orientation resizes correctly on its own.
-window.visualViewport?.addEventListener('resize', debounce(fitBoardToViewport, 100));
+// visualViewport's own 'resize' event is the one iOS actually fires for this — also the one
+// that fires constantly for routine chrome show/hide, which is exactly why it goes through
+// the same handleViewportResize threshold filter above rather than calling
+// fitBoardToViewport directly.
+window.visualViewport?.addEventListener('resize', debounce(handleViewportResize, 100));
+
+// ---- scroll diagnostics (Current Objective — see TODO.md) ----
+//
+// The app-wide iOS scroll regression has now failed real-device verification twice, on a bug
+// class this project's own history says resists incremental CSS guessing (the original
+// scan-wizard-specific scroll bug took four rounds). Per TODO.md's own recommended next step,
+// this doesn't attempt a third blind CSS fix — it's a measurement tool, so the NEXT fix can be
+// aimed at the real, on-device numbers instead of another guess. It answers exactly the
+// question TODO.md poses: compare real `scrollHeight` against the real visible viewport height,
+// and identify which element(s) are still contributing the extra (genuinely blank, per the
+// project owner's report) scrollable space — per screen, on the real device where the bug
+// actually reproduces (this project's own preview tooling can't reliably reproduce it).
+//
+// Gated behind `?debug=scroll` in the URL rather than a normal Help-menu item: this is
+// investigative instrumentation for the current bug, not a player-facing feature, and a
+// floating button needs to stay reachable over every screen INCLUDING open modals (the scan
+// wizard, stats/pairing, how-to-play) to satisfy TODO.md's "test across all screens" — none of
+// which the normal Help dropdown stays reachable through, since modals sit above it. Safe to
+// delete this whole section once the real fix, informed by a real report from this tool, ships
+// and holds on real hardware.
+function initScrollDiagnostics() {
+  if (new URLSearchParams(location.search).get('debug') !== 'scroll') return;
+
+  // Every top-level region with its own sizing/positioning logic implicated in past rounds of
+  // this bug (see TODO.md): the fixed explain panel, the fixed board root, each modal overlay,
+  // and the scan wizard's full-screen view. Labeled by what a report reader would recognize on
+  // screen, not just the raw id, since this is meant to be read by the project owner directly
+  // off their phone, not traced back through the source by someone who already knows it.
+  const candidates = [
+    ['page-root (whole page content)', els.pageRoot],
+    ['board-root (puzzle grid)', els.boardRoot],
+    ['explain-panel (bottom hint panel)', els.explainPanel],
+    ['howtoplay-modal', els.howToPlayModal],
+    ['complete-modal', els.completeModal],
+    ['confirm-modal', els.confirmModal],
+    ['stats-modal', els.statsModal],
+    ['scan-modal (scan wizard)', els.scanModal],
+    ['help-menu-list (Help dropdown)', els.helpMenuList],
+  ];
+
+  function buildReport() {
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const docScrollHeight = document.documentElement.scrollHeight;
+    const bodyScrollHeight = document.body.scrollHeight;
+    const excess = Math.max(docScrollHeight, bodyScrollHeight) - viewportHeight;
+
+    const lines = [];
+    lines.push(`${new Date().toLocaleTimeString()}`);
+    lines.push(`visualViewport.height: ${window.visualViewport?.height ?? '(unavailable)'}`);
+    lines.push(`window.innerHeight: ${window.innerHeight}`);
+    lines.push(`document.documentElement.scrollHeight: ${docScrollHeight}`);
+    lines.push(`document.body.scrollHeight: ${bodyScrollHeight}`);
+    lines.push(`window.scrollY: ${window.scrollY}`);
+    lines.push(`EXCESS (scrollable beyond visible viewport): ${excess}px`);
+    lines.push('');
+    lines.push('Per-element (only currently-rendered ones shown; sorted worst offender first):');
+
+    const rows = candidates
+      .filter(([, el]) => el && getComputedStyle(el).display !== 'none')
+      .map(([label, el]) => {
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        // How far this element's own bottom edge sits past the visible viewport's bottom —
+        // the direct, per-element version of the page-wide `excess` figure above. Fixed-
+        // position elements aren't supposed to contribute to document scrollHeight at all
+        // (see TODO.md's "genuinely blank" detail — precisely the discrepancy worth
+        // surfacing if one of these has a positive overflowPx despite `position: fixed`).
+        const overflowPx = Math.round(rect.bottom - viewportHeight);
+        return { label, position: style.position, offsetHeight: el.offsetHeight, rectTop: Math.round(rect.top), rectBottom: Math.round(rect.bottom), overflowPx };
+      })
+      .sort((a, b) => b.overflowPx - a.overflowPx);
+
+    for (const r of rows) {
+      lines.push(
+        `  ${r.label}: position=${r.position} offsetHeight=${r.offsetHeight} rect.top=${r.rectTop} ` +
+        `rect.bottom=${r.rectBottom} overflowPastViewportBottom=${r.overflowPx}px`
+      );
+    }
+    return lines.join('\n');
+  }
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'scroll-diag-btn';
+  btn.textContent = '📏';
+  btn.setAttribute('aria-label', 'Scroll diagnostics');
+  document.body.appendChild(btn);
+
+  const panel = document.createElement('div');
+  panel.className = 'scroll-diag-panel hidden';
+  const pre = document.createElement('pre');
+  pre.className = 'scroll-diag-panel__text';
+  const actions = document.createElement('div');
+  actions.className = 'scroll-diag-panel__actions';
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'btn';
+  copyBtn.textContent = 'Copy report';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'btn btn--primary';
+  closeBtn.textContent = 'Close';
+  actions.append(copyBtn, closeBtn);
+  panel.append(pre, actions);
+  document.body.appendChild(panel);
+
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard?.writeText(pre.textContent).then(
+      () => { copyBtn.textContent = 'Copied!'; setTimeout(() => { copyBtn.textContent = 'Copy report'; }, 1500); },
+      () => { copyBtn.textContent = 'Copy failed — select text manually'; }
+    );
+  });
+  closeBtn.addEventListener('click', () => panel.classList.add('hidden'));
+  btn.addEventListener('click', () => {
+    pre.textContent = buildReport();
+    panel.classList.remove('hidden');
+  });
+}
+initScrollDiagnostics();
