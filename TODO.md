@@ -168,56 +168,78 @@ Completed Tasks
      glyph's own font metrics can inflate a text button's rendered height past
      its `line-height` — fixed via an explicit `.btn { height: 2.2rem }` with flex
      centering. **The project owner's real-device screenshot shows the visual
-     misalignment is still present** — see round 3 above.
-* **Scroll bug + toolbar alignment, round 3 — implemented, awaiting real-device
-  verification.** See Current Objective above for full detail: a periodic
-  `setInterval(correctResidualViewportPan, 400)` idle re-check (replacing the
-  event-only approach for the scroll pan), `-webkit-appearance: none` added to
-  `.btn` (a real candidate root cause for the toolbar issue), and the
-  `?debug=scroll` report extended to list every toolbar button's real geometry
-  so the next on-device check yields numbers instead of a screenshot.
+     misalignment is still present** — see round 4 below (turned out to be a
+     misdiagnosis: not a size issue at all).
+* **Scroll bug, round 3 — implemented, awaiting real-device verification.** See
+  Current Objective above for full detail: a periodic
+  `setInterval(correctResidualViewportPan, 400)` idle re-check, replacing reliance
+  on the event-only approach alone (events are kept too, as a fast path).
+* **Toolbar alignment, round 3 — superseded by round 4 (below); its own fix
+  (`-webkit-appearance: none` on `.btn`) turned out not to be the actual cause,
+  though it's harmless and left in place.** Also added the `?debug=scroll`
+  toolbar-geometry report, which remains useful diagnostic infrastructure.
+* **Toolbar alignment, round 4 — the REAL bug, found and fixed via direct
+  measurement, confirmed in preview (see Current Objective above for full
+  detail).** The project owner correctly identified that rounds 2-3 were solving
+  the wrong problem ("It isn't size... the buttons aren't lined up"). Root cause:
+  `.btn + .btn { margin-top: 0.5rem }` — a rule meant for vertical button stacks
+  elsewhere — was leaking into `.library-entry-group`'s horizontal row, the one
+  consumer that never got the same `{ margin-top: 0 }` reset every other
+  `.btn`-group in the codebase already had. Fixed, plus gave `.mode-toggle` an
+  explicit height matching `.btn`'s so the Fill/Mark-empty pill lines up too.
+  Verified by remeasuring `rect.top`/`rect.bottom` directly (not just height) —
+  every first-row toolbar button now reports identical coordinates. Still wants a
+  real-device screenshot to fully close out, per this bug family's track record.
 
 Current Objective (Focus Area)
 
-* **Scroll bug and toolbar-alignment bug — round 3 implemented, awaiting real-device
-  verification (both need a fresh `?debug=scroll` capture before either can be called
-  resolved — round 2 also passed every local/preview check and still failed on-device).**
-  1. **Scroll pan fix, round 3**: added a periodic idle re-check —
-     `setInterval(correctResidualViewportPan, 400)` (`app.js`, right after the existing
-     `focusout`/`focusin`/`resize` listeners, which are kept as-is). Directly implements
-     round 2's own diagnosis: the stuck-pan repro's "nothing focused, offsetTop stuck
-     nonzero" state is exactly what `correctResidualViewportPan`'s existing unconditional
-     `scrollTo` branch already handles correctly — it just never got invoked again because
-     no covered event (`focusout`/`focusin`/`resize`) fired during the 54+ second stuck
-     window. The function is cheap (a couple of property reads, early-returns when
-     `offsetTop === 0`, the common case) so polling doesn't chase individual triggers
-     anymore — it self-corrects regardless of what transition caused the stuck state.
-  2. **Toolbar alignment, round 3, two parts**:
-     - Added `-webkit-appearance: none;` to `.btn` (`styles.css`) alongside the existing
-       unprefixed `appearance: none;` — a real, currently-missing property, and a genuinely
-       plausible root cause: iOS Safari's native button chrome isn't fully stripped by the
-       unprefixed property alone on every version, and "Puzzle library" is the ONE toolbar
-       button using a solid fill (`.btn--primary`) — every neighbor is transparent/bordered
-       — so leftover native chrome would read as extra height/rounding far more visibly
-       against a solid gold fill than against a transparent background. This is a real
-       candidate, not confirmed — flagging it as a guess would be wrong, but so would
-       calling it fixed without on-device numbers.
-     - **Closed the actual gap round 2's toolbar fix suffered from**: its only real-device
-       evidence was a screenshot (an eyeball comparison), never a number, unlike the scroll
-       bug which already had real `?debug=scroll` data driving each round. The
-       `?debug=scroll` report (`app.js`, `buildReport()`) now also lists every toolbar
-       `.btn`'s `offsetHeight`, `rect.height`, `borderRadius`, `border`, `padding`, and
-       font metrics — reusing the same on-device tool/URL the project owner already knows
-       to check, rather than building a separate mechanism. Verified in preview: all five
-       buttons currently report identical `offsetHeight: 35` / `rect.height: 35` /
-       `borderRadius: 9.6px` in desktop Chromium (as round 2's fix also showed) — the real
-       test is what this same report says on the actual iPhone.
-  - **Next step is entirely on-device**: load `?debug=scroll` on the real iPhone, reproduce
-    the stuck-pan repro (open keyboard, close it, wait), and reopen the panel/tap the
-    diagnostic button afterward — the history log should show the periodic poll catching
-    and correcting the pan within ~400ms of it going stale, and the new toolbar-buttons
-    section should show real numbers for "Puzzle library" vs. its neighbors instead of a
-    screenshot-based guess. Do not report either fix as resolved without that capture.
+* **Toolbar button alignment — round 4 found and fixed the REAL bug, confirmed by direct
+  measurement (not by guessing and checking a screenshot).** The project owner correctly
+  called out that rounds 2 and 3 were solving the wrong problem: "It isn't size. The buttons
+  aren't lined up" — Puzzle library sat visibly higher than Stats/the save icon, and the
+  Fill/Mark-empty toggle sat higher than the save icon too. Checking `getBoundingClientRect().top`
+  for every toolbar button (not just height, which rounds 2-3 had already confirmed identical)
+  immediately showed it: `.btn + .btn { margin-top: 0.5rem }` (`styles.css`) — a rule that
+  exists for VERTICAL button stacks elsewhere (mistake popup, modal actions, library rows) —
+  was leaking into `.library-entry-group`'s horizontal row. Every other consumer of that base
+  rule already resets it (`.mistake-popup__actions .btn`, `.modal-card__actions .btn`,
+  `.library-row .btn`, all `{ margin-top: 0 }`); `.library-entry-group` was simply the one place
+  that reset was missing, so "Stats" and the save icon (each directly following another `.btn`)
+  sat 8px lower than "Puzzle library". Fixed the same way as every other consumer:
+  `.library-entry-group .btn { margin-top: 0 }`, placed after `.btn + .btn` in source order so
+  the equal-specificity cascade tie-break lands correctly (a first attempt placed it earlier in
+  the file and silently lost the tie — worth remembering if this pattern comes up again).
+  Also gave `.mode-toggle` (the Fill/Mark-empty pill) an explicit `height: 2.2rem` matching
+  `.btn`'s own fixed height, and made `.mode-btn` fill/center within it — it had no fixed height
+  of its own before, sizing off padding instead, which left it a few px off from every
+  `.btn`-based sibling once the margin leak was fixed and exposed it. **Verified by direct
+  remeasurement in preview**: every button on the toolbar's first row now reports an identical
+  `rect.top`/`rect.bottom` (130/165.2 in that preview run) — not just matching heights, actual
+  matching Y-position. All 812 tests still pass; Cancel/Confirm and other `.btn + .btn` vertical
+  stacks (restart confirm modal, checked directly) are unaffected. Round 3's
+  `-webkit-appearance: none` addition to `.btn` and the `?debug=scroll` toolbar-geometry report
+  are both left in place (harmless, and the geometry report is still generally useful
+  diagnostic infrastructure) but neither turned out to be the actual fix — see Completed Tasks
+  for the corrected record. **Still worth a real-device screenshot to confirm**, since every
+  round in this whole bug family has had at least one surprise the preview didn't catch, but
+  this is the first round backed by an actual matching-coordinates measurement rather than an
+  eyeballed comparison or an untested theory.
+
+* **Scroll bug — round 3 implemented, awaiting real-device verification** (round 2 passed every
+  local/preview check and still failed on-device, so this isn't being called resolved yet
+  either). Added a periodic idle re-check — `setInterval(correctResidualViewportPan, 400)`
+  (`app.js`, right after the existing `focusout`/`focusin`/`resize` listeners, which are kept
+  as-is). Directly implements round 2's own diagnosis: the stuck-pan repro's "nothing focused,
+  offsetTop stuck nonzero" state is exactly what `correctResidualViewportPan`'s existing
+  unconditional `scrollTo` branch already handles correctly — it just never got invoked again
+  because no covered event (`focusout`/`focusin`/`resize`) fired during the 54+ second stuck
+  window. The function is cheap (a couple of property reads, early-returns when `offsetTop === 0`,
+  the common case) so polling doesn't chase individual triggers anymore — it self-corrects
+  regardless of what transition caused the stuck state.
+  - **Next step is entirely on-device**: load `?debug=scroll` on the real iPhone, reproduce the
+    stuck-pan repro (open keyboard, close it, wait), and reopen the panel/tap the diagnostic
+    button afterward — the history log should show the periodic poll catching and correcting the
+    pan within ~400ms of it going stale. Do not report this fix as resolved without that capture.
 
 * **Historical: round 2's fix, tested on the real device with `?debug=scroll`,
   did NOT resolve the scroll bug** — the negative evidence and diagnosis that

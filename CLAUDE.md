@@ -61,29 +61,33 @@ done and deployed. Fully public library visibility is confirmed as the right mod
 OCR accuracy has been explicitly accepted as "good enough for now." See `TODO.md`'s
 Completed Tasks for the full history.
 
-**Current objective: round 3 of both the scroll bug and the toolbar-alignment bug is
-implemented (not yet deployed/verified) — round 2 of both failed real-device testing
-despite passing every local/preview check, so neither round 3 fix should be reported
-as resolved until confirmed with a fresh on-device `?debug=scroll` capture:**
+**Current objective: the toolbar-alignment bug is now fixed and confirmed by direct
+measurement (round 4); the scroll bug is still round 3, implemented but awaiting
+real-device verification (round 2 of both failed real-device testing despite passing
+every local/preview check):**
 
-* **Scroll pan, round 3**: replaced the event-only approach with a periodic idle
-  re-check — `setInterval(correctResidualViewportPan, 400)` (`app.js`) — since round
-  2's own diagnosis showed the stuck-pan state can persist through modal closes and
-  screen navigations that never fire the `focusout`/`focusin`/`resize` events the
-  fix depended on. The correction function itself already handled the stuck case
-  correctly; it just wasn't being re-invoked.
-* **Toolbar alignment, round 3**: added `-webkit-appearance: none;` to `.btn`
-  (`styles.css`) — a real, previously-missing property, and a plausible cause given
-  "Puzzle library" is the one *filled* toolbar button (`.btn--primary`) among
-  otherwise transparent/bordered neighbors. Also extended the `?debug=scroll` report
-  to list every toolbar button's real `offsetHeight`/`rect.height`/`borderRadius`/
-  etc., closing the gap where round 2's toolbar fix had only a screenshot as
-  real-device evidence, never a number.
+* **Toolbar alignment — FIXED, round 4.** The project owner correctly called out that
+  rounds 2-3 were chasing the wrong thing ("It isn't size... the buttons aren't lined
+  up"). Real cause: `.btn + .btn { margin-top: 0.5rem }` (`styles.css`, meant for
+  vertical button stacks elsewhere) was leaking into `.library-entry-group`'s
+  horizontal row — every other `.btn`-group consumer in the codebase already resets
+  this back to 0, `.library-entry-group` was the one place that reset was missing.
+  Fixed the same way; also gave `.mode-toggle` an explicit height matching `.btn`'s.
+  Verified by remeasuring `rect.top` directly (not just height) — every first-row
+  toolbar button now reports identical coordinates. Round 3's `-webkit-appearance`
+  addition and the `?debug=scroll` toolbar-geometry report are both left in place but
+  weren't the actual fix. Still wants a real-device screenshot to fully close out.
+* **Scroll pan, round 3 — implemented, awaiting real-device verification.** Replaced
+  the event-only approach with a periodic idle re-check —
+  `setInterval(correctResidualViewportPan, 400)` (`app.js`) — since round 2's own
+  diagnosis showed the stuck-pan state can persist through modal closes and screen
+  navigations that never fire the `focusout`/`focusin`/`resize` events the fix
+  depended on. The correction function itself already handled the stuck case
+  correctly; it just wasn't being re-invoked. **Next step is entirely on-device**:
+  reproduce the stuck-pan repro and check `?debug=scroll`'s history log on the real
+  iPhone. See `TODO.md`'s Current Objective for full detail.
 * `.explain-panel`'s round 2 defensive fix is still believed to be a real, working
-  partial win (confirmed via geometry in round 2's capture) — untouched by round 3.
-* **Next step is entirely on-device**: reproduce the stuck-pan repro and check
-  `?debug=scroll`'s history log + new toolbar-buttons section on the real iPhone.
-  See `TODO.md`'s Current Objective for full detail.
+  partial win (confirmed via geometry in round 2's capture) — untouched since.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,

@@ -147,6 +147,10 @@ body {
 
 .mode-toggle {
   display: inline-flex;
+  /* Round 4: matches .btn's own fixed-height treatment (see .btn's comment) — .mode-toggle had
+     no explicit height of its own, sizing instead off .mode-btn's padding, which landed a few px
+     off from every .btn-based sibling once the margin-top leak above was fixed and exposed it. */
+  height: 2.2rem;
   border: 1px solid rgba(230, 183, 63, 0.3);
   border-radius: 0.6rem;
   overflow: hidden;
@@ -154,12 +158,18 @@ body {
 
 .mode-btn {
   appearance: none;
+  -webkit-appearance: none;
   border: none;
   background: var(--panel-bg-raised);
   color: var(--text-dim);
   font-size: 0.85rem;
   font-weight: 600;
-  padding: 0.45rem 0.8rem;
+  /* Round 4: fills .mode-toggle's own fixed height (see .mode-toggle's comment) and centers its
+     text within it, instead of the padding implying a height that didn't quite match .btn's. */
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.8rem;
   cursor: pointer;
 }
 
@@ -258,16 +268,13 @@ body {
 
 .btn {
   appearance: none;
-  /* Round 3 (see TODO.md): unprefixed `appearance: none` alone doesn't fully strip iOS Safari's
-     native button chrome on every version — `-webkit-appearance` is the one that actually
-     controls it there. Missing this is a plausible reason "Puzzle library" specifically (the
-     one *filled* .btn--primary button in the toolbar — every neighbor is transparent/bordered)
-     could still show native rounding/height on the real device after round 2's height fix:
-     leftover WebKit chrome would read as a subtle gradient/inset look that's far more visible
-     against a solid gold fill than against a transparent background, and neither desktop
-     Chromium preview (no such native chrome to strip) nor the height/line-height fix (a layout
-     property, not an appearance one) would have caught or addressed it. Needs real-device
-     re-verification like everything else in this bug family — not assumed fixed from here. */
+  /* Round 3 (see TODO.md) added this as a candidate fix for the toolbar misalignment, on the
+     theory that iOS Safari's native button chrome wasn't fully stripped by the unprefixed
+     property alone. Round 4 found and fixed the ACTUAL cause (a leaked `.btn + .btn` margin —
+     see `.library-entry-group .btn`'s comment near that rule) via real getBoundingClientRect
+     measurements, not guessing — this property turned out not to be it. Left in as a harmless,
+     generally-correct hardening (real browsers do vary in how much unprefixed `appearance`
+     alone strips), not because it's believed to fix anything currently broken. */
   -webkit-appearance: none;
   border: 1px solid rgba(230, 183, 63, 0.35);
   background: var(--panel-bg-raised);
@@ -328,6 +335,21 @@ body {
 
 .btn + .btn {
   margin-top: 0.5rem;
+}
+
+/* Round 4 (see TODO.md) — the ACTUAL toolbar misalignment, confirmed by real
+   getBoundingClientRect measurements (not the height/appearance guesses of rounds 2-3): the
+   `.btn + .btn` rule above exists for vertical button stacks elsewhere, and every one of those
+   consumers already resets it back to 0 for its own horizontal-flex `.btn` group
+   (`.mistake-popup__actions .btn`, `.modal-card__actions .btn`, `.library-row .btn`, all below
+   this same rule for the cascade tie-break to land their way) — `.library-entry-group` was
+   simply the one place that reset got missed, so "Stats" and the save icon (each directly
+   following another `.btn`) sat 8px lower than "Puzzle library". Not a size or appearance issue
+   at all — rounds 2-3 measured height/border-radius/appearance and found them identical because
+   the bug was never there; it's vertical POSITION via an inherited margin, only visible by
+   checking each .btn's actual rect.top, not its own box dimensions. */
+.library-entry-group .btn {
+  margin-top: 0;
 }
 
 .hidden {
