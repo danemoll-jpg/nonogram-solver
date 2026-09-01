@@ -57,23 +57,23 @@ up to date than this file's summary below.
 
 Short version: items 1–7, the UI consolidation pass, a post-ship bug-fix pass, the
 iPad-verification follow-up pass, the clue-number spacing fix, item 10 (scan-existing-
-puzzle flow, complete across grid detection/clue OCR/fill-state capture), and a
+puzzle flow, complete across grid detection/clue OCR/fill-state capture), a
 five-item real-world-feedback round (OCR-vs-fill-state cross-check flagging, an
 undersized-board-on-return bug, app-wide overscroll-bounce removal, a drag-overwrite bug,
-and "Remove bad marks" counting as hint usage) are all done and deployed. See `TODO.md`'s
+and "Remove bad marks" counting as hint usage), and a known-row/col-count override for the
+scan wizard's recheck-warning UX (fixes the original 25-vs-26 grid miscount directly; a
+companion truncated-glyph detection idea was tried, tested against a real image, and
+dropped as unreliable — see `TODO.md`) are all done and deployed. See `TODO.md`'s
 Completed Tasks for the full round-by-round history and every design tradeoff
 (`src/gridDetect.js`, `src/scanPuzzle.js`, `src/ocr.js`, `src/ocrSegment.js`,
 `src/scanUI.js`, `src/cellStateDetect.js`).
 
-**Current objective is two more items from continued real-world use**: (1) replacing the
-current "wrong column count, cancel and rescan" dead-end warning with something actionable
-— letting the player supply a known row/col count up front to reconcile against, and
-detecting visually truncated/cut-off clue-number crops as a direct, localized signal
-instead of only an aggregate flag-count heuristic; and (2) a scroll regression on iOS,
-worse specifically when the on-screen keyboard opens (introducing extra whitespace) — see
-`TODO.md`'s Current Objective for the two symptoms to investigate separately (baseline
-scroll vs. keyboard-triggered) and the classic `100vh`/`visualViewport` mobile-keyboard
-culprit worth checking first.
+**Current objective**: an iOS scroll regression, both symptoms (baseline overflow with no
+keyboard, and extra whitespace once the on-screen keyboard opens) root-caused and fixed —
+see `TODO.md`'s Current Objective for the three separate baseline causes and the
+`visualViewport`/`dvh` keyboard fix. **Verified only in the browser preview so far; still
+needs real iOS hardware confirmation (keyboard genuinely open) before this is done**, per
+this project's own repeated history with this exact bug class.
 
 Item 8 (arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain
 deferred pending their own design pass.
