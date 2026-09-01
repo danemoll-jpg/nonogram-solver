@@ -73,169 +73,167 @@ Completed Tasks
     16: 1,1,12           17: 1,1,11           18: 1,4,11          19: 1,2,2,11        20: 1,1,1,1,11
     21: 1,1,1,1,10       22: 4,1,3,8          23: 1,4,1,1,5       24: 1,5,1,2         25: 1,1,3
     ```
-* **Four items from an earlier real-device round — three confirmed fixed on real
-  hardware; the fourth (per-number gray-out) turned out incomplete — see Current
-  Objective below.**
-  1. **OCR `11`→`1` misread — root-caused as a genuine Tesseract recognition failure
-     (not a geometry/grouping bug — confirmed directly: an isolated crop containing
-     only the two `1` glyphs, with nothing else in frame, still reads back as a single
-     `"1"` across every PSM mode tried). Fixed via a per-glyph OCR fallback**
-     (`glyphSidePadding`, `scanUI.js`; `groupGlyphsIntoNumbers` now returns each
-     group's individual glyph bands), triggered only when a multi-digit number's
-     whole-number OCR still returns the wrong digit count. **Verified against the real
-     ground-truth image**: all 6 real `11` occurrences now read correctly, plus a
-     bonus fix (column 16's `12`, a different digit pair hitting the same underlying
-     merge failure). Zero regressions across the other 44 lines.
-     - **A second, distinct OCR bug was found during this verification and
-       deliberately left unfixed**: on lines with many numbers, a lone single-digit
-       number sometimes drops out entirely (e.g. ground-truth `2,1,2,2,2` → `2,1,2,2`),
-       and one case of the opposite — a spurious extra digit (`3,1,1,3` → `3,1,1,7,3`,
-       traced to `findStripLines` detecting a glyph blob that isn't a real digit).
-       **Confirmed still present in the latest real-device round** (see Current
-       Objective — the project owner is now asking whether this is worth continuing
-       to chase, given it's a small residual error rate the correction step already
-       exists to catch).
-  2. Clue-number legibility on large puzzles — **fixed**: font size now floors at
-     `MIN_CLUE_FONT_PX` (13px) instead of continuing to shrink with `--cell-size`.
-     Verified against a synthetic 25×25 puzzle with deep clue stacks; reference
-     screenshot `scratch-images/reference-30x30-legible.png` used for target
-     proportions.
-  3. Per-number gray-out within a multi-number clue — **implemented as
-     `anchoredClueNumbers` (`lineSolver.js`)**, verified via a 300-trial brute-force
-     soundness differential test and hand-checked cases at the time, but **the
-     real-device round confirms this does not actually show up during normal
-     gameplay — see Current Objective below, this is not actually done.**
-  4. App-wide scroll bug, round 2 (structural fix — permanently non-scrolling
-     `<html>`/`<body>`, one region owning real scroll at a time) — **verified
-     extensively in browser-preview tooling but has now ALSO failed real-device
-     testing, the third consecutive round to do so** (round 1's magnitude-gating fix
-     failed real-device testing once; round 2's structural fix has now failed it once
-     as well) — see Current Objective below for how this round is being handled
-     differently.
+* **OCR accuracy — resolved as an accepted limitation, confirmed twice now by the
+  project owner.** Latest real-device test of the 25×25 puzzle showed only 3-5
+  mistakes total (down from originally near-total garbling) — the project owner has
+  explicitly said this is now "much more tolerable" and to defer further work on OCR
+  accuracy. Known residual failure modes, if this is ever picked back up: an
+  occasional lone single digit dropping out of a long clue (e.g. ground-truth
+  `2,1,2,2,2` → `2,1,2,2`) and an occasional spurious extra digit (`3,1,1,3` →
+  `3,1,1,7,3`, traced to `findStripLines` detecting a glyph blob that isn't a real
+  digit) — both rare enough, and already caught by the existing correction-step
+  review, that further engineering time isn't currently warranted.
+* **Per-number clue gray-out (`anchoredClueNumbers`) — real bug found and fixed.**
+  `walkAnchorsFromStart` (`lineSolver.js`) required a run to be bounded by a
+  *directly observed* EMPTY on BOTH sides before calling it anchored — provably more
+  conservative than necessary: once one side is genuinely excluded (edge, or a chain
+  of earlier proven runs), an exact-length-match run is already fully forced
+  regardless of whether the far side has been explicitly marked yet. Fixed, with a
+  full proof in the code comment; re-verified the existing 300-trial brute-force
+  soundness test (5 fresh runs, 812/812 each), corrected two hand-written tests that
+  had encoded the old incomplete behavior as "expected," and confirmed end-to-end in
+  browser preview that a single-sided bound now correctly triggers the gray-out in
+  normal gameplay.
+* **Save-to-library feature — client-side implementation done, and the Firestore
+  rules deploy has since happened (the feature works — a puzzle successfully
+  saves). See Current Objective below for a real follow-up bug found post-deploy
+  (saved puzzles don't appear in the library list afterward).** New module
+  `src/puzzleLibrary.js` (savePuzzleToLibrary/fetchLibraryPuzzles/loadLibraryPuzzle/
+  renamePuzzleInLibrary) backs a "Save to library" section on the scan wizard's
+  "done" step and a "Puzzle library" Help-menu entry (browse/play/rename modal).
+  Schema (`puzzles/{puzzleId}`): `rows`, `cols` (numbers); `rowClues`, `colClues`
+  (arrays of comma-joined strings, round-tripping through `scanPuzzle.js`'s existing
+  `parseClueText`); `title`; `creatorUid`; `createdAt` (serverTimestamp). No solution
+  is stored — `loadLibraryPuzzle` re-solves the clues via the same `buildScannedPuzzle`
+  path a fresh scan already uses. Design, all confirmed: blank-puzzle-only saves,
+  decoupled from the player's own scan session; public read; required title with
+  later creator-only editing (Firestore update rule scoped to just the `title`
+  field); library-sourced puzzles behave as real authored puzzles (full history,
+  counts toward stats).
 
 Current Objective (Focus Area)
 
-* **Scroll bug — diagnostic tool investigated and hardened this round; underlying
-  scroll bug itself still NOT fixed (deliberately — see below).**
-  - **The tool was confirmed to already render visibly, not console-only** — it builds
-    a real on-screen 📏 trigger button and a report panel with Copy/Close buttons (not
-    just a console.log), verified directly in browser preview by clicking it and
-    reading the rendered report. The "console-only, unusable on an iPad" concern from
-    the previous round doesn't apply.
-  - **Confirmed the feature is actually live on production** — fetched
-    `https://nonogrampro.netlify.app/app.js` directly and confirmed it already
-    contains `initScrollDiagnostics` (and `applyAnchoredClasses`, relevant to the next
-    item below) — so a stale/pre-feature deploy is ruled out as the explanation for
-    "nothing appeared." The response's own `Cache-Control: public, max-age=0,
-    must-revalidate` header also means Netlify isn't telling browsers to cache this
-    file, which further weakens (though doesn't 100% eliminate — iOS Safari can still
-    have its own quirks) a stale-HTTP-cache explanation.
-  - **Found and fixed a concrete, code-grounded reason the trigger button specifically
-    could still be invisible on a real device**, without touching the core scroll-lock
-    fix itself: `.scroll-diag-btn`/`.scroll-diag-panel` (`styles.css`) were
-    **top-anchored** (`top: 0.5rem`) — but this file's own comment on the round-2
-    structural fix documents that iOS Safari's address-bar chrome collapse/expand is
-    driven specifically by scrolling the *document*, and the round-2 fix made
-    `<html>`/`<body>` permanently non-scrollable. Put those two true facts together
-    and the chrome may now be **permanently stuck in its tallest (expanded) state**,
-    with no scroll gesture left to ever trigger a collapse — meaning a `top: 0.5rem`
-    fixed element can end up rendered underneath that permanently-expanded chrome,
-    genuinely invisible, with no way for the player to reveal it. **Fixed** by moving
-    both to bottom-anchored (matching `.explain-panel`, this app's only other fixed
-    element, already proven safe on real iOS hardware) — verified still renders
-    correctly in browser preview after the change. This is a fix to the *diagnostic
-    tool's own visibility* specifically, not a guess at the underlying document-lock
-    bug itself — deliberately not touched, per below.
-  - **Still open, and still needs the project owner's device, not another guess**:
-    whether this was really the whole explanation for "nothing appeared," and — the
-    actual point of the tool — what it reports once it's confirmed visible (measured
-    scrollHeight vs. viewport, which element(s) contribute any excess). **Ask the
-    project owner to reload nonogrampro.netlify.app fresh and try `?debug=scroll`
-    again** — the button should now show bottom-right. If it's visible now, tap it and
-    report the numbers in the panel; if it's STILL not visible, that's a stronger,
-    more specific finding (rules out both the console-only theory and the top-anchor
-    theory) worth its own dedicated investigation rather than a third repositioning
-    guess.
+* **New design item, confirmed with the project owner: consolidate the two separate
+  puzzle-selection UIs (the original top "Puzzle" dropdown of built-in samples, and
+  the newer Help-menu "Puzzle library" modal) into one single place — the library
+  modal wins, since it's the more extensible surface for future puzzle-management
+  features.** Two follow-on requirements the project owner flagged, both real scope,
+  not edge cases:
+  1. **Puzzle names must stay hidden until completion in the merged list, same as
+     the existing dropdown already does.** The dropdown currently shows a generic
+     placeholder (`Puzzle N — RxC`) instead of a puzzle's real name/title, revealing
+     the real name only in the completion modal — this exists specifically so
+     picking a puzzle doesn't spoil what picture it draws. The library modal
+     currently shows saved puzzles' real `title` field directly in the browse list,
+     which defeats that. **Fix: apply the exact same hidden-name display scheme to
+     every entry in the merged library list** (built-in and saved alike) — a generic
+     placeholder in the list, real title revealed only in the completion modal, same
+     as today's dropdown behavior. Don't invent a new scheme; reuse the existing one.
+  2. **The library entry point should not live in the Help dropdown** — browsing/
+     picking a puzzle isn't a help action. Reasonable default, not yet locked in:
+     since this modal is replacing the old dropdown as the primary way to choose a
+     puzzle, its trigger should move to roughly where the old dropdown lived (main
+     toolbar), not into any menu. Confirm this placement makes sense once it's
+     actually built, rather than assuming it's exactly right.
+  - **Scope for consolidating the two puzzle sources**: the built-in sample puzzles
+    (`SAMPLE_PUZZLES`) don't need to be migrated into Firestore — they can stay local
+    static data. What needs to change is the UI: the library modal's browse list
+    should merge both sources (local samples + fetched Firestore puzzles) into one
+    single list/view, rather than requiring built-ins to become Firestore documents.
+    Worth a light visual distinction between "built-in" and "community-saved" entries
+    in the merged list (e.g. a small label or grouping), but this is a nice-to-have,
+    not a blocker — the core requirement is one list, one entry point, not a data
+    migration.
+  - Remove the old top "Puzzle" dropdown entirely once the library modal covers
+    everything it did.
+  - **Additional scope, added by the project owner — these need real new data
+    tracking, not just UI:**
+    1. **Reveal a puzzle's real name in the list once the current user (or a
+       cross-device-paired linked identity) has solved it.** This needs a genuinely
+       new piece of per-user data that doesn't exist yet: today's personal stats
+       (`stats.js`/`recordCompletion`) are bucketed anonymously by grid *size*, with
+       no record of *which specific puzzle* was solved. Add per-user tracking of
+       solved library-puzzle IDs (e.g. `users/{uid}/solvedLibraryPuzzles/{puzzleId}`,
+       or an array/map field), written at the same completion point personal stats
+       already are recorded from. Since cross-device pairing already re-authenticates
+       a second device onto the same underlying uid (custom token, per the existing
+       pairing design), this should work across paired devices automatically once
+       it's keyed off uid the same way personal stats already are — no separate
+       cross-device logic needed.
+    2. **A visual "solved" indicator** (badge/checkmark) on library list rows,
+       driven by the same solved-puzzle-ID tracking as #1.
+    3. **Per-puzzle aggregate stats: total times solved, and fastest completion
+       time — across ALL users, not just the current one.** This is different from
+       (and in addition to) both the existing personal size-bucketed stats and the
+       new personal per-puzzle solved tracking above — it's a public, competitive,
+       per-puzzle-document stat. **Worth a real design decision on how this gets
+       written**: a client directly incrementing `timesSolved`/updating
+       `fastestTimeMs` on a public `puzzles/{puzzleId}` document via Firestore
+       rules is *gameable* (a malicious client could write a fake instant "fastest
+       time," or an arbitrary solve count, since Firestore rules can constrain
+       document shape but not easily express "this new value must be strictly
+       faster than the current one" as a trustworthy atomic check against a
+       client-controlled write). **Recommend following this project's own
+       established pattern** (the `createPairingCode`/`redeemPairingCode` callables,
+       which use the Admin SDK server-side specifically to keep sensitive writes
+       out of direct client hands) — a new callable Cloud Function that records a
+       library-puzzle completion, validates/increments the count, and only updates
+       `fastestTimeMs` if the new time genuinely improves on the stored one,
+       server-side. This is real new backend scope (a new Firestore field shape on
+       `puzzles/{puzzleId}`, a new callable, a new deploy), not just a client change
+       — flag this size difference to the project owner if it meaningfully changes
+       this round's scope/timeline.
+    4. **Filters on the library list: Solved / Unsolved / All, and by grid size.**
+       Straightforward once (1) exists (solved/unsolved filtering) and given
+       dimensions are already a schema field (size filtering) — no new data needed
+       beyond what's already listed above.
+    5. **"Stats & pairing" should also move out of the Help dropdown and be grouped
+       with the library, not live as a separate Help item.** Same reasoning as the
+       library itself — this is puzzle/progress-related, not a help action, and it's
+       increasingly the same conceptual area as the library now that per-puzzle
+       solved status and stats are part of it. Exact mechanism (a tab within the same
+       modal, an adjacent button, a section of the library view) is left to Code's
+       judgment — the requirement is that it's no longer under Help and is reachable
+       from/alongside the library, not the specific UI shape.
 
-* **Per-number gray-out (`anchoredClueNumbers`) — real bug found and fixed this
-  round** (the project owner correctly identified it after my first pass here wrongly
-  concluded there was nothing to fix). Wiring, rendering, and CSS were all already
-  fine (confirmed in the previous investigation pass); the actual bug was in
-  `walkAnchorsFromStart` (`lineSolver.js`) itself, and it's a real soundness/
-  completeness gap, not a UI wiring issue:
-  - **The old code required a run to be bounded by a *confirmed* EMPTY on BOTH
-    sides** before calling it anchored. That's provably more conservative than
-    necessary: once a walk has fully excluded everything before position `pos` (via
-    the line's true edge, or a chain of earlier already-proven runs), a FILLED run
-    starting at `pos` whose length exactly matches `clue[i]` is **already fully
-    forced** — it can't belong to an earlier or later clue number (no room / would
-    strand an earlier number), and it can't validly grow past its matching length
-    (growing it can never again equal `clue[i]`, and any other length is infeasible
-    for the same no-room reason) — so the trailing boundary is *logically* forced
-    empty even when it isn't yet a *directly observed* EMPTY mark. Requiring the far
-    side to already be observed-empty was therefore an unnecessary bar that made the
-    effect trigger far less often than the underlying logic actually allows —
-    directly explaining why it "barely showed up" in ordinary play, where players
-    routinely fill a run without also immediately X-marking the cell right after it.
-  - **Verified the fix is sound, not just more eager**, three ways: (1) a rigorous
-    manual proof (see the new comment on `walkAnchorsFromStart`) that growing a
-    left/right-excluded, exact-length-match run is always infeasible; (2) the
-    existing 300-trial brute-force soundness differential test (which checks every
-    positive anchoring claim against real brute-force-enumerated completions) still
-    passes — re-ran it 5 times total (fresh random trials each run, since it's not
-    seeded) with 812/812 passing every time; (3) two of the existing **hand-written**
-    tests turned out to encode the OLD, incomplete behavior as if it were correct —
-    brute-forcing them by hand found their expected `false` results were wrong (the
-    anchored position genuinely doesn't vary across the only valid completion) —
-    fixed both test expectations to match, with the brute-force reasoning written
-    into each test's own comment.
-  - **Verified end-to-end in browser preview** against a normal (non-scanned)
-    SAMPLE_PUZZLES puzzle using real `pointerdown`/`pointerup` events: filling a
-    single cell of a two-number clue and X-marking only the cell on ONE side of it
-    (leaving the other side of the run completely UNKNOWN — the exact case that used
-    to require both sides) now correctly grays that one clue number. This is a much
-    lower bar to trigger than before, so it should show up meaningfully more often
-    during ordinary play. **Still worth the project owner's real-device confirmation**
-    once this is deployed, but this is now a genuine logic fix, not a guess.
+* **Scroll bug: sharpened, keyboard-specific repro from the project owner — the
+  whitespace only appears once the on-screen keyboard has been used, and persists
+  after the keyboard closes; no issue before any keyboard interaction.** This is a
+  meaningfully more specific lead than "scrolls into whitespace sometimes" — it
+  points at something in the keyboard-open/close path leaving the page in a bad
+  state afterward, not a general layout bug. Two concrete things to check:
+  - The existing `VIEWPORT_CHANGE_THRESHOLD_PX`-gated keyboard-scale resize handling
+    (`handleViewportResize`, `app.js`) is *supposed* to recompute board sizing on a
+    genuine keyboard open/close (that's intentional, unlike the gated-out routine
+    iOS chrome noise) — check whether that recompute, or the `visualViewport`
+    listener driving it, leaves something in a wrong state once the keyboard closes
+    and the visual viewport returns to its original size (e.g. `--cell-size` or
+    `--explain-panel-space` not correctly reverting, or `#page-root`'s own
+    `overflow-y: auto` region ending up with a `scrollHeight` that doesn't shrink
+    back down).
+  - **The project owner tried `?debug=scroll` again after this repro but is unsure
+    whether it actually captured anything** — confirm directly whether the
+    diagnostic button (now bottom-anchored, per the previous round's fix) was
+    visible and tappable in this exact scenario, and if so, get the actual measured
+    numbers/report from it for this specific keyboard-triggered case (not just
+    baseline). If the button still wasn't visible or usable even after being
+    repositioned, that's a further, separate finding worth its own attention before
+    trusting the tool for real diagnosis.
 
-* **Save-to-library feature — client-side implementation done this round; NOT yet
-  usable in production because the updated `firestore.rules` haven't been deployed.**
-  New module `src/puzzleLibrary.js` (savePuzzleToLibrary/fetchLibraryPuzzles/
-  loadLibraryPuzzle/renamePuzzleInLibrary) backs a new "Save to library" section on
-  the scan wizard's existing "done" step (`src/scanUI.js`, `index.html`) and a new
-  "Puzzle library" Help-menu entry opening a browse/play/rename modal (`app.js`).
-  Verified in browser preview: the UI renders correctly and the library modal fails
-  soft with a clear message (confirmed via console: `permission-denied`, expected
-  since the live project's deployed rules don't have the `puzzles` collection yet).
-  **Before this is actually live: deploy the updated `firestore.rules`** —
-  `firebase deploy --only firestore:rules` — which the project owner needs to run
-  themselves (security-rule changes to a live project aren't something to do
-  unattended). No Firestore composite index needed (a single-field `orderBy` doesn't
-  require one). After deploying, worth a real end-to-end pass: save a puzzle from a
-  real scan, confirm it shows up in the library, play it (check it behaves like a
-  normal authored puzzle — real move history, counts toward stats), and rename it as
-  its creator.
-  - Schema (`puzzles/{puzzleId}`): `rows`, `cols` (numbers); `rowClues`, `colClues`
-    (arrays of comma-joined strings, e.g. `"2,5"` — Firestore has no array-of-arrays
-    type, and this round-trips through `scanPuzzle.js`'s existing `parseClueText`
-    rather than inventing a new format); `title`; `creatorUid`; `createdAt`
-    (serverTimestamp). No solution is stored — `loadLibraryPuzzle` re-solves the
-    clues via the same `buildScannedPuzzle` path a fresh scan already uses, since the
-    save step already proved they solve.
-  - Design this pulls forward a scoped first slice of item 9 (below), ahead of item
-    8, which the project owner has explicitly deprioritized (not a current priority
-    — keep it in Next Steps but no longer positioned as the next thing after item
-    9's remaining scope).
-  - **Design (confirmed with the project owner) and this round's scope are both now
-    implemented as described** — blank-puzzle-only saves decoupled from the player's
-    own scan session, public read for this first version, required title with
-    later creator-only editing, and library-sourced puzzles behaving as real
-    authored puzzles (full history, counts toward stats). No further design
-    decisions open here; what's left is purely the deploy + verification step
-    called out above. Pagination/sorting/filtering intentionally stayed minimal
-    (most-recent-first, no search) per the original "doesn't need to be a polished
-    library experience yet" scope call — a candidate for later polish, not a gap in
-    this round.
+* **Bug: a puzzle saves successfully to the library but doesn't appear in the
+  library list afterward.** Confirmed the save itself works (per the project owner's
+  direct test) — this is specifically a read/refresh problem, not a write problem.
+  Worth checking, in order of likely cause: (1) whether the library modal only
+  fetches once on open and needs an explicit re-fetch/refresh after a save completes
+  (most likely, and cheapest to fix — trigger `fetchLibraryPuzzles` again, or
+  optimistically prepend the just-saved puzzle to the list, right after
+  `savePuzzleToLibrary` resolves); (2) whether ordering by `createdAt`
+  (`serverTimestamp()`) causes a brand-new document to sort unpredictably or get
+  excluded immediately after write, before the server timestamp has actually been
+  assigned (a known Firestore gotcha with `serverTimestamp()` — the field reads as
+  `null` locally until the write is acknowledged by the server, which can affect an
+  `orderBy(createdAt)` query run too soon after saving). Verify against a real save
+  end-to-end, not just by reading the code.
 
 Next Steps (Do Not Start Yet)
 
@@ -246,7 +244,7 @@ Next Steps (Do Not Start Yet)
   up: is grid size user-adjustable at generation time or fixed per image; slider vs.
   automatic threshold/contrast tuning; reject, flag, or allow non-unique-solution
   puzzles.
-* Item 9 — Firestore schema + shared library UI, remaining scope after this round's
+* Item 9 — Firestore schema + shared library UI, remaining scope after the
   save-to-library feature above: friends-only/private sharing (deferred from this
   round's public-only version), any richer library browsing (search, filtering by
   size/difficulty), and whether stats become visible to friends. Stats-tracking and
@@ -258,11 +256,12 @@ Technical Notes / Blockers
 * `phraseDeduction()` in `src/hintPhrasing.js` calls the `phraseHint` Cloud Function by
   default, with `defaultPhraser`'s old deterministic templates kept as the fallback.
 * Firebase project exists (`nonogram-pro-e8a31`). Anonymous Auth + Firestore are in
-  active use for stats/pairing; item 9's puzzle-library Firestore usage is separate.
+  active use for stats/pairing and now the puzzle library.
 * No CI is configured — run `npm test` (or `node test/run.js`) locally before pushing.
 * Node.js 20→22 runtime bump — done and deployed.
-* Firestore security rules: in active use for `users/{uid}/stats/*` and
-  `pairingCodes/*`. Full puzzle-library rules still belong to item 9.
+* Firestore security rules: in active use for `users/{uid}/stats/*`, `pairingCodes/*`,
+  and now `puzzles/{puzzleId}` (public read, creator-only create, creator-only
+  title-only update).
 * Hint phrasing has an invisible-by-design fallback — "a hint appeared" is not proof
   the LLM call actually succeeded; check console/Cloud Function logs after any Cloud
   Function change.
@@ -272,29 +271,16 @@ Technical Notes / Blockers
 * **Item 10's grid/line detection, OCR, and fill-state detection were built and
   repeatedly fixed against real screenshots, not synthetic mockups alone** — prefer
   testing against a real image file over guessing at plausible synthetic pixel values.
-* **iOS scroll/touch bugs in this app have now failed real-device verification THREE
-  times across two separate underlying bugs** (the original scan-wizard-specific bug
-  took four rounds to actually fix; the current app-wide regression's gating fix and
-  then its structural permanent-lock fix have each failed real-device testing once).
-  Per Current Objective above, the next step is real on-device diagnostic data via
-  `?debug=scroll`, not another guess — this pattern of "passes every check this
-  project's tooling can perform, fails on the real device anyway" strongly suggests
-  the verification tooling itself cannot reproduce the actual trigger, not that the
-  underlying reasoning about the fix is wrong.
+* **iOS scroll/touch bugs in this app have now failed real-device verification
+  multiple times across two separate underlying bugs** (the original scan-wizard-
+  specific bug took four rounds; the current app-wide regression's gating fix and
+  structural permanent-lock fix have each also had real-device issues). The latest
+  round narrowed the repro to specifically keyboard-triggered, persisting afterward
+  — see Current Objective above. Use `?debug=scroll` for real on-device data, and
+  confirm the diagnostic tool itself is actually visible/usable in the specific
+  scenario being tested, not just in general.
 * `countGridLines` miscounting is understood and mitigated via the known-count
   override (see Completed Tasks) rather than by retuning the underlying heuristic.
 * Clue-number legibility on large puzzles — fixed, font floors at `MIN_CLUE_FONT_PX`.
-* Per-number clue gray-out (`anchoredClueNumbers`) — real over-conservatism bug found
-  and fixed this round (`walkAnchorsFromStart` no longer requires a run's far
-  boundary to be a directly-observed EMPTY mark — see Current Objective for the full
-  proof and verification). Needs the project owner's on-device confirmation once
-  deployed to fully close out.
-* **OCR residual accuracy — resolved as an accepted limitation, not a bug to chase
-  right now.** Asked the project owner directly (current accuracy vs. keep chasing);
-  answer: leave it as-is, document it, revisit only if it comes up again later. The
-  known residual failure modes, if this is ever picked back up: an occasional lone
-  single digit dropping out of a long clue (e.g. ground-truth `2,1,2,2,2` → `2,1,2,2`)
-  and an occasional spurious extra digit (`3,1,1,3` → `3,1,1,7,3`, traced to
-  `findStripLines` detecting a glyph blob that isn't a real digit) — both rare enough,
-  and already caught by the existing correction-step review, that the project owner
-  doesn't consider them worth further engineering time for now.
+* OCR residual accuracy — accepted as a known limitation per the project owner,
+  confirmed twice now; not currently being pursued further.
