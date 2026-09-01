@@ -34,15 +34,17 @@
   file over synthetic/guessed pixel data.** This feature's grid/line-detection, OCR, and
   fill-state-detection code has repeatedly had bugs that synthetic mockups missed but a
   real screenshot immediately surfaced — see `TODO.md`'s Completed Tasks for the full
-  history.
-- **iOS scroll/touch bugs in this app have proven resistant to incremental CSS fixes,
-  more than once.** The scan wizard's original scroll bug took four rounds; a
-  subsequent app-wide scroll regression's own multi-part fix has since failed real-device
-  re-verification too (see `TODO.md`'s Current Objective). When investigating this class
-  of bug, prefer directly measuring the real gap on a real device (e.g. `scrollHeight`
-  vs. viewport height per screen) over proposing another plausible CSS fix blind, and
-  always verify on real hardware — this project's own tooling cannot reliably reproduce
-  it.
+  history, including a confirmed real ground-truth reference puzzle
+  (`scratch-images/sample-mid-solve.jpg`) reusable for future OCR-accuracy verification.
+- **iOS scroll/touch bugs in this app have proven resistant to incremental CSS/JS
+  fixes, across two separate bugs now.** The original scan-wizard scroll bug took four
+  rounds; a subsequent app-wide scroll regression has now failed real-device
+  verification at least twice, even after a specific, plausible-sounding root cause was
+  found and fixed in the browser preview. When investigating this class of bug: use the
+  `?debug=scroll` diagnostic tool (`initScrollDiagnostics` in `app.js`) to get real
+  on-device measurements rather than reasoning from a plausible mechanism alone, and
+  don't assume a preview-verified fix holds on real hardware. If incremental fixes keep
+  failing, consider a more forceful structural approach over another targeted patch.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -55,50 +57,36 @@ more up to date than this file's summary below.
 
 Short version: the full solver/UI stack (items 1–7), the UI consolidation and post-ship
 bug-fix passes, the iPad-verification follow-up pass, the clue-number spacing fix, and
-**item 10 (scan-existing-puzzle)** — including grid detection, clue OCR, fill-state
-capture, and a known-row/col-count override that fixed the original 25-vs-26 column
-miscount — are all done and deployed. Item 10 in particular has been hardened against
-the project owner's own real screenshots across many rounds; see `TODO.md`'s Completed
-Tasks for the full history and every design tradeoff (`src/gridDetect.js`,
-`src/scanPuzzle.js`, `src/ocr.js`, `src/ocrSegment.js`, `src/scanUI.js`,
-`src/cellStateDetect.js`).
+**item 10 (scan-existing-puzzle)** are all done and deployed. Item 10 has been hardened
+across many real-screenshot rounds, including two confirmed, root-caused, and fixed
+bugs verified with real before/after data: a column-band geometry bug that caused
+cross-column digit bleed (fixed via a single shared border-centered rect for both
+cell-slicing and clue-band slicing), and a repeated-digit consistency check
+(`findRepeatedDigitOutlier`) that was built, tested against 50 real ground-truth
+clue-lines, tightened after catching its own false positive, and shipped. See
+`TODO.md`'s Completed Tasks for the full history, every design tradeoff
+(`src/gridDetect.js`, `src/scanPuzzle.js`, `src/ocr.js`, `src/ocrSegment.js`,
+`src/scanUI.js`, `src/cellStateDetect.js`), and the confirmed ground-truth reference
+puzzle.
 
-**Current objective has one open item left**, from real-device testing of the
-known-count override — of the other four, two are fixed and shipped, one was always
-just a documented non-issue (not a task), and one is a reusable reference (see
-`TODO.md`'s Completed Tasks for full detail):
-- ~~Column-crop double-read bug~~ — confirmed against real crop pixels, root-caused
-  (clue-band slicing used a plain border-snapped rect instead of the border-centered one
-  cell-slicing already used, causing per-column pitch error to compound across the
-  strip), fixed in `src/scanUI.js`, and verified with a real before/after OCR diff
-  against the ground-truth puzzle below. Regression test in `test/gridDetect.test.js`.
-- ~~Repeated-digit consistency check~~ — built, tested against all 50 real ground-truth
-  lines (below), tightened after real data caught a false positive, and shipped as a
-  distinct amber "suspect" flag in the scan wizard (`findRepeatedDigitOutlier` in
-  `src/ocrSegment.js`, wired into `src/scanUI.js`).
-- **App-wide scroll bug — fix implemented this round, still needs real-device
-  confirmation.** The project owner corrected the diagnosis: it's not extra scrollable
-  space, it's the screen moving on its own during ordinary scrolling with nothing on
-  screen to justify it. Root cause: `fitBoardToViewport` (`app.js`) recomputed board
-  sizing on every `resize`/`visualViewport resize` event, including the ones iOS fires
-  constantly as its chrome bar collapses/expands during normal scrolling — each
-  recompute nudged page height enough for iOS to compensate by shifting scroll position.
-  Fixed by gating those listeners behind a magnitude threshold
-  (`handleViewportResize`/`VIEWPORT_CHANGE_THRESHOLD_PX`, `app.js`) so routine chrome
-  noise no longer triggers a re-layout, while a real keyboard/rotation/resize still
-  does. Verified in the browser preview (manually dispatched resize events at both a
-  below-threshold and above-threshold delta); **real iPhone confirmation is still
-  outstanding** — this bug class has failed that confirmation twice before, so don't
-  treat preview verification as done here. An on-device `?debug=scroll` measurement
-  tool (`app.js`'s `initScrollDiagnostics`) also exists as a fallback if the screen
-  still moves after this fix.
-- Not a bug, just documented: the scan wizard's red-flag consistency check
-  (`isLineConsistent`) is a pure feasibility check, not a correctness check, so it
-  predictably misses real errors and flags some fine lines — a known limitation, not
-  something to chase further.
-- Full ground-truth rows/columns for the 25×25 real test puzzle used throughout this
-  investigation are recorded in `TODO.md` (confirmed line-by-line with the project
-  owner) — reusable for verifying future OCR-accuracy work.
+**Current objective has four items from the latest real-device round**:
+1. A specific OCR content-accuracy pattern (distinct from the now-fixed geometry bug):
+   `11` is consistently misread as `1`, while `12` reads correctly — directly testable
+   against several `11`s in the confirmed ground truth.
+2. The app-wide scroll bug is confirmed still NOT fixed on real hardware, and this
+   round's symptom description doesn't clearly match the previous round's diagnosis —
+   re-diagnose using the `?debug=scroll` tool before attempting another fix, and
+   consider the project owner's request to "just lock it down" as license for a more
+   forceful structural fix if incremental patches keep not holding.
+3. A new request: larger, more legible clue numbers on large puzzles (e.g. 25×25),
+   since font size currently scales directly with the shrinking `--cell-size` —
+   needs real design investigation (decoupling clue-font scaling from cell size,
+   reserving more layout space, etc.), not just a quick font-size bump.
+4. A new, now-precisely-specified feature: per-number gray-out within a multi-number
+   clue, where an individual number grays out only once its run is provably anchored
+   (to the line's edge, or via X's reaching a further-anchored neighbor) — not merely
+   "a run of the right length exists somewhere." Worth checking whether the solver's
+   existing edge-completion reasoning can be adapted for this display-only purpose.
 
 Item 8 (arbitrary-photo puzzle generation) and item 9 (Firestore shared library) remain
 deferred pending their own design pass.
