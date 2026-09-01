@@ -193,23 +193,31 @@ Current Objective (Focus Area)
       session detected) and writing a new document to a new Firestore collection
       (e.g. `puzzles/{puzzleId}`).
     - New Firestore schema fields needed, minimum viable: dimensions, row clues, col
-      clues, creator uid (Anonymous Auth, already in use elsewhere in this app),
-      `createdAt`. **Open detail, not yet decided**: does saving prompt the player
-      for a title/name, or auto-generate one (e.g. "Puzzle — RxC" + date, matching
-      the existing built-in-sample naming convention)? Worth a quick decision before
-      building the save UI, but not worth blocking on — a sensible default (prompt
-      for an optional title, auto-generate if left blank) is fine if no strong
-      preference.
-    - New Firestore security rules: public read on the new collection; write
-      restricted to an authenticated (including anonymous) user creating their own
-      document. No update/delete needed for this first version unless the project
-      owner wants creators to be able to remove their own saved puzzles — worth
-      confirming, otherwise assume not needed yet.
+      clues, `title`, creator uid (Anonymous Auth, already in use elsewhere in this
+      app), `createdAt`. **Confirmed with the project owner: the save action prompts
+      for a title up front (required, not auto-generated/optional), and the creator
+      can edit that title later** — this is real, additional scope beyond a
+      write-once save.
+    - **Title editing means the library browse UI (below) needs an edit affordance
+      for puzzles the current user created** — not just a read-only list. Simplest
+      reasonable approach: an edit control (pencil icon, or tap-to-rename) visible
+      only on the current user's own saved puzzles in the library view, opening a
+      small rename prompt that writes the updated `title` back to that puzzle's
+      Firestore document.
+    - New Firestore security rules, updated for editability: public read on the new
+      collection; **create** restricted to an authenticated (including anonymous)
+      user creating their own document; **update** restricted to the original
+      creator (`request.auth.uid == resource.data.creatorUid`) AND scoped to only
+      allow changing the `title` field — grid dimensions, clues, and creator should
+      never be editable after creation. No delete needed for this first version
+      unless the project owner wants creators to be able to remove their own saved
+      puzzles — worth confirming, otherwise assume not needed yet.
     - New "browse the library" UI — likely a new Help-menu entry (matching the
       existing pattern for "Scan a puzzle"/"Stats & pairing"), listing public saved
-      puzzles, tap to play. Pagination/sorting/filtering can start minimal (e.g. most
-      recent first) — this doesn't need to be a polished library experience yet, just
-      functional browsing and play.
+      puzzles, tap to play, with the rename affordance above for the current user's
+      own puzzles. Pagination/sorting/filtering can start minimal (e.g. most recent
+      first) — this doesn't need to be a polished library experience yet, just
+      functional browsing, play, and title editing.
     - **A puzzle played from the library behaves like any other authored puzzle, NOT
       like a scan-session puzzle**: real move history, undo-to-point, and normal
       stats counting — this is a genuine, permanent puzzle now, not an ephemeral

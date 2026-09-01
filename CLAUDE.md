@@ -78,10 +78,13 @@ puzzle.
    document, fully decoupled from whatever the player's own current scan session is
    doing. Public read for this first version; a puzzle played from the library
    behaves like a normal authored puzzle (real move history, counts toward stats),
-   not like an ephemeral scan session. This pulls a scoped first slice of item 9
-   forward, ahead of item 8, which is now explicitly deprioritized by the project
-   owner (kept in Next Steps, not dropped). See `TODO.md` for the full scope and one
-   still-open detail (whether saving prompts for a title).
+   not like an ephemeral scan session. Confirmed: saving prompts for a required
+   title, and the creator can edit that title later (needs an update-permission
+   Firestore rule scoped to just the `title` field, plus a rename affordance in the
+   library browse UI for the current user's own puzzles). This pulls a scoped first
+   slice of item 9 forward, ahead of item 8, which is now explicitly deprioritized by
+   the project owner (kept in Next Steps, not dropped). See `TODO.md` for the full
+   scope.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9 is no longer fully deferred — its save-to-library slice
