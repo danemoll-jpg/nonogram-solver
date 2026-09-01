@@ -1277,8 +1277,22 @@ body {
   box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.5);
 }
 
+/* Round 3 (see app.js's initScrollDiagnostics comment): the panel now shows two blocks — a
+   live snapshot and an always-on auto-captured history — so `flex: 1` on each splits the
+   available space between them rather than one dominating; both scroll independently. */
+.scroll-diag-panel__heading {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
 .scroll-diag-panel__text {
   flex: 1;
+  min-height: 4rem;
   margin: 0;
   overflow: auto;
   -webkit-overflow-scrolling: touch;

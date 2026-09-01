@@ -1519,6 +1519,34 @@ window.visualViewport?.addEventListener('resize', debounce(handleViewportResize,
 // project owner's report) scrollable space — per screen, on the real device where the bug
 // actually reproduces (this project's own preview tooling can't reliably reproduce it).
 //
+// Round 3 (see TODO.md — the project owner tried this tool after the sharpened keyboard-
+// specific repro but wasn't sure it had captured anything): the on-demand "tap for a
+// snapshot" design has a real gap — it only shows whatever's true AT THE MOMENT OF THE TAP,
+// so it can't distinguish "the bug produced no evidence" from "the player didn't tap during
+// the ~seconds-wide window that mattered" (and per the bug's own description, that window is
+// specifically right as/after the keyboard closes, easy to miss). Two changes address that
+// directly, without guessing at the underlying fix:
+//   1. An always-on rolling history (below) auto-captures a compact snapshot on every likely
+//      keyboard-relevant signal (a real visualViewport resize, a visualViewport pan/scroll,
+//      or a text input gaining/losing focus — the last one catches keyboard use even inside a
+//      modal, which visualViewport size alone can't distinguish from routine iOS chrome
+//      noise). Opening the panel any time after the bug happened now shows the actual
+//      timeline through it, not just whatever's true right now.
+//   2. The snapshot report now also captures `visualViewport.offsetTop`/`pageTop` — the pan
+//      amount — which the original report never did. A live-device test with a *positive*
+//      offsetTop that persists after the keyboard closes would point straight at a specific,
+//      well-documented root cause (iOS panning the visual viewport to keep a focused input
+//      clear of the keyboard, then failing to fully un-pan it) rather than requiring more
+//      guessing. This is also exactly the failure mode that could explain the *second* open
+//      question below (the button not reliably visible/tappable) as the SAME bug, not two.
+//
+// Separately (defensive, not a fix for the underlying bug): `position: fixed` elements on
+// iOS Safari are pinned to the LAYOUT viewport, not the visual one — during/after a keyboard
+// interaction, a naive bottom-anchored fixed element can render below whatever's actually
+// visible. pinToVisualViewport() below counter-translates this button/panel by the visual
+// viewport's own offset so they can't get stranded off-screen purely by this well-known
+// mechanism, whether or not it turns out to be part of the real bug.
+//
 // Gated behind `?debug=scroll` in the URL rather than a normal Help-menu item: this is
 // investigative instrumentation for the current bug, not a player-facing feature, and a
 // floating button needs to stay reachable over every screen INCLUDING open modals (the scan
@@ -1547,6 +1575,16 @@ function initScrollDiagnostics() {
     ['help-menu-list (Help dropdown)', els.helpMenuList],
   ];
 
+  // Short, readable identifier for the currently-focused element — id if it has one
+  // (every real input in this app does), else tag+type, else "(none)". Used both in the
+  // full snapshot and in each history-log line, since which input was focused is exactly
+  // what turns a bare "keyboard opened" signal into an actionable repro step.
+  function describeElement(el) {
+    if (!el || el === document.body) return '(none)';
+    if (el.id) return `#${el.id}`;
+    return el.tagName ? el.tagName.toLowerCase() + (el.type ? `[type=${el.type}]` : '') : String(el);
+  }
+
   function buildReport() {
     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
     const docScrollHeight = document.documentElement.scrollHeight;
@@ -1557,9 +1595,17 @@ function initScrollDiagnostics() {
     lines.push(`${new Date().toLocaleTimeString()}`);
     lines.push(`visualViewport.height: ${window.visualViewport?.height ?? '(unavailable)'}`);
     lines.push(`window.innerHeight: ${window.innerHeight}`);
+    // offsetTop/pageTop weren't captured before this round (see this function's header
+    // comment) — a nonzero value that persists after the keyboard closes is the direct
+    // signature of "iOS panned the visual viewport for the keyboard and didn't fully un-pan
+    // it", one concrete, checkable explanation for whitespace that outlives the keyboard.
+    lines.push(`visualViewport.offsetTop (pan from layout viewport top): ${window.visualViewport?.offsetTop ?? '(unavailable)'}`);
+    lines.push(`visualViewport.pageTop (pan including document scroll): ${window.visualViewport?.pageTop ?? '(unavailable)'}`);
+    lines.push(`visualViewport.scale: ${window.visualViewport?.scale ?? '(unavailable)'}`);
     lines.push(`document.documentElement.scrollHeight: ${docScrollHeight}`);
     lines.push(`document.body.scrollHeight: ${bodyScrollHeight}`);
     lines.push(`window.scrollY: ${window.scrollY}`);
+    lines.push(`document.activeElement: ${describeElement(document.activeElement)}`);
     lines.push(`EXCESS (scrollable beyond visible viewport): ${excess}px`);
     lines.push('');
     lines.push('Per-element (only currently-rendered ones shown; sorted worst offender first):');
@@ -1588,41 +1634,146 @@ function initScrollDiagnostics() {
     return lines.join('\n');
   }
 
+  // ---- always-on history log (see this function's header comment for why) ----
+  //
+  // Capped so a long play session can't grow this unboundedly — old entries are dropped, not
+  // the recent ones a real repro needs. Kept as plain strings (not objects re-rendered later)
+  // so "Copy history" can just join it — the whole point is getting this off the device
+  // verbatim, not building a UI around it.
+  const HISTORY_MAX = 60;
+  const history = [];
+  let lastVisualViewportHeight = window.visualViewport?.height ?? window.innerHeight;
+
+  function logHistory(trigger) {
+    const vv = window.visualViewport;
+    const line =
+      `${new Date().toLocaleTimeString()} — ${trigger} — ` +
+      `vv.height=${vv?.height ?? '?'} vv.offsetTop=${vv?.offsetTop ?? '?'} ` +
+      `innerHeight=${window.innerHeight} scrollY=${window.scrollY} ` +
+      `active=${describeElement(document.activeElement)}`;
+    history.push(line);
+    if (history.length > HISTORY_MAX) history.shift();
+    // Cheap enough to keep live-updated even while the panel's hidden — no reason to defer
+    // it to the next open, and it means a currently-open panel updates in real time too.
+    historyPre.textContent = history.join('\n');
+  }
+
+  // Throttles the visualViewport 'scroll' (pan) listener, which can fire rapidly during
+  // momentum scrolling — logging every single event would drown out the handful that
+  // actually matter in noise.
+  let lastScrollLog = 0;
+  function onVisualViewportScroll() {
+    const now = Date.now();
+    if (now - lastScrollLog < 150) return;
+    lastScrollLog = now;
+    logHistory('visualViewport scroll (pan)');
+  }
+
+  function onVisualViewportResize() {
+    const vv = window.visualViewport;
+    const newHeight = vv?.height ?? window.innerHeight;
+    const delta = newHeight - lastVisualViewportHeight;
+    lastVisualViewportHeight = newHeight;
+    // Same 120px heuristic app.js's own handleViewportResize uses to tell a real
+    // keyboard open/close from routine iOS chrome noise — labeled here rather than
+    // filtered, since for THIS tool seeing the noise too (correctly labeled) is useful
+    // context, not clutter to hide.
+    const label = Math.abs(delta) >= 120 ? 'visualViewport resize (likely keyboard)' : 'visualViewport resize (routine)';
+    logHistory(`${label} Δ${delta > 0 ? '+' : ''}${delta}px`);
+  }
+
+  function onFocusIn(e) {
+    if (!/^(input|textarea)$/i.test(e.target?.tagName || '')) return;
+    logHistory(`focusin ${describeElement(e.target)}`);
+  }
+  function onFocusOut(e) {
+    if (!/^(input|textarea)$/i.test(e.target?.tagName || '')) return;
+    logHistory(`focusout ${describeElement(e.target)}`);
+  }
+
+  window.visualViewport?.addEventListener('resize', onVisualViewportResize);
+  window.visualViewport?.addEventListener('scroll', onVisualViewportScroll);
+  document.addEventListener('focusin', onFocusIn);
+  document.addEventListener('focusout', onFocusOut);
+
+  // ---- keeping the button/panel visible through a keyboard interaction (defensive; see
+  // this function's header comment) ----
+  function pinToVisualViewport(el) {
+    function reposition() {
+      const vv = window.visualViewport;
+      if (!vv) return;
+      // Gap between the LAYOUT viewport's bottom (what a plain `position: fixed; bottom` is
+      // pinned to on iOS Safari) and the VISUAL viewport's actual visible bottom edge —
+      // positive whenever the keyboard (or a lingering, not-yet-reverted pan) is hiding part
+      // of the layout viewport. Counter-translating upward by that gap keeps this element
+      // inside whatever's really on screen either way.
+      const bottomGap = window.innerHeight - (vv.height + vv.offsetTop);
+      el.style.transform = bottomGap > 0 ? `translateY(-${bottomGap}px)` : '';
+    }
+    window.visualViewport?.addEventListener('resize', reposition);
+    window.visualViewport?.addEventListener('scroll', reposition);
+    reposition();
+  }
+
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'scroll-diag-btn';
   btn.textContent = '📏';
   btn.setAttribute('aria-label', 'Scroll diagnostics');
   document.body.appendChild(btn);
+  pinToVisualViewport(btn);
 
   const panel = document.createElement('div');
   panel.className = 'scroll-diag-panel hidden';
+
+  const snapshotHeading = document.createElement('h3');
+  snapshotHeading.className = 'scroll-diag-panel__heading';
+  snapshotHeading.textContent = 'Live snapshot (as of last tap)';
   const pre = document.createElement('pre');
   pre.className = 'scroll-diag-panel__text';
+
+  const historyHeading = document.createElement('h3');
+  historyHeading.className = 'scroll-diag-panel__heading';
+  historyHeading.textContent = 'Auto-captured history (this page load, oldest first)';
+  const historyPre = document.createElement('pre');
+  historyPre.className = 'scroll-diag-panel__text';
+
   const actions = document.createElement('div');
   actions.className = 'scroll-diag-panel__actions';
   const copyBtn = document.createElement('button');
   copyBtn.type = 'button';
   copyBtn.className = 'btn';
-  copyBtn.textContent = 'Copy report';
+  copyBtn.textContent = 'Copy snapshot';
+  const copyHistoryBtn = document.createElement('button');
+  copyHistoryBtn.type = 'button';
+  copyHistoryBtn.className = 'btn';
+  copyHistoryBtn.textContent = 'Copy history';
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.className = 'btn btn--primary';
   closeBtn.textContent = 'Close';
-  actions.append(copyBtn, closeBtn);
-  panel.append(pre, actions);
+  actions.append(copyBtn, copyHistoryBtn, closeBtn);
+  panel.append(snapshotHeading, pre, historyHeading, historyPre, actions);
   document.body.appendChild(panel);
+  pinToVisualViewport(panel);
 
-  copyBtn.addEventListener('click', () => {
-    navigator.clipboard?.writeText(pre.textContent).then(
-      () => { copyBtn.textContent = 'Copied!'; setTimeout(() => { copyBtn.textContent = 'Copy report'; }, 1500); },
-      () => { copyBtn.textContent = 'Copy failed — select text manually'; }
+  function copyText(text, button, idleLabel) {
+    navigator.clipboard?.writeText(text).then(
+      () => { button.textContent = 'Copied!'; setTimeout(() => { button.textContent = idleLabel; }, 1500); },
+      () => { button.textContent = 'Copy failed — select text manually'; }
     );
-  });
+  }
+  copyBtn.addEventListener('click', () => copyText(pre.textContent, copyBtn, 'Copy snapshot'));
+  copyHistoryBtn.addEventListener('click', () => copyText(historyPre.textContent, copyHistoryBtn, 'Copy history'));
   closeBtn.addEventListener('click', () => panel.classList.add('hidden'));
   btn.addEventListener('click', () => {
     pre.textContent = buildReport();
+    historyPre.textContent = history.length ? history.join('\n') : '(nothing captured yet this page load)';
     panel.classList.remove('hidden');
   });
+
+  // Seed one history entry immediately so a report opened right after page load isn't empty,
+  // and so the very first real resize/focus event has a baseline to diff against.
+  logHistory('page load');
 }
 initScrollDiagnostics();

@@ -174,6 +174,39 @@ Current Objective (Focus Area)
     baseline). If the button still wasn't visible or usable even after being
     repositioned, that's a further, separate finding worth its own attention before
     trusting the tool for real diagnosis.
+  - **Round 3 (this pass): the diagnostic tool itself was upgraded, not the
+    underlying bug — still needs real on-device verification, which this
+    environment can't provide.** The on-demand "tap for a snapshot" design had a
+    real gap: it could only prove "the bug produced no evidence" vs. "nobody tapped
+    during the moment that mattered" are indistinguishable, and per the sharpened
+    repro that moment is narrow (right as/after the keyboard closes). Changes,
+    verified working in browser preview (not on real iOS — see below):
+    - `initScrollDiagnostics` (`app.js`) now keeps an always-on rolling history (last
+      60 entries), auto-logging a compact line on every real `visualViewport`
+      resize, every `visualViewport` pan/scroll, and every text input focus/blur
+      (the last one catches keyboard use even inside a modal). Opening the panel
+      any time after the bug happens now shows the actual timeline through it
+      instead of depending on a well-timed tap.
+    - The snapshot report now also captures `visualViewport.offsetTop`/`pageTop` —
+      the iOS visual-viewport PAN amount — which the original report never
+      recorded. **This is the concrete thing to check on the next real-device
+      repro**: a positive `offsetTop` that's still nonzero after the keyboard
+      closes would point straight at a specific, well-documented root cause (iOS
+      panning the visual viewport to keep a focused input clear of the keyboard,
+      then not fully un-panning it) instead of requiring more guessing — and would
+      also explain the button-visibility open question above as the *same* bug,
+      not two, since a stuck pan can hide a naive bottom-anchored fixed element
+      too.
+    - Defensively (not a fix for the underlying bug, just insurance against a
+      known, unrelated iOS quirk): the diagnostic button/panel now counter-
+      translate themselves against `visualViewport.offsetTop` so a stuck pan can't
+      strand them off-screen the same way it might strand real page content.
+    - **Not done, and shouldn't be guessed at further without device data**: any
+      change to `handleViewportResize`, `fitBoardToViewport`, or the CSS variables
+      they drive. This project's own history (four rounds on the original scan-
+      wizard scroll bug, two more on this app-wide one) is the reason to wait for
+      an actual `offsetTop` reading from the real repro before touching that code
+      again.
 
 Next Steps (Do Not Start Yet)
 

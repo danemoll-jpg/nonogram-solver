@@ -67,10 +67,12 @@ pick that up only if the project owner asks for it):
   after the on-screen keyboard has been used, and persists afterward; no issue
   before any keyboard interaction. Points at the keyboard-triggered resize/re-fit
   path (`handleViewportResize`, `app.js`) leaving something in a wrong state once
-  the keyboard closes, rather than a general layout bug. Also need to confirm
-  whether the `?debug=scroll` diagnostic button was actually visible/usable in this
-  specific scenario — the project owner tried it but isn't sure it captured
-  anything.
+  the keyboard closes, rather than a general layout bug. The `?debug=scroll` tool
+  itself has since been upgraded (always-on history log, `visualViewport.offsetTop`/
+  `pageTop` now captured, button/panel pinned against a stuck viewport pan) — see
+  TODO.md's "Round 3" note — but the underlying bug is still unfixed and unverified
+  on real hardware; don't touch `handleViewportResize`/`fitBoardToViewport` again
+  without an actual on-device `offsetTop` reading from the new tool.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope (private/friends sharing, richer
