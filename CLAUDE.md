@@ -58,30 +58,31 @@ done and deployed. Fully public library visibility is confirmed as the right mod
 OCR accuracy has been explicitly accepted as "good enough for now." See `TODO.md`'s
 Completed Tasks for the full history.
 
-**Current objective: the scroll bug's round-1 fix is deployed but NOT the whole
-story** — three real follow-ups were confirmed with the project owner after round 1
-shipped, and Code should treat all of them as still outstanding, not already covered:
-1. **Broaden the fix's trigger.** A second real capture shows the residual pan can
-   settle to a nonzero value while an input is still actively focused (switching
-   between two fields mid-keyboard-session), not only after `focusout` — round 1's
-   fix explicitly requires no input focused before correcting, so this case isn't
-   handled. The real fix needs to compare the current `offsetTop` against what the
-   *current* keyboard state actually implies (not just "is anything focused"),
-   since forcibly re-zeroing while a field is genuinely focused would break that
-   field's visibility above the keyboard.
-2. **Apply the diagnostic button's existing defensive counter-translate fix to the
-   real player-facing `.explain-panel` too** — confirmed it disappears during the
-   same stuck-pan state, the same class of issue as the diagnostic button had
-   before its own fix. This is a safety net alongside the main correction, not a
-   replacement for it.
-3. **Move "Save progress" from the Help menu to its own main-toolbar button** —
-   round 1 shipped it under Help; the project owner confirmed afterward it should
-   move, same reasoning as Library/Stats leaving Help earlier.
+**Current objective: round 2 of the scroll bug (the three follow-ups confirmed after
+round 1 shipped, plus the Save-progress placement fix) is now implemented and
+committed, but NOT yet real-device-verified** — treat all of it as unverified, not
+done, until confirmed on the actual iPhone:
+1. **Broadened the fix's trigger — implemented.** `correctResidualViewportPan`
+   (`app.js`) no longer just checks "is anything focused" before bailing out; when a
+   text input is focused it now checks the input's real `getBoundingClientRect()`
+   against the current `visualViewport` pan/height, and corrects via
+   `scrollIntoView` (safe while focused) rather than a blind re-zero if the field
+   isn't actually visible where the stale pan claims it is. A `focusin` listener was
+   added alongside the existing `focusout` one so a field-to-field switch (the
+   second capture's repro) gets caught too.
+2. **`.explain-panel` counter-translate fix — implemented.** Same defensive
+   treatment the diagnostic button/panel already had, applied unconditionally (not
+   gated behind `?debug=scroll`) via a small `pinExplainPanelToVisualViewport` IIFE
+   in `app.js`, alongside the main correction.
+3. **"Save progress" moved to its own main-toolbar button — implemented.** New
+   `#btn-save-progress` in `index.html`'s `.library-entry-group`, removed from the
+   Help dropdown.
 
-Real-device verification (of round 1 AND all three follow-ups) remains the other
-half of "done" — this bug class has failed that check multiple times despite
-passing every local/preview test, so don't treat local verification as sufficient
-on its own. See `TODO.md` for full data and the second capture's exact timestamps.
+Real-device verification (of round 1's fix AND all three round-2 items above) is
+the only remaining step — this bug class has failed that check multiple times
+despite passing every local/preview test, so don't treat local verification as
+sufficient on its own. See `TODO.md` for the full repro steps and both captures'
+exact timestamps.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,

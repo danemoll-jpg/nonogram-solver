@@ -27,10 +27,14 @@
                list), since picking a puzzle isn't a help action and shouldn't live under
                Help. "Stats & pairing" moved out to sit alongside it for the same reason —
                it's increasingly the same conceptual area now that per-puzzle solved status
-               and personal stats are part of the library. -->
+               and personal stats are part of the library. "Save progress" joined them in the
+               Current Objective round (see TODO.md) — shipped under Help first, then the
+               project owner confirmed the same "not really a help action" reasoning applies
+               to it too. -->
           <div class="library-entry-group">
             <button id="btn-open-library" class="btn btn--primary" type="button">📚 Puzzle library</button>
             <button id="btn-open-stats" class="btn" type="button">📊 Stats</button>
+            <button id="btn-save-progress" class="btn" type="button">💾 Save progress</button>
           </div>
           <div class="mode-toggle" role="group" aria-label="Marking mode">
             <button id="mode-fill" class="mode-btn" type="button" aria-pressed="true">Fill</button>
@@ -56,7 +60,6 @@
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-check">Check my work</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-remove-bad">Remove bad marks</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-scan">Scan a puzzle</button></li>
-              <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-save-progress">Save progress</button></li>
               <li role="none" class="help-menu__toggle-item">
                 <label class="help-menu__item help-menu__item--toggle">
                   <input type="checkbox" id="toggle-autocheck" />

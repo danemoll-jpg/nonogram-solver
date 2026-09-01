@@ -191,14 +191,17 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **Three follow-ups on the scroll fix + one placement fix, all confirmed with the
-  project owner but shipped AFTER the round-1 fix above — Code should treat these
-  as still outstanding, not already covered by round 1.**
+* **Round 2 — the three follow-ups + placement fix confirmed after round 1 shipped
+  are now implemented and committed, but NOT yet real-device-verified. Per this bug
+  class's history (failed real-device verification multiple times despite passing
+  every local check), do not consider any of this done until confirmed on the
+  actual iPhone.**
 
-  1. **Broaden the scroll-fix trigger: a second real capture shows the residual
-     pan can settle to a nonzero value WHILE an input is still actively focused**,
-     not only after `focusout` — round 1's fix explicitly requires "no text input
-     currently focused" before correcting, so this case isn't covered yet.
+  1. **Broadened scroll-fix trigger — implemented.** Round 1's
+     `correctResidualViewportPan` (`app.js`) bailed out unconditionally whenever any
+     text input was focused; a second real capture showed the stuck-pan symptom can
+     also occur WHILE a field is still focused (switching directly from one input to
+     another without the keyboard fully closing):
      ```
      4:02:53 PM — focusin #scan-known-rows-input — offsetTop=0
      4:02:53 PM — resize (keyboard opens) Δ-408px — offsetTop=0
@@ -206,48 +209,46 @@ Current Objective (Focus Area)
      4:02:57 PM — focusout #scan-known-rows-input — offsetTop=408 (unchanged)
      4:02:57 PM — focusin #scan-known-cols-input — offsetTop=408 (unchanged,
                   keyboard stays open switching fields)
-     4:03:03 PM — resize (likely keyboard) Δ+329px — offsetTop=79 — **active
-                  STILL #scan-known-cols-input, not focusout yet**
+     4:03:03 PM — resize (likely keyboard) Δ+329px — offsetTop=79 — active STILL
+                  #scan-known-cols-input, not focusout yet
      4:03:03 PM — scroll/pan — offsetTop=79 — still focused
      4:03:06 PM — focusout #scan-known-cols-input — offsetTop=79 (unchanged)
      ```
-     The project owner directly confirmed the visible symptom now shows up while
-     the keyboard is still up, not only after it closes ("the white space is
-     there and stays there"). **Correcting the pan while a field is genuinely
-     still focused would break the input's visibility above the keyboard**, so
-     this isn't "just remove the no-focus condition" — the real fix is detecting
-     when the *current* `offsetTop` no longer matches what the *actual, current*
-     keyboard state calls for (e.g. comparing against the expected pan implied by
-     the current `visualViewport.height` deficit) and correcting to that expected
-     value even while focused, rather than only fully re-zeroing once nothing is
-     focused. Needs real thought on the right comparison, not a blind widen of
-     the existing condition.
-  2. **New, related symptom: the persistent bottom explain/hint panel
-     (`.explain-panel`) disappears while this stuck-pan state is active** —
-     confirmed by the project owner. Almost certainly the same class of issue as
-     the earlier diagnostic-button-visibility fix (a `position: fixed` element
-     getting pushed out of the visible area by the stuck pan), which was fixed
-     for the diagnostic button/panel specifically by counter-translating them
-     against `visualViewport.offsetTop` — that same defensive treatment was never
-     applied to the real player-facing `.explain-panel`. **Apply it now, as a
-     safety net alongside (not instead of) the main pan-correction fix** — the
-     main fix should prevent the stuck pan from occurring at all, but the panel
-     shouldn't be vulnerable to disappearing even if some residual pan slips
-     through before the main fix catches it.
-  3. **"Save progress" needs to move from the Help menu to its own main-toolbar
-     button.** Confirmed by the project owner after round 1 shipped it under
-     Help — the same "this isn't really a help action" reasoning already applied
-     to moving Library and Stats out of Help applies here too, and the toolbar
-     tightening from the UI polish round frees up the room for it.
+     Fixed by replacing the "is anything focused" proxy with a real geometry check:
+     when a text input is focused, `correctResidualViewportPan` now reads its
+     `getBoundingClientRect()` and checks whether it's still fully inside what the
+     current `vv.offsetTop`/`vv.height` say is visible; if not, it corrects via
+     `activeElement.scrollIntoView({block:'nearest'})` (safe while focused — asks
+     iOS to recompute the pan the real focused field needs) rather than the blind
+     `window.scrollTo` round 1 used for the nothing-focused case (which stays
+     unchanged for that case). Also added a `focusin` listener alongside the
+     existing `focusout` one, since the field-switch repro never produces a
+     "nothing focused" moment for `focusout` alone to catch.
+  2. **`.explain-panel` disappearing during the stuck-pan state — implemented.**
+     Applied the same defensive counter-translate the diagnostic button/panel
+     already had (`pinToVisualViewport` in `initScrollDiagnostics`) to the real
+     player-facing `.explain-panel`, unconditionally rather than gated behind
+     `?debug=scroll` — a small standalone `pinExplainPanelToVisualViewport` IIFE in
+     `app.js`, alongside (not instead of) the main pan-correction fix above.
+  3. **"Save progress" moved to the main toolbar — implemented.** New
+     `#btn-save-progress` button in the `.library-entry-group` toolbar row
+     (`index.html`), next to Library/Stats; removed from the Help dropdown. `app.js`
+     renamed `els.menuSaveProgress` → `els.btnSaveProgress` and dropped the
+     now-inapplicable `closeHelpMenu()` call from its click handler.
 
-  **Also still outstanding from round 1 itself, unresolved regardless of the
-  above**: real-device verification. Per this bug class's history (failed
-  real-device verification multiple times despite passing every local check), do
-  not consider ANY of this — round 1's fix or the three follow-ups above — done
-  until confirmed on the actual iPhone with `?debug=scroll`: focus a text input,
-  dismiss the keyboard (and separately, try switching between two inputs without
-  fully dismissing, per follow-up #1's repro), and confirm `offsetTop` settles to
-  the value it actually should have at each point, not a stuck stale one.
+  **Real-device verification is the only remaining step here** — for round 1's fix
+  AND all three follow-ups above. Use `?debug=scroll` on the actual iPhone:
+  1. Focus a text input, dismiss the keyboard normally — confirm `offsetTop`
+     settles to 0 (round 1's original repro).
+  2. Focus one text input, then tap directly into a second one without dismissing
+     the keyboard in between (follow-up #1's repro, e.g. the scan wizard's known-
+     rows/known-cols fields) — confirm `offsetTop` settles to whatever the second
+     field's own legitimate pan should be, not a stale value carried over from the
+     first field.
+  3. During either repro, confirm `.explain-panel` stays visible/reachable the
+     whole time, including mid-stuck-pan if it's caught before self-correcting.
+  4. Confirm the new toolbar "💾 Save progress" button is visible, reachable, and
+     works (Help menu should no longer show a Save progress item).
 
 Next Steps (Do Not Start Yet)
 

@@ -52,6 +52,7 @@ const els = {
   explainPanel: document.getElementById('explain-panel'),
   btnOpenLibrary: document.getElementById('btn-open-library'),
   btnOpenStats: document.getElementById('btn-open-stats'),
+  btnSaveProgress: document.getElementById('btn-save-progress'),
   boardRoot: document.getElementById('board-root'),
   statusLine: document.getElementById('status-line'),
   modeFill: document.getElementById('mode-fill'),
@@ -65,7 +66,6 @@ const els = {
   menuCheck: document.getElementById('menu-check'),
   menuRemoveBad: document.getElementById('menu-remove-bad'),
   menuScan: document.getElementById('menu-scan'),
-  menuSaveProgress: document.getElementById('menu-save-progress'),
   menuRestart: document.getElementById('menu-restart'),
   menuAllGames: document.getElementById('menu-all-games'),
   explainBody: document.getElementById('explain-panel-body'),
@@ -654,8 +654,11 @@ async function saveProgressIfApplicable() {
   await saveInProgressPuzzle(puzzle.id, board.grid, elapsedMs, hintsUsed);
 }
 
-els.menuSaveProgress.addEventListener('click', async () => {
-  closeHelpMenu();
+// Current Objective #3 (see TODO.md): moved out of the Help menu onto its own main-toolbar
+// button, alongside Library/Stats — the project owner confirmed after round 1 shipped this
+// under Help that the same "not really a help action" reasoning already applied to those two
+// applies here too, and the UI-polish round's toolbar trimming left room for it.
+els.btnSaveProgress.addEventListener('click', async () => {
   if (puzzle.source === 'scan') {
     setExplain("A scanned puzzle can't be saved — it has no stable identity to save progress against.");
     return;
@@ -1735,23 +1738,53 @@ window.visualViewport?.addEventListener('resize', debounce(handleViewportResize,
 //
 // Root cause CONFIRMED via real on-device `?debug=scroll` history (see TODO.md), not guessed:
 // iOS Safari pans the *visual* viewport to keep a focused input clear of the on-screen
-// keyboard, then on keyboard close doesn't always fully reverse that pan. A real device
-// captured this exactly: the pan opened by 408px, keyboard-close only reversed 329px of it,
-// leaving `visualViewport.offsetTop` stuck at a residual 79px — still 79px a full second
-// after focus was gone entirely, i.e. it does not self-correct given time. This is a
-// well-known iOS Safari quirk, not a sizing bug in this app's own CSS/JS — fitBoardToViewport
-// was confirmed correct throughout the same repro, so this fix deliberately doesn't touch it.
-// The established workaround for this specific quirk is a corrective, no-op-looking
-// `window.scrollTo` once the keyboard is confirmed closed: it reliably nudges iOS Safari to
-// recompute and re-zero the visual-viewport offset.
+// keyboard, then doesn't always fully reverse that pan. Round 1's real capture showed this
+// with NOTHING focused: the pan opened by 408px, closing only reversed 329px of it, leaving
+// `visualViewport.offsetTop` stuck at a residual 79px a full second after focus was gone
+// entirely — it does not self-correct given time. This is a well-known iOS Safari quirk, not
+// a sizing bug in this app's own CSS/JS — fitBoardToViewport was confirmed correct throughout
+// the same repro, so this fix deliberately doesn't touch it.
+//
+// A SECOND real capture (Current Objective follow-up #1, see TODO.md) showed the same "stuck,
+// stale pan" symptom can also happen WHILE an input is still focused — switching directly from
+// one field to another without the keyboard ever fully closing left the pan sized for the
+// field that was focused a moment ago, not the one that's focused now:
+//   focusin #scan-known-rows-input — offsetTop=0
+//   resize (keyboard opens) — offsetTop=408
+//   focusout #scan-known-rows-input — offsetTop=408 (unchanged)
+//   focusin #scan-known-cols-input — offsetTop=408 (unchanged, keyboard stays open)
+//   resize (likely keyboard) — offsetTop=79 — active STILL #scan-known-cols-input
+// Round 1's fix explicitly bailed out whenever *anything* was focused, on the assumption that
+// a focused field's pan is presumably legitimate — this capture disproves that assumption, so
+// blindly widening round 1's condition to "correct even while focused" isn't safe either: a
+// genuinely-focused field's pan IS legitimate, and re-zeroing it with `scrollTo` would just
+// hide that field behind the keyboard instead of fixing anything (the project owner's own
+// framing of the risk here).
+//
+// The fix below checks the actual geometry instead of trusting focus state as a proxy: is the
+// element that's ACTUALLY focused right now still fully inside what the current pan+height say
+// is visible? If yes, the pan is still doing its job — leave it. If no (stale, sized for a
+// field that no longer has focus, or simply never updated for this one), correct it — but with
+// `scrollIntoView` on the real focused element rather than a blind `scrollTo`, so the
+// correction re-derives the pan a currently-focused field actually needs instead of erasing it.
 function correctResidualViewportPan() {
   const vv = window.visualViewport;
   if (!vv || vv.offsetTop === 0) return;
-  // Only correct once the keyboard is actually gone — a focused text input means the pan is
-  // legitimate (an input IS currently being kept clear of a real keyboard), not residual.
   const active = document.activeElement;
-  if (active && /^(input|textarea)$/i.test(active.tagName || '')) return;
-  window.scrollTo(window.scrollX, window.scrollY);
+  const activeIsTextInput = active && /^(input|textarea)$/i.test(active.tagName || '');
+  if (!activeIsTextInput) {
+    // Nothing focused at all: no legitimate reason for a nonzero pan to exist — round 1's
+    // original, unconditional re-zero is exactly right here.
+    window.scrollTo(window.scrollX, window.scrollY);
+    return;
+  }
+  // Something is focused, so *some* pan may be legitimate — check whether it's still correct
+  // for the field that actually has focus right now, rather than assuming focus alone proves it.
+  const rect = active.getBoundingClientRect();
+  const visibleTop = rect.top - vv.offsetTop;
+  const visibleBottom = rect.bottom - vv.offsetTop;
+  if (visibleTop >= 0 && visibleBottom <= vv.height) return; // pan still keeps this field visible — leave it
+  active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
 // focusout is the authoritative "an input just lost focus" signal. The real timeline above
@@ -1762,11 +1795,45 @@ document.addEventListener('focusout', (e) => {
   if (!/^(input|textarea)$/i.test(e.target?.tagName || '')) return;
   setTimeout(correctResidualViewportPan, 100);
 });
+// Current Objective follow-up #1: also re-check shortly after a field GAINS focus, not only
+// after one loses it — the second capture's repro (switching directly between two fields while
+// the keyboard stays open throughout) never produces a "focus lost, nothing new focused"
+// moment at all, so a focusout-only listener can't ever catch it.
+document.addEventListener('focusin', (e) => {
+  if (!/^(input|textarea)$/i.test(e.target?.tagName || '')) return;
+  setTimeout(correctResidualViewportPan, 100);
+});
 // Belt-and-suspenders: also re-check on every visualViewport resize (which includes the one
 // accompanying keyboard close, height growing back toward window.innerHeight) in case focusout
 // doesn't fire for some reason — e.g. focus cleared programmatically rather than by the player
 // dismissing the keyboard by hand.
 window.visualViewport?.addEventListener('resize', debounce(correctResidualViewportPan, 150));
+
+// ---- Current Objective #2: keep the player-facing explain panel visible through the same
+// stuck-pan state (see TODO.md) ----
+//
+// `.explain-panel` is `position: fixed; bottom: 0`, which iOS Safari pins to the LAYOUT
+// viewport, not the visual one. During/after a keyboard interaction — including the stuck-pan
+// state above, in whatever window before correctResidualViewportPan catches it — a lingering
+// pan can push the actually-visible area up past this element's fixed position, making it
+// disappear off the bottom of the screen. Confirmed by the project owner as the same class of
+// issue the scroll-diagnostics tool's own floating button/panel already got a defensive fix
+// for (see initScrollDiagnostics' pinToVisualViewport below, gated behind `?debug=scroll`) —
+// that treatment was never applied to this real player-facing panel. Applied here
+// unconditionally (not gated behind the debug flag) as a safety net ALONGSIDE, not instead of,
+// the pan-correction fix above: that fix should stop the stuck pan from occurring at all, but
+// this panel shouldn't be vulnerable to vanishing even if some residual pan slips through first.
+(function pinExplainPanelToVisualViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  function reposition() {
+    const bottomGap = window.innerHeight - (vv.height + vv.offsetTop);
+    els.explainPanel.style.transform = bottomGap > 0 ? `translateY(-${bottomGap}px)` : '';
+  }
+  vv.addEventListener('resize', reposition);
+  vv.addEventListener('scroll', reposition);
+  reposition();
+})();
 
 // ---- scroll diagnostics (Current Objective — see TODO.md) ----
 //
