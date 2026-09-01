@@ -78,135 +78,164 @@ Completed Tasks
   mistakes total (down from originally near-total garbling) — the project owner has
   explicitly said this is now "much more tolerable" and to defer further work on OCR
   accuracy. Known residual failure modes, if this is ever picked back up: an
-  occasional lone single digit dropping out of a long clue (e.g. ground-truth
-  `2,1,2,2,2` → `2,1,2,2`) and an occasional spurious extra digit (`3,1,1,3` →
-  `3,1,1,7,3`, traced to `findStripLines` detecting a glyph blob that isn't a real
-  digit) — both rare enough, and already caught by the existing correction-step
-  review, that further engineering time isn't currently warranted.
+  occasional lone single digit dropping out of a long clue and an occasional
+  spurious extra digit — both rare enough, and already caught by the existing
+  correction-step review, that further engineering time isn't currently warranted.
 * **Per-number clue gray-out (`anchoredClueNumbers`) — real bug found and fixed.**
   `walkAnchorsFromStart` (`lineSolver.js`) required a run to be bounded by a
   *directly observed* EMPTY on BOTH sides before calling it anchored — provably more
-  conservative than necessary: once one side is genuinely excluded (edge, or a chain
-  of earlier proven runs), an exact-length-match run is already fully forced
-  regardless of whether the far side has been explicitly marked yet. Fixed, with a
-  full proof in the code comment; re-verified the existing 300-trial brute-force
-  soundness test (5 fresh runs, 812/812 each), corrected two hand-written tests that
-  had encoded the old incomplete behavior as "expected," and confirmed end-to-end in
-  browser preview that a single-sided bound now correctly triggers the gray-out in
-  normal gameplay.
+  conservative than necessary. Fixed, with a full proof in the code comment;
+  re-verified against a 300-trial brute-force soundness test (5 fresh runs, 812/812
+  each), corrected two hand-written tests that had encoded the old incomplete
+  behavior as "expected," and confirmed end-to-end in browser preview.
 * **Library consolidation round — done and verified end-to-end in browser preview
-  (real Firestore reads/writes, not just built-in data), Firestore rules deployed.**
-  The old top "Puzzle" dropdown is gone entirely; the puzzle library modal (now
-  triggered from a toolbar button roughly where the dropdown lived, alongside a new
-  "Stats & pairing" toolbar button — both moved out of the Help dropdown, which no
-  longer has either entry) is the single puzzle-selection UI, merging `SAMPLE_PUZZLES`
-  (built-ins stay local static data, not migrated into Firestore) with
-  `fetchLibraryPuzzles()`'s community-saved puzzles into one list (`app.js`'s
-  `refreshLibraryList`/`renderLibraryList`/`applyLibraryFilters`). Every row hides its
-  real title behind the existing "Puzzle N — RxC" placeholder scheme until the current
-  (or cross-device-paired) player has solved that specific puzzle, then reveals the
-  title, a "✓ Solved" badge, and personal `timesSolved`/`bestTimeMs` — all driven by a
-  new per-user collection, `users/{uid}/solvedLibraryPuzzles/{puzzleId}`
-  (`src/puzzleLibrary.js`'s `recordPuzzleSolved`/`fetchSolvedPuzzles`, written
-  alongside the existing per-size stats at the same completion point, both skipping
-  scan-origin puzzles), keyed uniformly off a puzzle's own id whether it's a
-  SAMPLE_PUZZLES id or a Firestore doc id — so cross-device pairing (already
-  re-authenticating onto the same uid) tracks it automatically, no extra logic needed.
-  `recordPuzzleSolved` uses a Firestore transaction so `bestTimeMs` can't be clobbered
-  by two racing solves. Solved/Unsolved and grid-size filters on the list, and a light
-  "Built-in"/"Community" badge distinguishing the two sources. Firestore rules deployed
-  (`users/{uid}/solvedLibraryPuzzles/{puzzleId}`, same owning-uid-only pattern as the
-  existing per-size `stats` rule) — confirmed live via a real solve-and-reopen round
-  trip (write failed with `permission-denied` before deploy, succeeded and showed the
-  revealed name + solved badge + `1× · best 0:13` after). **Not built this round (left
-  as the nice-to-have TODO.md already scoped it as): the optional GLOBAL
+  (real Firestore reads/writes), Firestore rules deployed.** The old top "Puzzle"
+  dropdown is gone entirely; the puzzle library modal (its own toolbar button, plus
+  a new "Stats & pairing" toolbar button — both moved out of the Help dropdown) is
+  the single puzzle-selection UI, merging `SAMPLE_PUZZLES` (built-ins stay local
+  static data) with `fetchLibraryPuzzles()`'s community-saved puzzles into one list.
+  Every row hides its real title behind the existing "Puzzle N — RxC" placeholder
+  scheme until the current (or cross-device-paired) player has solved that specific
+  puzzle, then reveals the title, a "✓ Solved" badge, and personal
+  `timesSolved`/`bestTimeMs`, driven by a new per-user collection,
+  `users/{uid}/solvedLibraryPuzzles/{puzzleId}` — keyed uniformly off a puzzle's own
+  id, so cross-device pairing tracks it automatically. Solved/Unsolved and
+  grid-size filters, and a light "Built-in"/"Community" badge. Firestore rules
+  deployed and confirmed live via a real solve-and-reopen round trip. **Not built
+  this round (deliberately deferred as a nice-to-have): the optional GLOBAL
   fastest-time-across-all-users per puzzle** — would need a callable Cloud Function
-  (like `createPairingCode`/`redeemPairingCode`) to avoid a gameable client-writable
-  public field; nothing currently depends on it.
-* **Save-to-library feature — client-side implementation done, and the Firestore
-  rules deploy has since happened (the feature works — a puzzle successfully saves
-  and does appear in the library list). The earlier "doesn't appear" report was a
-  false alarm: it was showing up correctly in the library, just not in the separate
-  old dropdown — which is exactly why the two are being merged (see Current
-  Objective's consolidation item).** New module `src/puzzleLibrary.js`
+  to avoid a gameable client-writable public field.
+* **Save-to-library feature — done, deployed, confirmed working (saving, browsing,
+  and renaming all work end-to-end).** `src/puzzleLibrary.js`
   (savePuzzleToLibrary/fetchLibraryPuzzles/loadLibraryPuzzle/renamePuzzleInLibrary)
-  backs a "Save to library" section on the scan wizard's "done" step and a "Puzzle
-  library" Help-menu entry (browse/play/rename modal).
-  Schema (`puzzles/{puzzleId}`): `rows`, `cols` (numbers); `rowClues`, `colClues`
-  (arrays of comma-joined strings, round-tripping through `scanPuzzle.js`'s existing
-  `parseClueText`); `title`; `creatorUid`; `createdAt` (serverTimestamp). No solution
-  is stored — `loadLibraryPuzzle` re-solves the clues via the same `buildScannedPuzzle`
-  path a fresh scan already uses. Design, all confirmed: blank-puzzle-only saves,
-  decoupled from the player's own scan session; public read; required title with
-  later creator-only editing (Firestore update rule scoped to just the `title`
-  field); library-sourced puzzles behave as real authored puzzles (full history,
-  counts toward stats).
+  backs a "Save to library" section on the scan wizard's "done" step. Schema
+  (`puzzles/{puzzleId}`): `rows`, `cols`, `rowClues`, `colClues` (comma-joined
+  strings, round-tripping through `scanPuzzle.js`'s `parseClueText`), `title`,
+  `creatorUid`, `createdAt`. No solution stored — re-solved via the same
+  `buildScannedPuzzle` path a fresh scan uses. Blank-puzzle-only saves, decoupled
+  from the player's own scan session; public read (see below — confirmed as the
+  right model, no separate friends-only tier needed); required title with
+  later creator-only editing; library-sourced puzzles behave as real authored
+  puzzles (full history, counts toward stats).
+* **Confirmed with the project owner: fully public visibility (already built) is the
+  right model — no separate friends-only/private sharing tier is needed.** This
+  resolves the "friends-only/private sharing" question that was previously listed
+  as open remaining scope under item 9 — it's now closed, not deferred.
 
 Current Objective (Focus Area)
 
-* **Library consolidation round — done, see Completed Tasks for the full writeup.**
-  The one deliberately-deferred piece: the optional GLOBAL fastest-time-across-all-
-  users stat per puzzle (needs a callable Cloud Function to avoid a gameable
-  client-writable public field — see Completed Tasks entry for why). Not started;
-  pick up only if/when the project owner actually wants it, per its original
-  nice-to-have framing.
+* **Scroll bug — ROOT CAUSE CONFIRMED via real on-device diagnostic data. Ready for
+  a targeted fix, not further guessing.** Real `?debug=scroll` history from the
+  project owner's device, timestamped through an actual keyboard open/close cycle
+  on `#scan-known-rows-input`:
+  ```
+  2:50:57 PM — focusin — vv.height=1048 vv.offsetTop=0
+  2:50:57 PM — resize (keyboard opens) Δ-408px — vv.height=640 vv.offsetTop=0
+  2:50:57 PM — scroll/pan — vv.height=640 vv.offsetTop=408
+  2:51:00 PM — resize (keyboard closes) Δ+329px — vv.height=969 vv.offsetTop=79
+  2:51:00 PM — scroll/pan — vv.height=969 vv.offsetTop=79
+  2:51:01 PM — focusout — vv.height=969 vv.offsetTop=79 active=(none)
+  ```
+  Live snapshot one second after focusout: `visualViewport.offsetTop: 79`,
+  `document.activeElement: (none)` (keyboard genuinely closed, nothing focused),
+  and the tool's own "EXCESS (scrollable beyond visible viewport)" reads exactly
+  **79px** — matching `offsetTop` precisely. **Confirmed: this is not extra
+  content, not a sizing bug, and not something `handleViewportResize`'s
+  recompute logic is getting wrong** — the board/page content itself is the
+  correct size throughout. It's purely that **iOS's visual-viewport pan (used to
+  keep a focused input clear of the on-screen keyboard) doesn't fully reset back
+  to `offsetTop: 0` once the keyboard closes** — it opened with a 408px pan and
+  closed with only 329px of that reversed, leaving a stuck 79px residual pan that
+  the app currently has no logic to detect or correct. This is a known (if
+  under-documented) iOS Safari quirk, not specific to this app's own CSS/JS sizing.
+  **Fix direction**: don't touch `fitBoardToViewport`'s sizing math (it was never
+  the problem) — instead, add explicit detection for "keyboard has closed but
+  `visualViewport.offsetTop` is still nonzero" (e.g. on `focusout` combined with
+  `visualViewport.height` having returned close to `window.innerHeight`, or a
+  `visualViewport` `resize` event where the height grows back toward full with no
+  input focused) and force iOS to re-resolve the pan — the established pattern for
+  this specific iOS quirk is a corrective `window.scrollTo` (even a no-op-looking
+  `window.scrollTo(0, window.scrollY)`, or `window.scrollTo(0, 0)`) issued shortly
+  after that detection fires, which reliably nudges iOS Safari to recompute and
+  re-zero the visual-viewport offset. Verify the fix using the same
+  `?debug=scroll` tool and the same real repro (focus `#scan-known-rows-input` or
+  any text input, dismiss the keyboard, check `offsetTop` returns to 0) — on the
+  real device, not just browser preview, given this bug class's history.
 
-* **Scroll bug: sharpened, keyboard-specific repro from the project owner — the
-  whitespace only appears once the on-screen keyboard has been used, and persists
-  after the keyboard closes; no issue before any keyboard interaction.** This is a
-  meaningfully more specific lead than "scrolls into whitespace sometimes" — it
-  points at something in the keyboard-open/close path leaving the page in a bad
-  state afterward, not a general layout bug. Two concrete things to check:
-  - The existing `VIEWPORT_CHANGE_THRESHOLD_PX`-gated keyboard-scale resize handling
-    (`handleViewportResize`, `app.js`) is *supposed* to recompute board sizing on a
-    genuine keyboard open/close (that's intentional, unlike the gated-out routine
-    iOS chrome noise) — check whether that recompute, or the `visualViewport`
-    listener driving it, leaves something in a wrong state once the keyboard closes
-    and the visual viewport returns to its original size (e.g. `--cell-size` or
-    `--explain-panel-space` not correctly reverting, or `#page-root`'s own
-    `overflow-y: auto` region ending up with a `scrollHeight` that doesn't shrink
-    back down).
-  - **The project owner tried `?debug=scroll` again after this repro but is unsure
-    whether it actually captured anything** — confirm directly whether the
-    diagnostic button (now bottom-anchored, per the previous round's fix) was
-    visible and tappable in this exact scenario, and if so, get the actual measured
-    numbers/report from it for this specific keyboard-triggered case (not just
-    baseline). If the button still wasn't visible or usable even after being
-    repositioned, that's a further, separate finding worth its own attention before
-    trusting the tool for real diagnosis.
-  - **Round 3 (this pass): the diagnostic tool itself was upgraded, not the
-    underlying bug — still needs real on-device verification, which this
-    environment can't provide.** The on-demand "tap for a snapshot" design had a
-    real gap: it could only prove "the bug produced no evidence" vs. "nobody tapped
-    during the moment that mattered" are indistinguishable, and per the sharpened
-    repro that moment is narrow (right as/after the keyboard closes). Changes,
-    verified working in browser preview (not on real iOS — see below):
-    - `initScrollDiagnostics` (`app.js`) now keeps an always-on rolling history (last
-      60 entries), auto-logging a compact line on every real `visualViewport`
-      resize, every `visualViewport` pan/scroll, and every text input focus/blur
-      (the last one catches keyboard use even inside a modal). Opening the panel
-      any time after the bug happens now shows the actual timeline through it
-      instead of depending on a well-timed tap.
-    - The snapshot report now also captures `visualViewport.offsetTop`/`pageTop` —
-      the iOS visual-viewport PAN amount — which the original report never
-      recorded. **This is the concrete thing to check on the next real-device
-      repro**: a positive `offsetTop` that's still nonzero after the keyboard
-      closes would point straight at a specific, well-documented root cause (iOS
-      panning the visual viewport to keep a focused input clear of the keyboard,
-      then not fully un-panning it) instead of requiring more guessing — and would
-      also explain the button-visibility open question above as the *same* bug,
-      not two, since a stuck pan can hide a naive bottom-anchored fixed element
-      too.
-    - Defensively (not a fix for the underlying bug, just insurance against a
-      known, unrelated iOS quirk): the diagnostic button/panel now counter-
-      translate themselves against `visualViewport.offsetTop` so a stuck pan can't
-      strand them off-screen the same way it might strand real page content.
-    - **Not done, and shouldn't be guessed at further without device data**: any
-      change to `handleViewportResize`, `fitBoardToViewport`, or the CSS variables
-      they drive. This project's own history (four rounds on the original scan-
-      wizard scroll bug, two more on this app-wide one) is the reason to wait for
-      an actual `offsetTop` reading from the real repro before touching that code
-      again.
+* **New: UI/branding polish round.**
+  1. **Tighten the toolbar** — rename "Stats & pairing" to just "Stats"; move
+     Auto-check into the Help menu (off the main toolbar); change the Help
+     button/dropdown trigger to a plain "?" icon instead of a text "Help ▾" button.
+  2. **Rebrand**: app name becomes "Nonogram Pro" (matching the live domain,
+     nonogrampro.netlify.app); remove the current tagline/description text
+     ("Pick a puzzle, fill it in...") from the main page entirely — see item 4
+     below for where that description text should actually go instead. Replace the
+     current puzzle-piece icon with something that actually reads as a nonogram
+     (e.g. a small filled-grid/checkerboard-pattern icon) — specific icon choice is
+     Code's call unless the project owner has a preference.
+  3. **Bigger/more visible X marks** on the board — current rendering isn't
+     obvious enough to read at a glance.
+  4. **List this game in the game-hub repo** (`C:\Users\danmo\game-hub`, a sibling
+     project Code can access directly — confirmed, not a cross-repo handoff
+     blocker). Match that repo's existing listing style/pattern. **This is where
+     the tagline/description text removed from the main nonogram page in item 2
+     should end up** — the game-hub listing is the more appropriate place for a
+     "what is this game" blurb than cluttering the actual play screen.
+  5. **"Clear" becomes "Restart"** — not just a rename: restarting should reset
+     this attempt's hint-used count and elapsed time, not only clear the board's
+     marks. Today's Clear-all only resets marks/history; a genuine restart should
+     put the puzzle back to the exact state it was in when first loaded, stats
+     included, as if starting the attempt over from scratch. Keep the existing
+     confirm-before-acting behavior (per the earlier `window.confirm`-reliability
+     fix — reuse the in-page confirm dialog, not a native one).
+  6. **New "All games" button, returning to the game-hub, with a confirmation
+     dialog before navigating away** (same in-page confirm pattern as the rest of
+     this app, not a native `confirm()`).
+
+* **New: saved/incomplete puzzle progress — a real feature, not a quick add, fully
+  scoped now including save cadence.** The project owner asked directly how
+  complicated this is: moderate, not trivial, but it reuses existing groundwork
+  rather than starting from scratch (the same board-seeding mechanism already built
+  for scanned puzzles' `initialMarks` → `Board.fromGrid` can seed a resumed board
+  from saved progress the same way). Scope:
+  - New per-user record of in-progress puzzle state (e.g.
+    `users/{uid}/inProgressPuzzles/{puzzleId}`): the current fill/X grid state,
+    elapsed time so far, hints used so far, last-updated timestamp.
+  - New "Incomplete" category in the library's filters, alongside the existing
+    Solved/Unsolved/size filters — showing puzzles with saved in-progress state.
+  - Selecting an "Incomplete" library entry resumes play from the saved state
+    (board pre-seeded, stats continuing from where they left off) rather than
+    starting blank.
+  - **Save cadence, confirmed with the project owner: explicit, in-app-triggered
+    saves only — not every move, and not a browser-level "leaving" signal.**
+    Progress saves on: (1) an explicit "Save" action/button the player can trigger
+    anytime; (2) automatically when the player switches to a different puzzle;
+    (3) automatically when the player exits the current puzzle back to the
+    library. All three are deliberate in-app navigation/UI events Code can hook
+    directly and reliably — no need for browser tab-close/backgrounding
+    detection, which is notoriously unreliable on mobile Safari and was the main
+    risk with a pure "save on leave" approach. This keeps Firestore writes low
+    (no per-move writes) while still saving at every point progress could
+    otherwise be lost within the app's own flow.
+
+* **New: live running count of cells painted while drag-filling.** While the
+  player is click-and-dragging to fill a run of cells (the existing drag-paint
+  behavior, which already only paints blank cells per the earlier drag-overwrite
+  fix), show a live, continuously-updating count of how many cells have been
+  painted in the current drag stroke — helps the player match a clue's run length
+  by watching the count as they drag, rather than counting cells by eye
+  afterward. Scope notes:
+  - Primarily useful for Fill-mode drags specifically (since a run length maps to
+    a clue number); worth also showing the same live count for Mark-empty (X)
+    drags for consistency, but that's the lower-priority half if effort needs to
+    be split.
+  - Display location is a UI design choice, not specified — likely most useful
+    right at/near the drag point (a small floating badge following the
+    cursor/touch position) rather than a fixed location elsewhere on screen,
+    since the whole point is glanceable feedback without looking away from where
+    you're dragging. Code's call on the exact placement/styling.
+  - Should disappear/reset once the drag ends (pointerup) — this is transient
+    in-drag feedback, not a persistent UI element.
 
 Next Steps (Do Not Start Yet)
 
@@ -217,24 +246,21 @@ Next Steps (Do Not Start Yet)
   up: is grid size user-adjustable at generation time or fixed per image; slider vs.
   automatic threshold/contrast tuning; reject, flag, or allow non-unique-solution
   puzzles.
-* Item 9 — Firestore schema + shared library UI, remaining scope after the
-  save-to-library feature above: friends-only/private sharing (deferred from this
-  round's public-only version), any richer library browsing (search, filtering by
-  size/difficulty), and whether stats become visible to friends. Stats-tracking and
-  cross-device pairing were already pulled out into their own item and confirmed done
-  earlier.
+* Item 9 — remaining scope: richer library browsing only now (search over titles,
+  sort options like newest/most-solved, pagination once the library grows) — the
+  friends-only/private sharing question is resolved (see Completed Tasks: fully
+  public is the confirmed model, nothing further needed there).
 
 Technical Notes / Blockers
 
 * `phraseDeduction()` in `src/hintPhrasing.js` calls the `phraseHint` Cloud Function by
   default, with `defaultPhraser`'s old deterministic templates kept as the fallback.
 * Firebase project exists (`nonogram-pro-e8a31`). Anonymous Auth + Firestore are in
-  active use for stats/pairing and now the puzzle library.
+  active use for stats/pairing and the puzzle library.
 * No CI is configured — run `npm test` (or `node test/run.js`) locally before pushing.
 * Node.js 20→22 runtime bump — done and deployed.
 * Firestore security rules: in active use for `users/{uid}/stats/*`, `pairingCodes/*`,
-  and now `puzzles/{puzzleId}` (public read, creator-only create, creator-only
-  title-only update).
+  `puzzles/{puzzleId}`, and `users/{uid}/solvedLibraryPuzzles/{puzzleId}`.
 * Hint phrasing has an invisible-by-design fallback — "a hint appeared" is not proof
   the LLM call actually succeeded; check console/Cloud Function logs after any Cloud
   Function change.
@@ -245,15 +271,16 @@ Technical Notes / Blockers
   repeatedly fixed against real screenshots, not synthetic mockups alone** — prefer
   testing against a real image file over guessing at plausible synthetic pixel values.
 * **iOS scroll/touch bugs in this app have now failed real-device verification
-  multiple times across two separate underlying bugs** (the original scan-wizard-
-  specific bug took four rounds; the current app-wide regression's gating fix and
-  structural permanent-lock fix have each also had real-device issues). The latest
-  round narrowed the repro to specifically keyboard-triggered, persisting afterward
-  — see Current Objective above. Use `?debug=scroll` for real on-device data, and
-  confirm the diagnostic tool itself is actually visible/usable in the specific
-  scenario being tested, not just in general.
+  multiple times.** The latest round narrowed the repro to specifically
+  keyboard-triggered, persisting afterward, and upgraded the diagnostic tool to
+  capture the iOS visual-viewport pan amount specifically. Use `?debug=scroll` for
+  real on-device data — remember it requires tapping an on-screen button (bottom-
+  anchored) to open its report panel, which the project owner initially missed.
 * `countGridLines` miscounting is understood and mitigated via the known-count
   override (see Completed Tasks) rather than by retuning the underlying heuristic.
 * Clue-number legibility on large puzzles — fixed, font floors at `MIN_CLUE_FONT_PX`.
 * OCR residual accuracy — accepted as a known limitation per the project owner,
   confirmed twice now; not currently being pursued further.
+* Sibling repo `game-hub` (`C:\Users\danmo\game-hub`) is directly accessible to
+  Code — confirmed by the project owner, not a cross-repo handoff blocker for the
+  new game-hub listing item above.
