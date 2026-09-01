@@ -93,13 +93,32 @@ function range(a, b) {
 // boundary that already matches its clue number) generalized to walk the WHOLE clue inward
 // from an edge, one number at a time, instead of stopping after the first.
 //
-// A number counts as anchored only once its own run is providably fixed in place: either it
-// touches the true edge of the line, or the run immediately after (walking left-to-right) or
-// before (right-to-left) an already-anchored neighbor, with every cell in between confirmed
-// EMPTY. Deliberately requires an actual EMPTY mark, not merely "not FILLED" — a still-
-// UNKNOWN gap cell means a later move could still change where that run ends up sitting, so
-// "a run of the right length exists" alone is never enough (see TODO.md's own `5, 3, 2`
-// example: a complete run of 3 floating with neither neighbor anchored yet stays unanchored).
+// A number counts as anchored once its own run is providably fixed in place: the walk has
+// already fully accounted for every cell before `pos` (either a confirmed-empty gap, or an
+// earlier number's own already-proven run, recursively) — so there is genuinely no room
+// anywhere before `pos` for numbers 0..i-1 to relocate into. Given that, a FILLED run
+// starting at `pos` whose length exactly matches clue[i] is forced: it can't be number i-1 or
+// earlier (no room left of it), it can't be number i+1 or later (that would strand number i
+// with nowhere to go), and it can't be number i itself at any OTHER length (it can't shrink —
+// filled cells never un-fill — and growing it into a following UNKNOWN cell would change its
+// length away from the one and only value that keeps it assignable to number i, which is the
+// same contradiction again). So the run's identity AND its exact extent are both forced in
+// every valid completion, regardless of whether the cell immediately after it is a confirmed
+// EMPTY or still UNKNOWN — that trailing cell is itself implied empty by this same argument,
+// it just isn't a *directly observed* mark yet, which is why the walk still won't try to
+// anchor number i+1 from an unconfirmed cell (see the loop below): it only stops relying on
+// what's directly marked once it runs out of forced conclusions to chain forward from.
+//
+// (This function used to also require the run's far/trailing boundary to already be a
+// directly-observed EMPTY mark before counting it as anchored — reasonable-sounding, but
+// unnecessarily conservative per the argument above, confirmed by brute force: it made the
+// effect require far more player progress than the underlying logic actually needs, which in
+// practice meant it rarely triggered during ordinary play. TODO.md's own `5, 3, 2` example
+// (a complete run of 3 floating with neither neighbor anchored yet stays unanchored) is still
+// correctly unanchored under this version too — it fails at the very first check below
+// (`line[pos] !== FILLED`, since nothing has walked in from either edge to reach it yet), not
+// because of the removed far-boundary requirement; that example was never actually about this
+// function's far-boundary check in the first place.)
 function walkAnchorsFromStart(line, clue) {
   const n = line.length;
   const anchored = new Array(clue.length).fill(false);
@@ -110,7 +129,6 @@ function walkAnchorsFromStart(line, clue) {
     let runEnd = pos;
     while (runEnd < n && line[runEnd] === FILLED) runEnd++;
     if (runEnd - pos !== clue[i]) break; // wrong length: still growing (UNKNOWN ahead) or already contradictory either way, not provable
-    if (runEnd < n && line[runEnd] !== EMPTY) break; // run's far boundary not confirmed yet
     anchored[i] = true;
     pos = runEnd;
   }

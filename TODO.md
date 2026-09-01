@@ -157,36 +157,46 @@ Current Objective (Focus Area)
     theory) worth its own dedicated investigation rather than a third repositioning
     guess.
 
-* **Per-number gray-out (`anchoredClueNumbers`) — investigated this round; confirmed
-  NOT broken in normal gameplay.** Traced the full path end to end: `renderBoard()`
-  unconditionally calls `syncAllCellVisuals()`, which calls `applyAnchoredClasses` for
-  every row and column on *every* render and every player action — there is no
-  separate scan-only code path, and no source-gated branch anywhere in it. Reproduced
-  actual gameplay directly (real `pointerdown`/`pointerup` events on the board, not
-  synthetic clicks) against a normal (non-scanned) SAMPLE_PUZZLES puzzle in browser
-  preview: filling one cell of a two-number clue and X-marking the cell right after it
-  (bounding that run on both sides) correctly added `nono-clue__num--anchored` — dim
-  color, confirmed via computed style — to just that one clue number, leaving its
-  sibling number at full brightness. The algorithm, wiring, and CSS all check out.
-  - **Likely explanation for the real-device report**: `anchoredClueNumbers`
-    (`lineSolver.js`) is deliberately conservative — `walkAnchorsFromStart` only marks
-    a run anchored once it's bounded by a *confirmed* EMPTY (or the line's edge) on
-    both sides, not just "provably forced" in a fuller logical sense (see its own
-    comment: a floating complete run isn't enough). A **freshly-loaded, lightly-played
-    normal puzzle starts completely blank**, so nothing can be anchored yet almost by
-    definition — whereas a **scanned puzzle's `initialMarks`** (from OCR fill-state
-    detection) can already satisfy that bounded-on-both-sides condition the instant it
-    loads, with zero player action. That asymmetry — instantly visible on a scan,
-    requiring some real progress on a normal puzzle — is a strong candidate for why a
-    quick real-device glance at a normal puzzle would show nothing, without the
-    feature actually being disabled there.
-  - **No code change made** — I couldn't find a bug to fix, and shipping a change
-    without one would just be guessing. **Next step needs the project owner**: play a
-    normal puzzle far enough that some run is bounded by confirmed empty cells on both
-    sides (X-marking the cell(s) right after a filled run is the fastest way to force
-    this), then check whether that clue number visibly dims. If it still doesn't, on
-    the real device specifically, that's a genuinely new, more specific finding (points
-    at device-specific rendering/contrast, not wiring) worth its own follow-up.
+* **Per-number gray-out (`anchoredClueNumbers`) — real bug found and fixed this
+  round** (the project owner correctly identified it after my first pass here wrongly
+  concluded there was nothing to fix). Wiring, rendering, and CSS were all already
+  fine (confirmed in the previous investigation pass); the actual bug was in
+  `walkAnchorsFromStart` (`lineSolver.js`) itself, and it's a real soundness/
+  completeness gap, not a UI wiring issue:
+  - **The old code required a run to be bounded by a *confirmed* EMPTY on BOTH
+    sides** before calling it anchored. That's provably more conservative than
+    necessary: once a walk has fully excluded everything before position `pos` (via
+    the line's true edge, or a chain of earlier already-proven runs), a FILLED run
+    starting at `pos` whose length exactly matches `clue[i]` is **already fully
+    forced** — it can't belong to an earlier or later clue number (no room / would
+    strand an earlier number), and it can't validly grow past its matching length
+    (growing it can never again equal `clue[i]`, and any other length is infeasible
+    for the same no-room reason) — so the trailing boundary is *logically* forced
+    empty even when it isn't yet a *directly observed* EMPTY mark. Requiring the far
+    side to already be observed-empty was therefore an unnecessary bar that made the
+    effect trigger far less often than the underlying logic actually allows —
+    directly explaining why it "barely showed up" in ordinary play, where players
+    routinely fill a run without also immediately X-marking the cell right after it.
+  - **Verified the fix is sound, not just more eager**, three ways: (1) a rigorous
+    manual proof (see the new comment on `walkAnchorsFromStart`) that growing a
+    left/right-excluded, exact-length-match run is always infeasible; (2) the
+    existing 300-trial brute-force soundness differential test (which checks every
+    positive anchoring claim against real brute-force-enumerated completions) still
+    passes — re-ran it 5 times total (fresh random trials each run, since it's not
+    seeded) with 812/812 passing every time; (3) two of the existing **hand-written**
+    tests turned out to encode the OLD, incomplete behavior as if it were correct —
+    brute-forcing them by hand found their expected `false` results were wrong (the
+    anchored position genuinely doesn't vary across the only valid completion) —
+    fixed both test expectations to match, with the brute-force reasoning written
+    into each test's own comment.
+  - **Verified end-to-end in browser preview** against a normal (non-scanned)
+    SAMPLE_PUZZLES puzzle using real `pointerdown`/`pointerup` events: filling a
+    single cell of a two-number clue and X-marking only the cell on ONE side of it
+    (leaving the other side of the run completely UNKNOWN — the exact case that used
+    to require both sides) now correctly grays that one clue number. This is a much
+    lower bar to trigger than before, so it should show up meaningfully more often
+    during ordinary play. **Still worth the project owner's real-device confirmation**
+    once this is deployed, but this is now a genuine logic fix, not a guess.
 
 * **Save-to-library feature — client-side implementation done this round; NOT yet
   usable in production because the updated `firestore.rules` haven't been deployed.**
@@ -274,10 +284,11 @@ Technical Notes / Blockers
 * `countGridLines` miscounting is understood and mitigated via the known-count
   override (see Completed Tasks) rather than by retuning the underlying heuristic.
 * Clue-number legibility on large puzzles — fixed, font floors at `MIN_CLUE_FONT_PX`.
-* Per-number clue gray-out (`anchoredClueNumbers`) — investigated and confirmed
-  working correctly in normal gameplay (see Current Objective for the repro); the
-  earlier "not actually working" note was itself likely a verification artifact, not
-  a real bug — needs the project owner's on-device confirmation to fully close out.
+* Per-number clue gray-out (`anchoredClueNumbers`) — real over-conservatism bug found
+  and fixed this round (`walkAnchorsFromStart` no longer requires a run's far
+  boundary to be a directly-observed EMPTY mark — see Current Objective for the full
+  proof and verification). Needs the project owner's on-device confirmation once
+  deployed to fully close out.
 * **OCR residual accuracy — resolved as an accepted limitation, not a bug to chase
   right now.** Asked the project owner directly (current accuracy vs. keep chasing);
   answer: leave it as-is, document it, revisit only if it comes up again later. The

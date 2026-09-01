@@ -176,11 +176,16 @@ describe('anchoredClueNumbers (hand-checked cases)', () => {
     assertEqual(anchoredClueNumbers(line, [5, 3, 2]), [true, true, false]);
   });
 
-  test('a run touching the true edge is NOT anchored on its own if its far boundary is still unknown', () => {
-    // clue [2]: the run starts at the line's own edge, but nothing confirms it stops at
-    // length 2 rather than growing into the still-UNKNOWN cell right after it.
+  test('a run touching the true edge IS anchored even with an unconfirmed far boundary, when growing it would leave nowhere for the rest of the clue to go', () => {
+    // clue [2]: the run starts at the line's own edge with no other numbers before it, so
+    // there's nothing else the visible length-2 run could be — and growing into the
+    // still-UNKNOWN cell after it would make it length 3, which no valid completion of
+    // clue [2] can ever be. Brute force over both UNKNOWN cells confirms this: the ONLY
+    // consistent completion is FILLED, FILLED, EMPTY, EMPTY — the "2"'s position is
+    // genuinely invariant, so it's anchored despite the far boundary not being a directly
+    // observed EMPTY mark yet (see walkAnchorsFromStart's own comment for the general case).
     const line = [FILLED, FILLED, UNKNOWN, UNKNOWN];
-    assertEqual(anchoredClueNumbers(line, [2]), [false]);
+    assertEqual(anchoredClueNumbers(line, [2]), [true]);
   });
 
   test('a run touching the true edge IS anchored once its far boundary is confirmed empty', () => {
@@ -192,16 +197,18 @@ describe('anchoredClueNumbers (hand-checked cases)', () => {
     assertEqual(anchoredClueNumbers([FILLED, FILLED, FILLED], [3]), [true]);
   });
 
-  test('touching the true edge alone does not anchor a number whose far boundary is still unknown, even when a different number elsewhere is fully anchored', () => {
+  test('a number touching the true edge anchors from that edge alone, even with an unconfirmed far boundary and a genuinely-floating number elsewhere in the same clue', () => {
     const line = [
       FILLED, FILLED, FILLED, FILLED, FILLED, // "5", anchors: left edge + confirmed empty after
       EMPTY,
-      UNKNOWN, // breaks the chain toward the "3"
-      FILLED, FILLED, FILLED, // "3" — floating, not reachable from either anchored end
-      UNKNOWN, // breaks the chain from the "2" side too
-      FILLED, FILLED, // "2", touches the right edge, but its far (left-facing) boundary is UNKNOWN
+      UNKNOWN, // breaks the chain toward the "3" — genuinely floating, not reachable from either edge
+      FILLED, FILLED, FILLED, // "3" — floating: could still grow either direction, unlike the "2" below
+      UNKNOWN,
+      FILLED, FILLED, // "2", touches the right edge — same reasoning as the single-clue case above:
+      // growing left into the UNKNOWN would make it length 3, which can't be the last number of
+      // clue [5,3,2] (only "2" fits there), so it's anchored despite the unconfirmed far boundary.
     ];
-    assertEqual(anchoredClueNumbers(line, [5, 3, 2]), [true, false, false]);
+    assertEqual(anchoredClueNumbers(line, [5, 3, 2]), [true, false, true]);
   });
 
   test('an empty clue has no numbers to anchor', () => {
