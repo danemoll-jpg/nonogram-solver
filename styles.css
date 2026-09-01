@@ -1165,10 +1165,27 @@ body {
    comment): investigative instrumentation for the app-wide iOS scroll bug, not a player-facing
    feature — only created at all behind `?debug=scroll`. z-index deliberately higher than
    .modal-overlay's 100 so the trigger button stays usable over every screen, open modals
-   included (per TODO.md's "test across all screens"). */
+   included (per TODO.md's "test across all screens").
+
+   Bottom-anchored, NOT top-anchored (this round's real finding — see TODO.md): the project
+   owner reported nothing visible on-screen at all for `?debug=scroll` on a real device, but
+   the tool itself was confirmed (in browser-preview testing) to build and render its report
+   correctly once triggered — so the button itself was very likely the thing never getting
+   tapped, not a report failing to generate. This file's own html/body comment documents why:
+   the round-2 structural fix made <html>/<body> permanently non-scrollable specifically
+   because iOS Safari's address-bar chrome collapse/expand is driven by scrolling the
+   document — which also means that chrome can no longer collapse at all any more, so it may
+   now sit permanently in its tallest (expanded) state. A `position: fixed; top: 0.5rem`
+   element measured from the layout viewport can end up rendered underneath that permanently-
+   expanded chrome with no way to reveal it (no scroll gesture left to trigger a collapse) —
+   exactly the kind of iOS layout-vs-visual-viewport quirk this bug class keeps turning out to
+   be. Every other fixed element in this app that's already proven safe on real iOS hardware
+   (.explain-panel) is bottom-anchored, not top-anchored, which is the only place in this
+   layout not contested by browser chrome — so this moves here rather than guessing at another
+   top-edge-specific patch. */
 .scroll-diag-btn {
   position: fixed;
-  top: 0.5rem;
+  bottom: 0.5rem;
   right: 0.5rem;
   z-index: 99999;
   width: 2.5rem;
@@ -1183,9 +1200,17 @@ body {
   box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.4);
 }
 
+/* Anchored from the bottom (not `inset: 0.5rem`, which pins the top edge too) for the same
+   reason .scroll-diag-btn above is bottom-anchored — this panel's own top edge shouldn't be
+   able to land underneath a permanently-expanded iOS chrome bar either. Sizing via
+   max-height/width off the bottom-left-right anchors instead of a fixed top means it grows
+   upward from guaranteed-visible space rather than starting from a possibly-obscured one. */
 .scroll-diag-panel {
   position: fixed;
-  inset: 0.5rem;
+  bottom: 0.5rem;
+  left: 0.5rem;
+  right: 0.5rem;
+  max-height: min(80vh, 80dvh);
   z-index: 99998;
   background: var(--panel-bg-raised);
   border: 2px solid var(--gold);

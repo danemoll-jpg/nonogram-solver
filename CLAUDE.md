@@ -54,24 +54,36 @@ for the full history, every design tradeoff, and the confirmed ground-truth refe
 puzzle.
 
 **Current objective has three items, all found during the latest real-device round**:
-1. **Scroll bug — escalating past another blind fix, and the diagnostic tool needs
-   attention first.** Three straight rounds have each passed thorough preview
-   verification and then failed on the real device. The project owner tried
-   `?debug=scroll` and nothing appeared on screen — confirm whether
-   `initScrollDiagnostics` renders visibly or only logs to the console (console-only
-   isn't usable on an iPad without a Mac for remote Web Inspector — a real access
-   barrier to solve first). Also worth ruling out a stale/cached deploy on the test
-   device before assuming the fix itself is still wrong.
-2. **Per-number clue gray-out (`anchoredClueNumbers`) doesn't actually show up during
-   normal gameplay** — it was verified algorithmically and via a scanned puzzle, but
-   real-device testing shows it's not appearing during regular play. Investigate
-   whether `applyAnchoredClasses` (`app.js`) is only running on the scan-import
-   render path rather than every board render.
+1. **Scroll bug — diagnostic tool investigated + hardened; underlying bug still open.**
+   Confirmed `initScrollDiagnostics` already renders visibly (a real button + report
+   panel, not console-only) and is already live on production (fetched the deployed
+   `app.js` directly and confirmed it's there) — ruling out both the "console-only"
+   and "stale deploy" theories from last round. Found a real, code-grounded reason the
+   trigger button specifically could still be invisible on-device: it was
+   top-anchored, but the round-2 fix (permanently non-scrollable `<html>`/`<body>`)
+   means iOS's chrome can likely no longer ever auto-collapse (that collapse is driven
+   by document scrolling, per this file's own comment), so it may sit permanently
+   expanded, hiding anything pinned near the top. Fixed by moving the diagnostic
+   button/panel to bottom-anchored (matching `.explain-panel`, already proven safe on
+   real iOS) — the underlying document-lock fix itself was deliberately NOT touched.
+   **Needs the project owner to retry `?debug=scroll` on-device** and report what the
+   now-hopefully-visible tool shows.
+2. **Per-number clue gray-out (`anchoredClueNumbers`) — investigated; confirmed NOT
+   broken.** Traced the full render path (no scan-only branch exists) and reproduced
+   real gameplay (actual pointer events, not synthetic clicks) against a normal
+   puzzle in browser preview: bounding a clue's run with a confirmed-empty cell on
+   both sides correctly dims just that number. Likely explanation for the real-device
+   report: the anchoring check requires a run bounded on both sides by a *confirmed*
+   empty, which a freshly-loaded, lightly-played normal puzzle won't have yet — while
+   a scanned puzzle's pre-filled `initialMarks` can satisfy that instantly on load.
+   No code change made (didn't want to guess without a found bug) — see TODO.md for
+   the exact repro steps to retry on-device.
 3. **OCR residual-error question, not a bug to silently fix**: a previously-flagged,
    distinct dropped/extra-digit OCR issue is confirmed still present on real-device
-   testing. Ask the project owner directly whether the current (much-improved, mostly
-   correct) accuracy is acceptable given the correction step already catches
-   remaining errors, rather than assuming further chasing is automatically worthwhile.
+   testing. Asked the project owner directly this round whether the current
+   (much-improved, mostly correct) accuracy is acceptable given the correction step
+   already catches remaining errors, rather than assuming further chasing is
+   automatically worthwhile.
 4. **Save-to-library feature — client-side implementation done, NOT yet deployed.**
    Save a scanned puzzle to a public shared library, reusing the scan wizard as the
    authoring tool (`src/puzzleLibrary.js`, plus wiring in `src/scanUI.js`/`app.js`/

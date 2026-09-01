@@ -115,55 +115,87 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **Scroll bug: escalating past another blind fix attempt — and the diagnostic tool
-  itself needs attention first.** Three consecutive rounds (gating fix, then a
-  structural permanent-lock fix) have each looked sound and passed everything this
-  project's own tooling can verify, then failed on the real device anyway — a clear
-  sign the verification tooling itself cannot reproduce whatever's actually happening.
-  **The project owner tried `?debug=scroll` on the real device and nothing visible
-  appeared on screen — this is itself a real finding, not a null result to ignore.**
-  Before anything else: confirm whether `initScrollDiagnostics` (`app.js`) is designed
-  to render something on-screen (an overlay, a panel) versus only logging to the
-  browser's developer console — if it's console-only, that's not usable by the
-  project owner on an iPad without a Mac connected via cable for Safari's remote Web
-  Inspector, which is a real access barrier worth solving before relying on this tool
-  further. If it's meant to render visibly and isn't, that's a bug in the tool itself
-  to fix first. **Once the tool is confirmed actually producing visible, accessible
-  output, get real on-device diagnostic data from it** — contributing elements,
-  measured scrollHeight vs. viewport, etc. — as the next real lead, not another
-  plausible-sounding hypothesis shipped blind. Also worth double-checking as a
-  first, cheaper step regardless: confirm the round-2 structural-fix deploy actually
-  reached the device being tested (fresh reload / cache-busted, not a stale cached
-  build), since three straight real-device failures for a fix that passed thorough
-  preview testing is worth ruling out a deploy/cache mismatch for before assuming the
-  CSS/JS itself is still wrong.
+* **Scroll bug — diagnostic tool investigated and hardened this round; underlying
+  scroll bug itself still NOT fixed (deliberately — see below).**
+  - **The tool was confirmed to already render visibly, not console-only** — it builds
+    a real on-screen 📏 trigger button and a report panel with Copy/Close buttons (not
+    just a console.log), verified directly in browser preview by clicking it and
+    reading the rendered report. The "console-only, unusable on an iPad" concern from
+    the previous round doesn't apply.
+  - **Confirmed the feature is actually live on production** — fetched
+    `https://nonogrampro.netlify.app/app.js` directly and confirmed it already
+    contains `initScrollDiagnostics` (and `applyAnchoredClasses`, relevant to the next
+    item below) — so a stale/pre-feature deploy is ruled out as the explanation for
+    "nothing appeared." The response's own `Cache-Control: public, max-age=0,
+    must-revalidate` header also means Netlify isn't telling browsers to cache this
+    file, which further weakens (though doesn't 100% eliminate — iOS Safari can still
+    have its own quirks) a stale-HTTP-cache explanation.
+  - **Found and fixed a concrete, code-grounded reason the trigger button specifically
+    could still be invisible on a real device**, without touching the core scroll-lock
+    fix itself: `.scroll-diag-btn`/`.scroll-diag-panel` (`styles.css`) were
+    **top-anchored** (`top: 0.5rem`) — but this file's own comment on the round-2
+    structural fix documents that iOS Safari's address-bar chrome collapse/expand is
+    driven specifically by scrolling the *document*, and the round-2 fix made
+    `<html>`/`<body>` permanently non-scrollable. Put those two true facts together
+    and the chrome may now be **permanently stuck in its tallest (expanded) state**,
+    with no scroll gesture left to ever trigger a collapse — meaning a `top: 0.5rem`
+    fixed element can end up rendered underneath that permanently-expanded chrome,
+    genuinely invisible, with no way for the player to reveal it. **Fixed** by moving
+    both to bottom-anchored (matching `.explain-panel`, this app's only other fixed
+    element, already proven safe on real iOS hardware) — verified still renders
+    correctly in browser preview after the change. This is a fix to the *diagnostic
+    tool's own visibility* specifically, not a guess at the underlying document-lock
+    bug itself — deliberately not touched, per below.
+  - **Still open, and still needs the project owner's device, not another guess**:
+    whether this was really the whole explanation for "nothing appeared," and — the
+    actual point of the tool — what it reports once it's confirmed visible (measured
+    scrollHeight vs. viewport, which element(s) contribute any excess). **Ask the
+    project owner to reload nonogrampro.netlify.app fresh and try `?debug=scroll`
+    again** — the button should now show bottom-right. If it's visible now, tap it and
+    report the numbers in the panel; if it's STILL not visible, that's a stronger,
+    more specific finding (rules out both the console-only theory and the top-anchor
+    theory) worth its own dedicated investigation rather than a third repositioning
+    guess.
 
-* **Per-number gray-out (`anchoredClueNumbers`) only appears to work for imported
-  (scanned) puzzles, not during regular gameplay on normal puzzles — needs
-  investigation.** The feature was implemented and wired into `app.js`'s
-  `syncAllCellVisuals` via `applyAnchoredClasses`, which should run generally, not
-  only on the scan-import code path — but real-device testing shows it isn't visibly
-  triggering during ordinary play. Investigate whether `applyAnchoredClasses` (or the
-  `anchoredClueNumbers` call feeding it) is actually being invoked on every board
-  render, or only on the code path scanned puzzles happen to go through — check
-  whether normal play's render/update path differs from the scanned-puzzle path in a
-  way that skips this call. Verify fix live in normal gameplay (not just against a
-  scanned puzzle), since that's specifically where it's currently missing.
+* **Per-number gray-out (`anchoredClueNumbers`) — investigated this round; confirmed
+  NOT broken in normal gameplay.** Traced the full path end to end: `renderBoard()`
+  unconditionally calls `syncAllCellVisuals()`, which calls `applyAnchoredClasses` for
+  every row and column on *every* render and every player action — there is no
+  separate scan-only code path, and no source-gated branch anywhere in it. Reproduced
+  actual gameplay directly (real `pointerdown`/`pointerup` events on the board, not
+  synthetic clicks) against a normal (non-scanned) SAMPLE_PUZZLES puzzle in browser
+  preview: filling one cell of a two-number clue and X-marking the cell right after it
+  (bounding that run on both sides) correctly added `nono-clue__num--anchored` — dim
+  color, confirmed via computed style — to just that one clue number, leaving its
+  sibling number at full brightness. The algorithm, wiring, and CSS all check out.
+  - **Likely explanation for the real-device report**: `anchoredClueNumbers`
+    (`lineSolver.js`) is deliberately conservative — `walkAnchorsFromStart` only marks
+    a run anchored once it's bounded by a *confirmed* EMPTY (or the line's edge) on
+    both sides, not just "provably forced" in a fuller logical sense (see its own
+    comment: a floating complete run isn't enough). A **freshly-loaded, lightly-played
+    normal puzzle starts completely blank**, so nothing can be anchored yet almost by
+    definition — whereas a **scanned puzzle's `initialMarks`** (from OCR fill-state
+    detection) can already satisfy that bounded-on-both-sides condition the instant it
+    loads, with zero player action. That asymmetry — instantly visible on a scan,
+    requiring some real progress on a normal puzzle — is a strong candidate for why a
+    quick real-device glance at a normal puzzle would show nothing, without the
+    feature actually being disabled there.
+  - **No code change made** — I couldn't find a bug to fix, and shipping a change
+    without one would just be guessing. **Next step needs the project owner**: play a
+    normal puzzle far enough that some run is bounded by confirmed empty cells on both
+    sides (X-marking the cell(s) right after a filled run is the fastest way to force
+    this), then check whether that clue number visibly dims. If it still doesn't, on
+    the real device specifically, that's a genuinely new, more specific finding (points
+    at device-specific rendering/contrast, not wiring) worth its own follow-up.
 
-* **OCR residual accuracy — the previously-flagged "single digit sometimes drops or
-  an extra digit appears" bug is confirmed present in real-device testing; open
-  question for the project owner on whether it's worth continuing to chase.** Overall
-  OCR accuracy is now much improved (clean geometry, most digits correct); the
-  remaining errors are occasional, not systemic, and are exactly the kind of ordinary
-  residual noise the correction step (editable text next to a thumbnail) already
-  exists to catch. Given diminishing returns are a real risk here (this feature's own
-  history already flagged this exact tradeoff once before, per its Round 3 OCR notes),
-  worth explicitly asking the project owner whether the current error rate is
-  acceptable given they're already reviewing every line anyway, rather than assuming
-  further chasing is automatically worth it. If they do want it pursued further,
-  `findStripLines`'s spurious-glyph-blob false positive (the `3,1,1,3`→`3,1,1,7,3`
-  case) and the dropped-single-digit case are the two concrete repro leads already on
-  record.
+* **OCR residual accuracy — this is a question for you, not something to keep chasing
+  autonomously; asked directly this round (see chat).** Overall OCR accuracy is much
+  improved (clean geometry, most digits correct); the remaining errors (occasional
+  dropped/extra single digits) are exactly the kind of ordinary residual noise the
+  correction step (editable text next to a thumbnail) already exists to catch. If
+  further chasing is wanted, `findStripLines`'s spurious-glyph-blob false positive
+  (the `3,1,1,3`→`3,1,1,7,3` case) and the dropped-single-digit case are the two
+  concrete repro leads already on record.
 
 * **Save-to-library feature — client-side implementation done this round; NOT yet
   usable in production because the updated `firestore.rules` haven't been deployed.**
