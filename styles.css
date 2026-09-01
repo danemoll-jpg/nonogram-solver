@@ -176,8 +176,10 @@ body {
    it's reachable in one tap regardless of what else is open. */
 .mute-toggle {
   font-size: 1.1rem;
-  line-height: 1;
-  padding: 0.45rem 0.7rem;
+  /* Only horizontal padding needed — see .btn's own comment: its fixed height + flex centering
+     already handles vertical sizing, so this button's height stays in lockstep with every
+     other .btn in the toolbar regardless of which glyph is in it. */
+  padding: 0 0.7rem;
 }
 
 /* Single "Help" dropdown (item: UI consolidation pass) — replaces the old always-visible
@@ -193,8 +195,10 @@ body {
 .help-menu__trigger {
   font-size: 1.05rem;
   font-weight: 800;
-  line-height: 1;
-  padding: 0.45rem 0.75rem;
+  /* Only horizontal padding needed — see .btn's own comment: its fixed height + flex centering
+     already handles vertical sizing, so this button's height stays in lockstep with every
+     other .btn in the toolbar regardless of which glyph is in it. */
+  padding: 0 0.75rem;
 }
 
 .help-menu__list {
@@ -259,7 +263,23 @@ body {
   color: var(--text);
   font-size: 0.88rem;
   font-weight: 600;
-  padding: 0.5rem 0.9rem;
+  /* An explicit line-height (not "normal", the default) still isn't enough on its own here:
+     color-emoji glyphs (📚 vs 📊 vs 💾, all used as button icons in this toolbar) carry
+     noticeably different natural font metrics from each other and from plain text, and at
+     least Chromium lets an oversized glyph inflate a text button's rendered height PAST its
+     specified line-height — confirmed directly (📚 "Puzzle library" measuring 8px taller than
+     "📊 Stats" with every relevant computed style, including line-height, otherwise identical).
+     Pinning an explicit `height` (with flex centering below, instead of relying on line-height
+     + padding to imply one) makes every .btn's box size a fixed value nothing about its content
+     can override, so the toolbar row lines up regardless of which glyph any one button uses. */
+  height: 2.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  overflow: hidden;
+  line-height: 1.2;
+  padding: 0 0.9rem;
   border-radius: 0.6rem;
   cursor: pointer;
   transition: transform 0.1s ease, border-color 0.1s ease;
@@ -289,8 +309,10 @@ body {
    .help-menu__trigger right next to it. */
 .btn--icon {
   font-size: 1.1rem;
-  line-height: 1;
-  padding: 0.45rem 0.7rem;
+  /* Only horizontal padding needed now — .btn's fixed height + flex centering (see .btn's own
+     comment) already handles vertical sizing/centering, so a vertical component here would
+     just eat into that fixed box rather than changing anything visible. */
+  padding: 0 0.7rem;
 }
 
 .btn + .btn {
