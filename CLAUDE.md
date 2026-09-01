@@ -55,7 +55,7 @@ feature (deployed, live, saving works) are all done. OCR accuracy has been expli
 accepted as "good enough for now" by the project owner, confirmed twice. See
 `TODO.md`'s Completed Tasks for the full history and every design tradeoff.
 
-**Current objective has three items**:
+**Current objective has two items**:
 1. **New design item: consolidate the two separate puzzle-selection UIs (the old
    top "Puzzle" dropdown of built-in samples, and the newer Help-menu library
    modal) into one — the library modal wins.** Two real follow-on requirements: the
@@ -64,17 +64,16 @@ accepted as "good enough for now" by the project owner, confirmed twice. See
    new one), and the library's entry point should move out of the Help dropdown
    (browsing puzzles isn't a help action) to roughly where the old dropdown lived.
    Built-in samples don't need to migrate into Firestore — just merge both sources
-   into one UI list. **Additional scope added this round, some of it real new
-   backend work**: reveal a puzzle's real name once the current (or cross-device-
-   paired) user has solved it, a solved-status badge, per-puzzle solved/unsolved
-   filters and a size filter, and public per-puzzle aggregate stats (times solved,
-   fastest time) — the last of which should go through a new server-side Cloud
-   Function (following this project's existing pairing-callable pattern) rather
-   than a direct client write, since a client-writable "fastest time" field is
-   gameable. Also: "Stats & pairing" moves out of the Help dropdown too and gets
-   grouped with the library (exact UI shape left to Code's judgment). See
-   `TODO.md` for full scope and the size/timeline flag on the aggregate-stats
-   piece specifically.
+   into one UI list. **Additional scope added this round**: reveal a puzzle's real
+   name once the current (or cross-device-paired) user has solved it, a
+   solved-status badge, per-puzzle solved/unsolved and size filters, personal
+   per-puzzle stats (times solved, best time — a direct client write, no Cloud
+   Function needed since it's the player's own uid-scoped data), and optionally a
+   global fastest-time stat per puzzle (nice-to-have, not required this round; if
+   built, needs a server-side Cloud Function like the existing pairing callables,
+   since a client-writable public "fastest time" field is gameable). Also: "Stats &
+   pairing" moves out of the Help dropdown too and gets grouped with the library
+   (exact UI shape left to Code's judgment). See `TODO.md` for full scope.
 2. **Scroll bug — now with a much sharper repro**: whitespace appears specifically
    after the on-screen keyboard has been used, and persists afterward; no issue
    before any keyboard interaction. Points at the keyboard-triggered resize/re-fit
@@ -83,11 +82,6 @@ accepted as "good enough for now" by the project owner, confirmed twice. See
    whether the `?debug=scroll` diagnostic button was actually visible/usable in this
    specific scenario — the project owner tried it but isn't sure it captured
    anything.
-3. **Bug: a puzzle saves to the library successfully but doesn't show up in the
-   library list afterward.** Confirmed write-side works; this is a read/refresh
-   problem. Likely causes to check: the library modal not re-fetching after a save
-   completes, or a `serverTimestamp()`/`orderBy` race where a brand-new document's
-   timestamp isn't resolved yet when the list is queried immediately after saving.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope (private/friends sharing, richer

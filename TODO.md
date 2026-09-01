@@ -95,12 +95,14 @@ Completed Tasks
   browser preview that a single-sided bound now correctly triggers the gray-out in
   normal gameplay.
 * **Save-to-library feature — client-side implementation done, and the Firestore
-  rules deploy has since happened (the feature works — a puzzle successfully
-  saves). See Current Objective below for a real follow-up bug found post-deploy
-  (saved puzzles don't appear in the library list afterward).** New module
-  `src/puzzleLibrary.js` (savePuzzleToLibrary/fetchLibraryPuzzles/loadLibraryPuzzle/
-  renamePuzzleInLibrary) backs a "Save to library" section on the scan wizard's
-  "done" step and a "Puzzle library" Help-menu entry (browse/play/rename modal).
+  rules deploy has since happened (the feature works — a puzzle successfully saves
+  and does appear in the library list). The earlier "doesn't appear" report was a
+  false alarm: it was showing up correctly in the library, just not in the separate
+  old dropdown — which is exactly why the two are being merged (see Current
+  Objective's consolidation item).** New module `src/puzzleLibrary.js`
+  (savePuzzleToLibrary/fetchLibraryPuzzles/loadLibraryPuzzle/renamePuzzleInLibrary)
+  backs a "Save to library" section on the scan wizard's "done" step and a "Puzzle
+  library" Help-menu entry (browse/play/rename modal).
   Schema (`puzzles/{puzzleId}`): `rows`, `cols` (numbers); `rowClues`, `colClues`
   (arrays of comma-joined strings, round-tripping through `scanPuzzle.js`'s existing
   `parseClueText`); `title`; `creatorUid`; `createdAt` (serverTimestamp). No solution
@@ -162,28 +164,34 @@ Current Objective (Focus Area)
        cross-device logic needed.
     2. **A visual "solved" indicator** (badge/checkmark) on library list rows,
        driven by the same solved-puzzle-ID tracking as #1.
-    3. **Per-puzzle aggregate stats: total times solved, and fastest completion
-       time — across ALL users, not just the current one.** This is different from
-       (and in addition to) both the existing personal size-bucketed stats and the
-       new personal per-puzzle solved tracking above — it's a public, competitive,
-       per-puzzle-document stat. **Worth a real design decision on how this gets
-       written**: a client directly incrementing `timesSolved`/updating
-       `fastestTimeMs` on a public `puzzles/{puzzleId}` document via Firestore
-       rules is *gameable* (a malicious client could write a fake instant "fastest
-       time," or an arbitrary solve count, since Firestore rules can constrain
-       document shape but not easily express "this new value must be strictly
-       faster than the current one" as a trustworthy atomic check against a
-       client-controlled write). **Recommend following this project's own
-       established pattern** (the `createPairingCode`/`redeemPairingCode` callables,
-       which use the Admin SDK server-side specifically to keep sensitive writes
-       out of direct client hands) — a new callable Cloud Function that records a
-       library-puzzle completion, validates/increments the count, and only updates
-       `fastestTimeMs` if the new time genuinely improves on the stored one,
-       server-side. This is real new backend scope (a new Firestore field shape on
-       `puzzles/{puzzleId}`, a new callable, a new deploy), not just a client change
-       — flag this size difference to the project owner if it meaningfully changes
-       this round's scope/timeline.
+    3. **Per-puzzle stats, scope corrected by the project owner: times-solved and
+       fastest-time are PERSONAL (this user only), not a global aggregate.** Store
+       both directly in the same per-user solved-puzzle-ID record from #1 (e.g.
+       `users/{uid}/solvedLibraryPuzzles/{puzzleId}: { timesSolved, bestTimeMs }`) —
+       this is the player's own data, protected by the standard per-uid Firestore
+       rule already in place elsewhere in this app (write allowed only when
+       `request.auth.uid` matches the document's own uid), so **no Cloud Function is
+       needed for this personal piece** — a direct client write is fine here, unlike
+       the global stat below.
+       - **Separately, optional/"would be interesting," not a firm requirement this
+         round**: a GLOBAL fastest-time-across-all-users stat per puzzle (not a
+         global times-solved count — the project owner only asked for global
+         fastest-time specifically). If built, this genuinely is a public,
+         competitive, per-puzzle-document field, and the earlier gameability
+         concern still applies to it specifically: a client directly writing a
+         "fastest time" to a public `puzzles/{puzzleId}` document is gameable
+         (nothing stops a malicious client from writing a fake instant time).
+         **If/when this gets built, follow this project's established pattern**
+         (the `createPairingCode`/`redeemPairingCode` callables, which use the
+         Admin SDK server-side specifically to keep sensitive writes out of direct
+         client hands) — a callable Cloud Function that only updates a puzzle's
+         global `fastestTimeMs` if the new time genuinely improves on the stored
+         one, server-side. Treat this as a nice-to-have to slot in once the rest of
+         the library work (consolidation, personal solved/stats, filters) is done,
+         not something to build first or that should hold up the rest of this
+         round.
     4. **Filters on the library list: Solved / Unsolved / All, and by grid size.**
+
        Straightforward once (1) exists (solved/unsolved filtering) and given
        dimensions are already a schema field (size filtering) — no new data needed
        beyond what's already listed above.
@@ -219,21 +227,6 @@ Current Objective (Focus Area)
     baseline). If the button still wasn't visible or usable even after being
     repositioned, that's a further, separate finding worth its own attention before
     trusting the tool for real diagnosis.
-
-* **Bug: a puzzle saves successfully to the library but doesn't appear in the
-  library list afterward.** Confirmed the save itself works (per the project owner's
-  direct test) — this is specifically a read/refresh problem, not a write problem.
-  Worth checking, in order of likely cause: (1) whether the library modal only
-  fetches once on open and needs an explicit re-fetch/refresh after a save completes
-  (most likely, and cheapest to fix — trigger `fetchLibraryPuzzles` again, or
-  optimistically prepend the just-saved puzzle to the list, right after
-  `savePuzzleToLibrary` resolves); (2) whether ordering by `createdAt`
-  (`serverTimestamp()`) causes a brand-new document to sort unpredictably or get
-  excluded immediately after write, before the server timestamp has actually been
-  assigned (a known Firestore gotcha with `serverTimestamp()` — the field reads as
-  `null` locally until the write is acknowledged by the server, which can affect an
-  `orderBy(createdAt)` query run too soon after saving). Verify against a real save
-  end-to-end, not just by reading the code.
 
 Next Steps (Do Not Start Yet)
 
