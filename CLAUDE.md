@@ -61,28 +61,29 @@ done and deployed. Fully public library visibility is confirmed as the right mod
 OCR accuracy has been explicitly accepted as "good enough for now." See `TODO.md`'s
 Completed Tasks for the full history.
 
-**Current objective: the scroll bug is NOT resolved, and round 2's fix (deployed and
-already reported here previously as "implemented") has now been real-device-tested
-and confirmed still failing** — with real new diagnostic data pointing at a specific,
-actionable gap:
+**Current objective: round 3 of both the scroll bug and the toolbar-alignment bug is
+implemented (not yet deployed/verified) — round 2 of both failed real-device testing
+despite passing every local/preview check, so neither round 3 fix should be reported
+as resolved until confirmed with a fresh on-device `?debug=scroll` capture:**
 
-* A full real-device `?debug=scroll` capture shows the pan getting stuck at
-  `offsetTop: 79` and then STAYING stuck through closing the scan wizard (54+
-  seconds later) and navigating back to the main play screen — neither of those
-  transitions is a `focusout` or `visualViewport resize` event, which are the ONLY
-  two triggers round 1 and round 2's fixes listen for. **Recommended next
-  direction: stop adding individual event listeners one at a time and consider a
-  periodic/idle re-check instead** (poll every so often for "offsetTop nonzero,
-  nothing focused" and self-correct regardless of what triggered that state). See
-  `TODO.md` for the full timestamped capture and additional diagnosis notes.
-* Separately: the `.explain-panel` defensive fix from round 2 appears to actually
-  be working in this same capture (its rect stayed within viewport bounds) — a
-  real partial win worth keeping, even though the main pan issue remains open.
-* Also: the toolbar button height/alignment fix from round 2 does not appear to
-  have resolved the visual issue on the real device — "Puzzle library" still
-  looks taller than its neighbors in the project owner's screenshot, despite
-  passing the earlier desktop-preview measurement. Needs re-verification directly
-  on-device, not just via preview numbers.
+* **Scroll pan, round 3**: replaced the event-only approach with a periodic idle
+  re-check — `setInterval(correctResidualViewportPan, 400)` (`app.js`) — since round
+  2's own diagnosis showed the stuck-pan state can persist through modal closes and
+  screen navigations that never fire the `focusout`/`focusin`/`resize` events the
+  fix depended on. The correction function itself already handled the stuck case
+  correctly; it just wasn't being re-invoked.
+* **Toolbar alignment, round 3**: added `-webkit-appearance: none;` to `.btn`
+  (`styles.css`) — a real, previously-missing property, and a plausible cause given
+  "Puzzle library" is the one *filled* toolbar button (`.btn--primary`) among
+  otherwise transparent/bordered neighbors. Also extended the `?debug=scroll` report
+  to list every toolbar button's real `offsetHeight`/`rect.height`/`borderRadius`/
+  etc., closing the gap where round 2's toolbar fix had only a screenshot as
+  real-device evidence, never a number.
+* `.explain-panel`'s round 2 defensive fix is still believed to be a real, working
+  partial win (confirmed via geometry in round 2's capture) — untouched by round 3.
+* **Next step is entirely on-device**: reproduce the stuck-pan repro and check
+  `?debug=scroll`'s history log + new toolbar-buttons section on the real iPhone.
+  See `TODO.md`'s Current Objective for full detail.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,

@@ -1809,6 +1809,20 @@ document.addEventListener('focusin', (e) => {
 // dismissing the keyboard by hand.
 window.visualViewport?.addEventListener('resize', debounce(correctResidualViewportPan, 150));
 
+// Round 3 (see TODO.md): a REAL on-device `?debug=scroll` capture showed the pan getting stuck
+// at offsetTop=79 and then staying stuck through 54+ seconds, a full scan-wizard close, and a
+// screen navigation — none of which are a `focusout`/`focusin`/visualViewport `resize`, the only
+// three events round 1 and round 2 re-check on. That's a coverage gap in *which events trigger a
+// check*, not a flaw in correctResidualViewportPan's own logic (confirmed: the capture's "nothing
+// focused, offsetTop stuck nonzero" state is exactly the case the function already handles via
+// its unconditional `scrollTo` branch above — it simply never got invoked again because no
+// covered event fired). Rather than keep chasing individual triggers one at a time, add a
+// low-frequency idle poll as a backstop: correctResidualViewportPan is a couple of cheap property
+// reads and returns immediately whenever offsetTop is already 0 (the common case), so polling a
+// few times a second costs effectively nothing but closes the gap regardless of what transition
+// (or lack of one) caused the stuck state.
+setInterval(correctResidualViewportPan, 400);
+
 // ---- Current Objective #2: keep the player-facing explain panel visible through the same
 // stuck-pan state (see TODO.md) ----
 //
@@ -1958,6 +1972,30 @@ function initScrollDiagnostics() {
         `  ${r.label}: position=${r.position} offsetHeight=${r.offsetHeight} rect.top=${r.rectTop} ` +
         `rect.bottom=${r.rectBottom} overflowPastViewportBottom=${r.overflowPx}px`
       );
+    }
+
+    // Toolbar button geometry (round 3 — see TODO.md): round 2's "Puzzle library" height/
+    // roundness fix was confirmed via a desktop-preview measurement (35.2px for all five
+    // buttons) that then didn't hold on the real device — but the only real-device evidence
+    // since has been a screenshot, an eyeball comparison, not a number. Reporting the actual
+    // getBoundingClientRect/computed-style values for every toolbar .btn here closes that same
+    // "screenshot vs. real numbers" gap this tool already closed for the scroll bug, off the
+    // one debug view the project owner already knows to check.
+    const toolbarEl = document.querySelector('.toolbar');
+    const toolbarButtons = toolbarEl ? Array.from(toolbarEl.querySelectorAll('.btn')) : [];
+    if (toolbarButtons.length) {
+      lines.push('');
+      lines.push('Toolbar buttons (round 3 — see TODO.md):');
+      for (const btn of toolbarButtons) {
+        const rect = btn.getBoundingClientRect();
+        const style = getComputedStyle(btn);
+        const label = describeElement(btn) + (btn.textContent.trim() ? ` "${btn.textContent.trim()}"` : '');
+        lines.push(
+          `  ${label}: offsetHeight=${btn.offsetHeight} rect.width=${Math.round(rect.width)} ` +
+          `rect.height=${Math.round(rect.height)} borderRadius=${style.borderRadius} ` +
+          `border=${style.borderWidth} padding=${style.padding} font=${style.fontSize}/${style.lineHeight}`
+        );
+      }
     }
     return lines.join('\n');
   }

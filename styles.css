@@ -258,6 +258,17 @@ body {
 
 .btn {
   appearance: none;
+  /* Round 3 (see TODO.md): unprefixed `appearance: none` alone doesn't fully strip iOS Safari's
+     native button chrome on every version — `-webkit-appearance` is the one that actually
+     controls it there. Missing this is a plausible reason "Puzzle library" specifically (the
+     one *filled* .btn--primary button in the toolbar — every neighbor is transparent/bordered)
+     could still show native rounding/height on the real device after round 2's height fix:
+     leftover WebKit chrome would read as a subtle gradient/inset look that's far more visible
+     against a solid gold fill than against a transparent background, and neither desktop
+     Chromium preview (no such native chrome to strip) nor the height/line-height fix (a layout
+     property, not an appearance one) would have caught or addressed it. Needs real-device
+     re-verification like everything else in this bug family — not assumed fixed from here. */
+  -webkit-appearance: none;
   border: 1px solid rgba(230, 183, 63, 0.35);
   background: var(--panel-bg-raised);
   color: var(--text);
