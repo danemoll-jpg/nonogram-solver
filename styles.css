@@ -283,6 +283,16 @@ body {
   background: transparent;
 }
 
+/* Icon-only button (Save progress — see TODO.md): the label was pure toolbar clutter once the
+   💾 glyph alone reads fine, same reasoning that already trimmed the Help button down to a bare
+   "?" — square-ish padding instead of .btn's text-shaped default, sized to match .mute-toggle /
+   .help-menu__trigger right next to it. */
+.btn--icon {
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.45rem 0.7rem;
+}
+
 .btn + .btn {
   margin-top: 0.5rem;
 }
