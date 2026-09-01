@@ -124,8 +124,22 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **Scroll bug — ROOT CAUSE CONFIRMED via real on-device diagnostic data. Ready for
-  a targeted fix, not further guessing.** Real `?debug=scroll` history from the
+* **Scroll bug — fix implemented (`app.js`, `correctResidualViewportPan`), NOT YET
+  VERIFIED ON A REAL DEVICE.** Per this bug class's history (failed real-device
+  verification multiple times despite passing every local check), do not consider
+  this done until confirmed on the actual iPhone with `?debug=scroll`: focus
+  `#scan-known-rows-input` (or any text input), dismiss the keyboard, and confirm
+  `visualViewport.offsetTop` returns to 0 shortly after (the history log's
+  "focusout" and following "visualViewport resize" lines should show it settle at
+  0, not stay stuck like the pre-fix 79px repro below). The fix: on `focusout` of a
+  text input (100ms delay) and on every `visualViewport` `resize` (150ms debounce),
+  if `offsetTop` is nonzero and no text input is currently focused, issue a
+  corrective no-op-looking `window.scrollTo(window.scrollX, window.scrollY)` —
+  deliberately doesn't touch `fitBoardToViewport`'s sizing math, per the root-cause
+  finding below that it was never the problem.
+
+  Root cause (confirmed via real on-device diagnostic data before this fix). Real
+  `?debug=scroll` history from the
   project owner's device, timestamped through an actual keyboard open/close cycle
   on `#scan-known-rows-input`:
   ```
@@ -148,19 +162,8 @@ Current Objective (Focus Area)
   closed with only 329px of that reversed, leaving a stuck 79px residual pan that
   the app currently has no logic to detect or correct. This is a known (if
   under-documented) iOS Safari quirk, not specific to this app's own CSS/JS sizing.
-  **Fix direction**: don't touch `fitBoardToViewport`'s sizing math (it was never
-  the problem) — instead, add explicit detection for "keyboard has closed but
-  `visualViewport.offsetTop` is still nonzero" (e.g. on `focusout` combined with
-  `visualViewport.height` having returned close to `window.innerHeight`, or a
-  `visualViewport` `resize` event where the height grows back toward full with no
-  input focused) and force iOS to re-resolve the pan — the established pattern for
-  this specific iOS quirk is a corrective `window.scrollTo` (even a no-op-looking
-  `window.scrollTo(0, window.scrollY)`, or `window.scrollTo(0, 0)`) issued shortly
-  after that detection fires, which reliably nudges iOS Safari to recompute and
-  re-zero the visual-viewport offset. Verify the fix using the same
-  `?debug=scroll` tool and the same real repro (focus `#scan-known-rows-input` or
-  any text input, dismiss the keyboard, check `offsetTop` returns to 0) — on the
-  real device, not just browser preview, given this bug class's history.
+  See the fix summary at the top of this item for what's now implemented and
+  what's still needed (real-device verification) before this can be called done.
 
 * **New: UI/branding polish round.**
   1. **Tighten the toolbar** — rename "Stats & pairing" to just "Stats"; move

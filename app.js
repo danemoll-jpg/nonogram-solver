@@ -1507,6 +1507,43 @@ window.addEventListener('orientationchange', () => setTimeout(fitBoardToViewport
 // fitBoardToViewport directly.
 window.visualViewport?.addEventListener('resize', debounce(handleViewportResize, 100));
 
+// ---- iOS keyboard-close residual viewport pan fix (Current Objective — see TODO.md) ----
+//
+// Root cause CONFIRMED via real on-device `?debug=scroll` history (see TODO.md), not guessed:
+// iOS Safari pans the *visual* viewport to keep a focused input clear of the on-screen
+// keyboard, then on keyboard close doesn't always fully reverse that pan. A real device
+// captured this exactly: the pan opened by 408px, keyboard-close only reversed 329px of it,
+// leaving `visualViewport.offsetTop` stuck at a residual 79px — still 79px a full second
+// after focus was gone entirely, i.e. it does not self-correct given time. This is a
+// well-known iOS Safari quirk, not a sizing bug in this app's own CSS/JS — fitBoardToViewport
+// was confirmed correct throughout the same repro, so this fix deliberately doesn't touch it.
+// The established workaround for this specific quirk is a corrective, no-op-looking
+// `window.scrollTo` once the keyboard is confirmed closed: it reliably nudges iOS Safari to
+// recompute and re-zero the visual-viewport offset.
+function correctResidualViewportPan() {
+  const vv = window.visualViewport;
+  if (!vv || vv.offsetTop === 0) return;
+  // Only correct once the keyboard is actually gone — a focused text input means the pan is
+  // legitimate (an input IS currently being kept clear of a real keyboard), not residual.
+  const active = document.activeElement;
+  if (active && /^(input|textarea)$/i.test(active.tagName || '')) return;
+  window.scrollTo(window.scrollX, window.scrollY);
+}
+
+// focusout is the authoritative "an input just lost focus" signal. The real timeline above
+// shows the keyboard-close resize/pan and the resulting stuck offsetTop both land BEFORE
+// focusout fires, and stay stuck at least a second after — so a short delay here (letting iOS
+// finish its close animation) is enough; there's no reason to wait longer.
+document.addEventListener('focusout', (e) => {
+  if (!/^(input|textarea)$/i.test(e.target?.tagName || '')) return;
+  setTimeout(correctResidualViewportPan, 100);
+});
+// Belt-and-suspenders: also re-check on every visualViewport resize (which includes the one
+// accompanying keyboard close, height growing back toward window.innerHeight) in case focusout
+// doesn't fire for some reason — e.g. focus cleared programmatically rather than by the player
+// dismissing the keyboard by hand.
+window.visualViewport?.addEventListener('resize', debounce(correctResidualViewportPan, 150));
+
 // ---- scroll diagnostics (Current Objective — see TODO.md) ----
 //
 // The app-wide iOS scroll regression has now failed real-device verification twice, on a bug
