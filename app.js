@@ -13,7 +13,13 @@ import { SAMPLE_PUZZLES } from './src/puzzles.js';
 import { playSound, isMuted, toggleMuted, onDragSweepCell, startDragSweep, stopDragSweep } from './src/sounds.js';
 import { recordCompletion, fetchAllStats, generatePairingCode, redeemPairingCode } from './src/stats.js';
 import { initScanWizard } from './src/scanUI.js';
-import { fetchLibraryPuzzles, loadLibraryPuzzle, renamePuzzleInLibrary } from './src/puzzleLibrary.js';
+import {
+  fetchLibraryPuzzles,
+  loadLibraryPuzzle,
+  renamePuzzleInLibrary,
+  fetchSolvedPuzzles,
+  recordPuzzleSolved,
+} from './src/puzzleLibrary.js';
 import { ensureSignedIn } from './src/firebase.js';
 
 let puzzle = null;
@@ -40,7 +46,8 @@ const colClueEls = [];
 const els = {
   pageRoot: document.getElementById('page-root'),
   explainPanel: document.getElementById('explain-panel'),
-  puzzleSelect: document.getElementById('puzzle-select'),
+  btnOpenLibrary: document.getElementById('btn-open-library'),
+  btnOpenStats: document.getElementById('btn-open-stats'),
   boardRoot: document.getElementById('board-root'),
   statusLine: document.getElementById('status-line'),
   modeFill: document.getElementById('mode-fill'),
@@ -54,8 +61,6 @@ const els = {
   menuCheck: document.getElementById('menu-check'),
   menuRemoveBad: document.getElementById('menu-remove-bad'),
   menuScan: document.getElementById('menu-scan'),
-  menuLibrary: document.getElementById('menu-library'),
-  menuStats: document.getElementById('menu-stats'),
   menuClearAll: document.getElementById('menu-clear-all'),
   explainBody: document.getElementById('explain-panel-body'),
   btnContradiction: document.getElementById('btn-contradiction'),
@@ -119,6 +124,8 @@ const els = {
   libraryModal: document.getElementById('library-modal'),
   libraryStatus: document.getElementById('library-status'),
   libraryList: document.getElementById('library-list'),
+  libraryFilterSolved: document.getElementById('library-filter-solved'),
+  libraryFilterSize: document.getElementById('library-filter-size'),
   btnLibraryClose: document.getElementById('btn-library-close'),
 };
 
@@ -171,43 +178,10 @@ function setExplain(content) {
 
 // ---- puzzle lifecycle ----
 
-// Puzzle names are hidden until completion (item: hide the puzzle's name until completion)
-// so picking a puzzle doesn't already give away what image it is — the picker shows a
-// generic "Puzzle N — RxC" label instead of puzzle.name. The real name is revealed in the
-// completion modal (see maybeShowCompletion) once there's no picture left to spoil.
-function populatePuzzleSelect() {
-  els.puzzleSelect.innerHTML = '';
-  SAMPLE_PUZZLES.forEach((p, i) => {
-    const opt = document.createElement('option');
-    opt.value = p.id;
-    opt.textContent = `Puzzle ${i + 1} — ${p.rows}x${p.cols}`;
-    els.puzzleSelect.appendChild(opt);
-  });
-}
-
-// The most recently scanned puzzle this session (item 10), if any — kept separately from
-// SAMPLE_PUZZLES since a scanned puzzle isn't part of the curated library (item 9's
-// shared-library work is what would give it a permanent home; until then it only lives for
-// this session). Re-selecting its entry in the puzzle picker routes back through here.
-let scannedPuzzle = null;
-
-// The most recently played library puzzle this session (item 9's save-to-library slice),
-// mirroring scannedPuzzle's pattern above so re-selecting its picker entry works the same
-// way — except a library puzzle is a real, permanent puzzle (source stays 'authored', see
-// src/puzzleLibrary.js's loadLibraryPuzzle), not a session-only scan snapshot.
-let libraryPuzzle = null;
-
-function loadPuzzle(id) {
-  const p =
-    (scannedPuzzle && scannedPuzzle.id === id && scannedPuzzle) ||
-    (libraryPuzzle && libraryPuzzle.id === id && libraryPuzzle) ||
-    SAMPLE_PUZZLES.find((p) => p.id === id) ||
-    SAMPLE_PUZZLES[0];
-  startPuzzle(p);
-}
-
-// Shared init for any puzzle, however it was loaded — normal picker selection or a freshly
-// scanned one (see startScannedPuzzle). A scan-origin puzzle gets no move history (see
+// Shared init for any puzzle, however it was loaded — a library-modal selection (built-in
+// or community-saved, see the "puzzle library browse" section below) or a freshly scanned
+// one (passed straight through as initScanWizard's onPuzzleReady). A scan-origin puzzle
+// gets no move history (see
 // model.js's Board class comment and mistakes.js's snapshot-origin mistake-checking) — the
 // "no move history" and "never counts toward stats" behavior both fall out of that one
 // puzzle.source check (recordCompletion skips it separately — see src/stats.js).
@@ -221,7 +195,6 @@ function loadPuzzle(id) {
 // silently discarding real progress the way scanning used to (see TODO.md's history).
 function startPuzzle(p) {
   puzzle = p;
-  els.puzzleSelect.value = puzzle.id;
   board = puzzle.initialMarks ? Board.fromGrid(puzzle.initialMarks) : new Board(puzzle.rows, puzzle.cols);
   board.hasHistory = puzzle.source !== 'scan';
   highlightedCells = [];
@@ -234,39 +207,6 @@ function startPuzzle(p) {
   els.completeModal.classList.add('hidden');
   renderBoard();
   updateStatus('');
-}
-
-// Called by the scan wizard (src/scanUI.js) once it has a solved, playable puzzle. Adds (or
-// reuses) one picker entry for it so switching back to it later in the session works the
-// same way picking any other puzzle does.
-function startScannedPuzzle(p) {
-  scannedPuzzle = p;
-  let opt = els.puzzleSelect.querySelector('option[data-scan]');
-  if (!opt) {
-    opt = document.createElement('option');
-    opt.dataset.scan = 'true';
-    els.puzzleSelect.insertBefore(opt, els.puzzleSelect.firstChild);
-  }
-  opt.value = p.id;
-  opt.textContent = `Scanned puzzle — ${p.rows}x${p.cols}`;
-  startPuzzle(p);
-}
-
-// Called when the player picks a puzzle to play from the library browse modal (below). A
-// library puzzle's real title isn't spoiler-sensitive the way SAMPLE_PUZZLES' curated-shape
-// names are (see populatePuzzleSelect's comment) — browsing by title is the whole point — so
-// unlike that picker convention, this shows the puzzle's actual name.
-function startLibraryPuzzle(p) {
-  libraryPuzzle = p;
-  let opt = els.puzzleSelect.querySelector('option[data-library]');
-  if (!opt) {
-    opt = document.createElement('option');
-    opt.dataset.library = 'true';
-    els.puzzleSelect.insertBefore(opt, els.puzzleSelect.firstChild);
-  }
-  opt.value = p.id;
-  opt.textContent = `${p.name} — ${p.rows}x${p.cols}`;
-  startPuzzle(p);
 }
 
 // ---- rendering ----
@@ -642,14 +582,17 @@ function maybeShowCompletion() {
   playSound('completeFanfare');
   const timeMs = Date.now() - puzzleStartTime;
   const { hintsUsed, mistakes } = computeCompletionStats();
-  els.statName.textContent = puzzle.name; // reveal — see populatePuzzleSelect's comment
+  els.statName.textContent = puzzle.name; // reveal — see the library modal's renderLibraryList
   els.statTime.textContent = formatDuration(timeMs);
   els.statHints.textContent = String(hintsUsed);
   els.statMistakes.textContent = String(mistakes);
   els.completeModal.classList.remove('hidden');
   // Fire-and-forget: a stats-write failure (offline, not deployed yet) must never affect the
-  // completion UI the player already sees. recordCompletion itself skips scan-origin puzzles.
+  // completion UI the player already sees. Both calls skip scan-origin puzzles internally
+  // (see recordCompletion and recordPuzzleSolved) — a scan has no stable identity worth
+  // recording stats against, size-bucketed or per-puzzle.
   recordCompletion(puzzle, { timeMs, hintsUsed, mistakes }).catch(() => {});
+  recordPuzzleSolved(puzzle, timeMs).catch(() => {});
 }
 
 els.btnCompleteClose.addEventListener('click', () => {
@@ -1128,7 +1071,7 @@ els.menuRemoveBad.addEventListener('click', () => {
 
 const scanWizard = initScanWizard({
   els,
-  onPuzzleReady: startScannedPuzzle,
+  onPuzzleReady: startPuzzle,
   onClose: fitBoardToViewport,
   onOpen: syncExplainPanelSpace,
 });
@@ -1137,25 +1080,94 @@ els.menuScan.addEventListener('click', () => {
   scanWizard.open();
 });
 
-// ---- puzzle library browse (item 9's save-to-library slice — see TODO.md, src/puzzleLibrary.js) ----
+// ---- puzzle library browse (library-consolidation round — see TODO.md; started as item
+// 9's save-to-library slice) ----
+//
+// The single puzzle-selection UI: merges the built-in SAMPLE_PUZZLES with the public
+// community-saved puzzles from src/puzzleLibrary.js into one list. Every entry's id is
+// unique across both sources (a SAMPLE_PUZZLES id like 'heart-5' vs. a Firestore-generated
+// doc id), which is what lets solved-status tracking (users/{uid}/solvedLibraryPuzzles, see
+// src/puzzleLibrary.js) key off one id space for both.
 
-// Renders one row per library puzzle. `myUid`, resolved once per open (below) rather than per
-// row, decides whether that row's rename affordance shows at all — the Firestore rule is what
-// actually enforces who can rename (see firestore.rules), this just avoids showing a control
-// that would fail for everyone but the creator.
-function renderLibraryList(puzzles, myUid) {
+// Cached between a refresh and a filter change so switching the Solved/Unsolved or Size
+// filter doesn't need to re-fetch — only refreshLibraryList (on open, or after a completion)
+// re-fetches from Firestore.
+let libraryEntriesCache = [];
+let solvedPuzzlesCache = new Map(); // puzzleId -> { timesSolved, bestTimeMs }
+let libraryMyUid = null;
+
+function builtinLibraryEntries() {
+  return SAMPLE_PUZZLES.map((p) => ({
+    id: p.id,
+    rows: p.rows,
+    cols: p.cols,
+    title: p.name,
+    builtin: true,
+    creatorUid: null,
+  }));
+}
+
+// Rebuilds the Size filter's options from whatever sizes are actually present, preserving
+// the current selection if it's still a valid choice.
+function populateLibrarySizeFilter(entries) {
+  const sizes = [...new Set(entries.map((e) => `${e.rows}x${e.cols}`))];
+  sizes.sort((a, b) => {
+    const [ar, ac] = a.split('x').map(Number);
+    const [br, bc] = b.split('x').map(Number);
+    return ar * ac - br * bc || ar - br;
+  });
+  const prev = els.libraryFilterSize.value;
+  els.libraryFilterSize.innerHTML = '<option value="all">All sizes</option>';
+  for (const s of sizes) {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    els.libraryFilterSize.appendChild(opt);
+  }
+  if (sizes.includes(prev)) els.libraryFilterSize.value = prev;
+}
+
+// Renders one row per (already filtered) library entry. `myUid` decides whether that row's
+// rename affordance shows at all — the Firestore rule is what actually enforces who can
+// rename (see firestore.rules), this just avoids showing a control that would fail for
+// everyone but the creator; built-in entries never get one.
+function renderLibraryList(entries, solvedPuzzles, myUid) {
   els.libraryList.innerHTML = '';
-  for (const entry of puzzles) {
+  for (const entry of entries) {
+    const solved = solvedPuzzles.get(entry.id);
+
     const li = document.createElement('li');
     li.className = 'library-row';
 
+    const badge = document.createElement('span');
+    badge.className = `library-row__badge library-row__badge--${entry.builtin ? 'builtin' : 'community'}`;
+    badge.textContent = entry.builtin ? 'Built-in' : 'Community';
+
     const title = document.createElement('span');
     title.className = 'library-row__title';
-    title.textContent = entry.title;
+    // Hidden until solved — same generic "Puzzle N — RxC" placeholder scheme the old
+    // dropdown used (see the completion-modal comment in index.html) — so browsing the
+    // list doesn't spoil the picture. `displayIndex` is assigned once over the full
+    // unfiltered merged list (see refreshLibraryList) so it stays stable across filtering.
+    title.textContent = solved ? entry.title : `Puzzle ${entry.displayIndex} — ${entry.rows}x${entry.cols}`;
 
     const size = document.createElement('span');
     size.className = 'library-row__size';
     size.textContent = `${entry.rows}x${entry.cols}`;
+
+    li.append(badge, title, size);
+
+    if (solved) {
+      const solvedBadge = document.createElement('span');
+      solvedBadge.className = 'library-row__solved';
+      solvedBadge.textContent = '✓ Solved';
+      const statsSpan = document.createElement('span');
+      statsSpan.className = 'library-row__personal-stats';
+      const times = `${solved.timesSolved}×`;
+      const best = solved.bestTimeMs != null ? ` · best ${formatDuration(solved.bestTimeMs)}` : '';
+      statsSpan.textContent = `${times}${best}`;
+      li.append(solvedBadge, statsSpan);
+    }
 
     const playBtn = document.createElement('button');
     playBtn.className = 'btn btn--primary';
@@ -1165,19 +1177,20 @@ function renderLibraryList(puzzles, myUid) {
       playBtn.disabled = true;
       els.libraryStatus.textContent = '';
       try {
-        const p = await loadLibraryPuzzle(entry.id);
+        const p = entry.builtin
+          ? SAMPLE_PUZZLES.find((sp) => sp.id === entry.id)
+          : await loadLibraryPuzzle(entry.id);
         els.libraryModal.classList.add('hidden');
-        startLibraryPuzzle(p);
+        startPuzzle(p);
       } catch (err) {
         console.warn('loadLibraryPuzzle failed:', err);
         els.libraryStatus.textContent = `Couldn't load "${entry.title}" — ${err?.message || 'try again.'}`;
         playBtn.disabled = false;
       }
     });
+    li.appendChild(playBtn);
 
-    li.append(title, size, playBtn);
-
-    if (entry.creatorUid === myUid) {
+    if (!entry.builtin && entry.creatorUid === myUid) {
       const renameBtn = document.createElement('button');
       renameBtn.className = 'btn btn--ghost';
       renameBtn.type = 'button';
@@ -1185,6 +1198,8 @@ function renderLibraryList(puzzles, myUid) {
       renameBtn.addEventListener('click', () => {
         // Swap the row into an inline edit state — a text input pre-filled with the current
         // title plus Save/Cancel — rather than opening yet another modal on top of this one.
+        // (Renaming edits the always-real `entry.title`; whether it's currently DISPLAYED
+        // depends on solved status exactly like every other row, unaffected by this.)
         const input = document.createElement('input');
         input.className = 'library-row__rename-input';
         input.type = 'text';
@@ -1202,8 +1217,9 @@ function renderLibraryList(puzzles, myUid) {
           try {
             await renamePuzzleInLibrary(entry.id, newTitle);
             entry.title = newTitle;
-            title.textContent = newTitle;
-            li.replaceChildren(title, size, playBtn, renameBtn);
+            // Simplest correct way back to a normal row: re-render from the (now-updated)
+            // entries array rather than hand-reassembling this one row's children.
+            renderLibraryList(entries, solvedPuzzles, myUid);
           } catch (err) {
             console.warn('renamePuzzleInLibrary failed:', err);
             els.libraryStatus.textContent = `Couldn't rename — ${err?.message || 'try again.'}`;
@@ -1216,7 +1232,7 @@ function renderLibraryList(puzzles, myUid) {
         cancelBtn.type = 'button';
         cancelBtn.textContent = 'Cancel';
         cancelBtn.addEventListener('click', () => {
-          li.replaceChildren(title, size, playBtn, renameBtn);
+          renderLibraryList(entries, solvedPuzzles, myUid);
         });
 
         li.replaceChildren(input, saveBtn, cancelBtn);
@@ -1229,30 +1245,70 @@ function renderLibraryList(puzzles, myUid) {
   }
 }
 
+// Re-fetches everything the library modal needs (saved puzzles, solved-puzzle tracking, and
+// the signed-in uid) and re-renders. Built-in puzzles are always shown even if the Firestore
+// fetch fails (offline, rules not deployed) — they're static local data, not something a
+// network hiccup should hide.
 async function refreshLibraryList() {
   els.libraryStatus.textContent = 'Loading…';
   els.libraryList.innerHTML = '';
+
+  let saved = [];
+  let fetchError = null;
   try {
-    // Anonymous sign-in only (no UI, no prompt) — needed just to know "is this my own
-    // puzzle" for the rename affordance; browsing/reading the library itself is public and
-    // doesn't require it (see firestore.rules), but ensureSignedIn() is already how every
-    // other Firebase-backed feature here resolves "the current uid" (see src/stats.js).
-    const [puzzles, user] = await Promise.all([fetchLibraryPuzzles(), ensureSignedIn().catch(() => null)]);
-    if (puzzles.length === 0) {
-      els.libraryStatus.textContent = 'No puzzles saved to the library yet — save one from the scan wizard.';
-      return;
-    }
-    els.libraryStatus.textContent = '';
-    renderLibraryList(puzzles, user?.uid ?? null);
+    saved = await fetchLibraryPuzzles();
   } catch (err) {
     console.warn('fetchLibraryPuzzles failed:', err);
-    els.libraryStatus.textContent =
-      "Couldn't load the library — this needs Firestore rules deployed and a network connection.";
+    fetchError = err;
   }
+
+  // Anonymous sign-in only (no UI, no prompt) — needed for "is this my own puzzle" (rename
+  // affordance) and for the solved-puzzle lookup; browsing/reading the library itself is
+  // public and doesn't require it (see firestore.rules).
+  const [user, solvedPuzzles] = await Promise.all([
+    ensureSignedIn().catch(() => null),
+    fetchSolvedPuzzles().catch(() => new Map()),
+  ]);
+
+  const merged = builtinLibraryEntries().concat(saved.map((p) => ({ ...p, builtin: false })));
+  merged.forEach((e, i) => {
+    e.displayIndex = i + 1;
+  });
+
+  libraryEntriesCache = merged;
+  solvedPuzzlesCache = solvedPuzzles;
+  libraryMyUid = user?.uid ?? null;
+  populateLibrarySizeFilter(merged);
+
+  els.libraryStatus.textContent = fetchError
+    ? "Couldn't load community-saved puzzles (offline or not deployed yet) — showing built-in puzzles only."
+    : '';
+  applyLibraryFilters();
 }
 
-els.menuLibrary.addEventListener('click', () => {
-  closeHelpMenu();
+// Applies the Solved/Unsolved and Size filters to the cached merged list and re-renders —
+// doesn't re-fetch, so switching a filter is instant.
+function applyLibraryFilters() {
+  const solvedFilter = els.libraryFilterSolved.value;
+  const sizeFilter = els.libraryFilterSize.value;
+  let filtered = libraryEntriesCache;
+  if (solvedFilter === 'solved') filtered = filtered.filter((e) => solvedPuzzlesCache.has(e.id));
+  else if (solvedFilter === 'unsolved') filtered = filtered.filter((e) => !solvedPuzzlesCache.has(e.id));
+  if (sizeFilter !== 'all') filtered = filtered.filter((e) => `${e.rows}x${e.cols}` === sizeFilter);
+
+  if (filtered.length === 0) {
+    els.libraryList.innerHTML = '';
+    els.libraryStatus.textContent = 'No puzzles match these filters.';
+    return;
+  }
+  els.libraryStatus.textContent = '';
+  renderLibraryList(filtered, solvedPuzzlesCache, libraryMyUid);
+}
+
+els.libraryFilterSolved.addEventListener('change', applyLibraryFilters);
+els.libraryFilterSize.addEventListener('change', applyLibraryFilters);
+
+els.btnOpenLibrary.addEventListener('click', () => {
   els.libraryModal.classList.remove('hidden');
   refreshLibraryList();
 });
@@ -1267,7 +1323,7 @@ els.btnLibraryClose.addEventListener('click', () => {
 els.menuClearAll.addEventListener('click', async () => {
   closeHelpMenu();
   if (!(await showConfirm("Clear this puzzle and start over? This can't be undone."))) return;
-  loadPuzzle(puzzle.id);
+  startPuzzle(puzzle);
 });
 
 // ---- Help dropdown (item: UI consolidation pass) ----
@@ -1309,7 +1365,6 @@ els.btnHowToPlayClose.addEventListener('click', () => {
 
 // ---- toolbar ----
 
-els.puzzleSelect.addEventListener('change', (e) => loadPuzzle(e.target.value));
 els.toggleAutocheck.addEventListener('change', (e) => {
   autoCheckEnabled = e.target.checked;
 });
@@ -1361,8 +1416,7 @@ async function refreshStatsTable() {
   }
 }
 
-els.menuStats.addEventListener('click', () => {
-  closeHelpMenu();
+els.btnOpenStats.addEventListener('click', () => {
   els.pairingCodeDisplay.classList.add('hidden');
   els.pairingCodeInput.value = '';
   els.pairingStatus.textContent = '';
@@ -1410,8 +1464,7 @@ els.btnRedeemCode.addEventListener('click', async () => {
 
 setMode('fill');
 syncMuteButton();
-populatePuzzleSelect();
-loadPuzzle(SAMPLE_PUZZLES[0].id);
+startPuzzle(SAMPLE_PUZZLES[0]);
 // Current Objective (see TODO.md): the app-wide "screen moves up and down for no reason on
 // iOS" report turned out NOT to be about extra scrollable space (the scrollbar itself was
 // fine whenever real content needed one, per the project owner directly) — it's iOS Safari's

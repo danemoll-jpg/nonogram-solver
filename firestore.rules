@@ -1,6 +1,7 @@
 rules_version = '2';
 
-// Backs item 4 (cross-device stats + pairing). Only two collections exist so far:
+// Backs item 4 (cross-device stats + pairing) and the library-consolidation round (see
+// TODO.md's Current Objective). Collections:
 //
 //   users/{uid}/stats/{size}  — per-grid-size completion stats (src/stats.js). Owning-uid
 //     only, both read and write — no sharing/friend-visibility yet (that's item 9's
@@ -9,6 +10,19 @@ rules_version = '2';
 //     functions/index.js's redeemPairingCode) rather than trying to merge two separate
 //     Firebase Auth identities, so a plain request.auth.uid == uid check is all that's
 //     needed here — no merge-aware special-casing.
+//
+//   users/{uid}/solvedLibraryPuzzles/{puzzleId} — per-user "have I solved this puzzle"
+//     tracking (src/puzzleLibrary.js's recordPuzzleSolved/fetchSolvedPuzzles), keyed by
+//     the puzzle's own id — works uniformly for both a built-in SAMPLE_PUZZLES id (e.g.
+//     'heart-5') and a Firestore-generated `puzzles/{puzzleId}` id, since this is just a
+//     client-chosen document id under the player's own uid subcollection, not a reference
+//     that has to resolve against the public `puzzles` collection. Same owning-uid-only
+//     rule as `stats` above, and the same reasoning: pairing already re-authenticates onto
+//     the same uid, so no separate cross-device logic is needed here either. This is a
+//     personal record (times solved, personal best time) — never a public/competitive
+//     value — so a plain client write is fine, unlike a hypothetical global fastest-time
+//     stat (see TODO.md's note on why that one, if ever built, would need a Cloud Function
+//     instead).
 //
 //   pairingCodes/{code} — short-lived code -> uid mappings. Only ever read/written by the
 //     createPairingCode/redeemPairingCode Cloud Functions via the Admin SDK, which bypasses
@@ -25,6 +39,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /users/{uid}/stats/{size} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{uid}/solvedLibraryPuzzles/{puzzleId} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 

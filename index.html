@@ -18,10 +18,17 @@
     <main class="layout">
       <section class="board-panel">
         <div class="toolbar">
-          <label class="toolbar__field">
-            Puzzle
-            <select id="puzzle-select"></select>
-          </label>
+          <!-- Library consolidation round (see TODO.md): this is where the old "Puzzle"
+               dropdown of built-in samples used to live — it's now the entry point for the
+               merged library modal (built-in + community-saved puzzles in one browsable
+               list), since picking a puzzle isn't a help action and shouldn't live under
+               Help. "Stats & pairing" moved out to sit alongside it for the same reason —
+               it's increasingly the same conceptual area now that per-puzzle solved status
+               and personal stats are part of the library. -->
+          <div class="library-entry-group">
+            <button id="btn-open-library" class="btn btn--primary" type="button">📚 Puzzle library</button>
+            <button id="btn-open-stats" class="btn" type="button">📊 Stats & pairing</button>
+          </div>
           <div class="mode-toggle" role="group" aria-label="Marking mode">
             <button id="mode-fill" class="mode-btn" type="button" aria-pressed="true">Fill</button>
             <button id="mode-x" class="mode-btn" type="button" aria-pressed="false">✕ Mark empty</button>
@@ -45,8 +52,6 @@
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-check">Check my work</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-remove-bad">Remove bad marks</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-scan">Scan a puzzle</button></li>
-              <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-library">Puzzle library</button></li>
-              <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-stats">Stats & pairing</button></li>
               <li class="help-menu__divider" role="none" aria-hidden="true"></li>
               <li role="none"><button class="help-menu__item help-menu__item--danger" role="menuitem" type="button" id="menu-clear-all">Clear all</button></li>
             </ul>
@@ -114,8 +119,8 @@
   <div id="complete-modal" class="modal-overlay hidden">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="complete-title">
       <h2 id="complete-title" class="modal-card__title">🎉 Solved!</h2>
-      <!-- The puzzle's real name is hidden during play (see #puzzle-select's generic
-           "Puzzle N — RxC" labels) so it doesn't give away what image is being built —
+      <!-- The puzzle's real name is hidden during play (see the library modal's generic
+           "Puzzle N — RxC" row labels) so it doesn't give away what image is being built —
            revealed here now that there's no more picture left to spoil. -->
       <dl class="modal-stats">
         <div class="modal-stats__row"><dt>Puzzle</dt><dd id="stat-name"></dd></div>
@@ -277,16 +282,37 @@
     </div>
   </div>
 
-  <!-- Puzzle library (item 9's save-to-library slice) — public, most-recent-first list of
-       puzzles saved from the scan wizard's "done" step (see src/scanUI.js and
-       src/puzzleLibrary.js). Tap a puzzle to play it as a real, permanent puzzle (full move
-       history, counts toward stats — not a scan snapshot). A puzzle's creator additionally
-       gets a rename affordance, shown only on their own saved puzzles; renaming edits the
-       row in place instead of opening another modal. -->
+  <!-- Puzzle library — the single puzzle-selection UI (library-consolidation round, see
+       TODO.md), merging the built-in SAMPLE_PUZZLES with the public community-saved
+       puzzles from src/puzzleLibrary.js (item 9's save-to-library slice) into one browsable
+       list. Every row's real title stays hidden behind a generic "Puzzle N — RxC"
+       placeholder — same scheme the old dropdown used — until the current (or
+       cross-device-paired) player has solved that specific puzzle, tracked via
+       src/puzzleLibrary.js's recordPuzzleSolved/fetchSolvedPuzzles; a solved row also gets
+       a badge and personal times-solved/best-time. Tap a puzzle to play it as a real,
+       permanent puzzle (full move history, counts toward stats — not a scan snapshot). A
+       saved puzzle's creator additionally gets a rename affordance, shown only on their own
+       puzzles; renaming edits the row in place instead of opening another modal. -->
   <div id="library-modal" class="modal-overlay hidden">
     <div class="modal-card modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="library-title">
       <h2 id="library-title" class="modal-card__title">Puzzle library</h2>
       <div class="modal-card__body">
+        <div class="library-filters">
+          <label class="library-filters__field">
+            Show
+            <select id="library-filter-solved">
+              <option value="all">All</option>
+              <option value="solved">Solved</option>
+              <option value="unsolved">Unsolved</option>
+            </select>
+          </label>
+          <label class="library-filters__field">
+            Size
+            <select id="library-filter-size">
+              <option value="all">All sizes</option>
+            </select>
+          </label>
+        </div>
         <p id="library-status" class="stats-status">Loading…</p>
         <ul id="library-list" class="library-list"></ul>
       </div>

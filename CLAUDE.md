@@ -6,9 +6,10 @@
 - No TypeScript currently; the whole solver and UI are vanilla JS.
 - Firebase project (`nonogram-pro-e8a31`) is in active use for Cloud Functions, Anonymous
   Auth, and Firestore. Deployed callables: `phraseHint` (LLM hint phrasing) and
-  `createPairingCode`/`redeemPairingCode` (cross-device stats pairing). Firestore now
-  also backs the puzzle library (`puzzles/{puzzleId}`) — see `TODO.md` for deploy
-  gotchas if redeploying or adding more Firestore-touching functions/rules.
+  `createPairingCode`/`redeemPairingCode` (cross-device stats pairing). Firestore also
+  backs the puzzle library (`puzzles/{puzzleId}`) and per-user solved-puzzle tracking
+  (`users/{uid}/solvedLibraryPuzzles/{puzzleId}`) — see `TODO.md` for deploy gotchas if
+  redeploying or adding more Firestore-touching functions/rules.
 - Deploy target: Netlify, static-site mode. The Netlify site auto-deploys from this
   repo's `main` branch — live at https://nonogrampro.netlify.app/.
 - Tesseract.js (OCR, item 10's scan-existing-puzzle flow) is loaded lazily from the CDN
@@ -50,38 +51,26 @@ more up to date than this file's summary below.
 
 Short version: the full solver/UI stack, the UI consolidation and post-ship bug-fix
 passes, the iPad-verification follow-up pass, the clue-number spacing fix, item 10
-(scan-existing-puzzle), the per-number clue gray-out fix, and the save-to-library
-feature (deployed, live, saving works) are all done. OCR accuracy has been explicitly
-accepted as "good enough for now" by the project owner, confirmed twice. See
-`TODO.md`'s Completed Tasks for the full history and every design tradeoff.
+(scan-existing-puzzle), the per-number clue gray-out fix, the save-to-library
+feature, and the library-consolidation round (merged puzzle-selection UI, per-puzzle
+solved tracking + personal stats + filters, deployed and verified live) are all done.
+OCR accuracy has been explicitly accepted as "good enough for now" by the project
+owner, confirmed twice. See `TODO.md`'s Completed Tasks for the full history and
+every design tradeoff.
 
-**Current objective has two items**:
-1. **New design item: consolidate the two separate puzzle-selection UIs (the old
-   top "Puzzle" dropdown of built-in samples, and the newer Help-menu library
-   modal) into one — the library modal wins.** Two real follow-on requirements: the
-   merged list must hide puzzle names until completion (reuse the existing
-   `Puzzle N — RxC` placeholder scheme already used by the dropdown, don't invent a
-   new one), and the library's entry point should move out of the Help dropdown
-   (browsing puzzles isn't a help action) to roughly where the old dropdown lived.
-   Built-in samples don't need to migrate into Firestore — just merge both sources
-   into one UI list. **Additional scope added this round**: reveal a puzzle's real
-   name once the current (or cross-device-paired) user has solved it, a
-   solved-status badge, per-puzzle solved/unsolved and size filters, personal
-   per-puzzle stats (times solved, best time — a direct client write, no Cloud
-   Function needed since it's the player's own uid-scoped data), and optionally a
-   global fastest-time stat per puzzle (nice-to-have, not required this round; if
-   built, needs a server-side Cloud Function like the existing pairing callables,
-   since a client-writable public "fastest time" field is gameable). Also: "Stats &
-   pairing" moves out of the Help dropdown too and gets grouped with the library
-   (exact UI shape left to Code's judgment). See `TODO.md` for full scope.
-2. **Scroll bug — now with a much sharper repro**: whitespace appears specifically
-   after the on-screen keyboard has been used, and persists afterward; no issue
-   before any keyboard interaction. Points at the keyboard-triggered resize/re-fit
-   path (`handleViewportResize`, `app.js`) leaving something in a wrong state once
-   the keyboard closes, rather than a general layout bug. Also need to confirm
-   whether the `?debug=scroll` diagnostic button was actually visible/usable in this
-   specific scenario — the project owner tried it but isn't sure it captured
-   anything.
+**Current objective has one open item** (the library-consolidation round's one
+deliberately-deferred piece — an optional global fastest-time-per-puzzle stat,
+which would need a Cloud Function to avoid a gameable public field — is not it;
+pick that up only if the project owner asks for it):
+
+* **Scroll bug — now with a much sharper repro**: whitespace appears specifically
+  after the on-screen keyboard has been used, and persists afterward; no issue
+  before any keyboard interaction. Points at the keyboard-triggered resize/re-fit
+  path (`handleViewportResize`, `app.js`) leaving something in a wrong state once
+  the keyboard closes, rather than a general layout bug. Also need to confirm
+  whether the `?debug=scroll` diagnostic button was actually visible/usable in this
+  specific scenario — the project owner tried it but isn't sure it captured
+  anything.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope (private/friends sharing, richer

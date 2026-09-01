@@ -94,6 +94,35 @@ Completed Tasks
   had encoded the old incomplete behavior as "expected," and confirmed end-to-end in
   browser preview that a single-sided bound now correctly triggers the gray-out in
   normal gameplay.
+* **Library consolidation round — done and verified end-to-end in browser preview
+  (real Firestore reads/writes, not just built-in data), Firestore rules deployed.**
+  The old top "Puzzle" dropdown is gone entirely; the puzzle library modal (now
+  triggered from a toolbar button roughly where the dropdown lived, alongside a new
+  "Stats & pairing" toolbar button — both moved out of the Help dropdown, which no
+  longer has either entry) is the single puzzle-selection UI, merging `SAMPLE_PUZZLES`
+  (built-ins stay local static data, not migrated into Firestore) with
+  `fetchLibraryPuzzles()`'s community-saved puzzles into one list (`app.js`'s
+  `refreshLibraryList`/`renderLibraryList`/`applyLibraryFilters`). Every row hides its
+  real title behind the existing "Puzzle N — RxC" placeholder scheme until the current
+  (or cross-device-paired) player has solved that specific puzzle, then reveals the
+  title, a "✓ Solved" badge, and personal `timesSolved`/`bestTimeMs` — all driven by a
+  new per-user collection, `users/{uid}/solvedLibraryPuzzles/{puzzleId}`
+  (`src/puzzleLibrary.js`'s `recordPuzzleSolved`/`fetchSolvedPuzzles`, written
+  alongside the existing per-size stats at the same completion point, both skipping
+  scan-origin puzzles), keyed uniformly off a puzzle's own id whether it's a
+  SAMPLE_PUZZLES id or a Firestore doc id — so cross-device pairing (already
+  re-authenticating onto the same uid) tracks it automatically, no extra logic needed.
+  `recordPuzzleSolved` uses a Firestore transaction so `bestTimeMs` can't be clobbered
+  by two racing solves. Solved/Unsolved and grid-size filters on the list, and a light
+  "Built-in"/"Community" badge distinguishing the two sources. Firestore rules deployed
+  (`users/{uid}/solvedLibraryPuzzles/{puzzleId}`, same owning-uid-only pattern as the
+  existing per-size `stats` rule) — confirmed live via a real solve-and-reopen round
+  trip (write failed with `permission-denied` before deploy, succeeded and showed the
+  revealed name + solved badge + `1× · best 0:13` after). **Not built this round (left
+  as the nice-to-have TODO.md already scoped it as): the optional GLOBAL
+  fastest-time-across-all-users per puzzle** — would need a callable Cloud Function
+  (like `createPairingCode`/`redeemPairingCode`) to avoid a gameable client-writable
+  public field; nothing currently depends on it.
 * **Save-to-library feature — client-side implementation done, and the Firestore
   rules deploy has since happened (the feature works — a puzzle successfully saves
   and does appear in the library list). The earlier "doesn't appear" report was a
@@ -115,94 +144,12 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **New design item, confirmed with the project owner: consolidate the two separate
-  puzzle-selection UIs (the original top "Puzzle" dropdown of built-in samples, and
-  the newer Help-menu "Puzzle library" modal) into one single place — the library
-  modal wins, since it's the more extensible surface for future puzzle-management
-  features.** Two follow-on requirements the project owner flagged, both real scope,
-  not edge cases:
-  1. **Puzzle names must stay hidden until completion in the merged list, same as
-     the existing dropdown already does.** The dropdown currently shows a generic
-     placeholder (`Puzzle N — RxC`) instead of a puzzle's real name/title, revealing
-     the real name only in the completion modal — this exists specifically so
-     picking a puzzle doesn't spoil what picture it draws. The library modal
-     currently shows saved puzzles' real `title` field directly in the browse list,
-     which defeats that. **Fix: apply the exact same hidden-name display scheme to
-     every entry in the merged library list** (built-in and saved alike) — a generic
-     placeholder in the list, real title revealed only in the completion modal, same
-     as today's dropdown behavior. Don't invent a new scheme; reuse the existing one.
-  2. **The library entry point should not live in the Help dropdown** — browsing/
-     picking a puzzle isn't a help action. Reasonable default, not yet locked in:
-     since this modal is replacing the old dropdown as the primary way to choose a
-     puzzle, its trigger should move to roughly where the old dropdown lived (main
-     toolbar), not into any menu. Confirm this placement makes sense once it's
-     actually built, rather than assuming it's exactly right.
-  - **Scope for consolidating the two puzzle sources**: the built-in sample puzzles
-    (`SAMPLE_PUZZLES`) don't need to be migrated into Firestore — they can stay local
-    static data. What needs to change is the UI: the library modal's browse list
-    should merge both sources (local samples + fetched Firestore puzzles) into one
-    single list/view, rather than requiring built-ins to become Firestore documents.
-    Worth a light visual distinction between "built-in" and "community-saved" entries
-    in the merged list (e.g. a small label or grouping), but this is a nice-to-have,
-    not a blocker — the core requirement is one list, one entry point, not a data
-    migration.
-  - Remove the old top "Puzzle" dropdown entirely once the library modal covers
-    everything it did.
-  - **Additional scope, added by the project owner — these need real new data
-    tracking, not just UI:**
-    1. **Reveal a puzzle's real name in the list once the current user (or a
-       cross-device-paired linked identity) has solved it.** This needs a genuinely
-       new piece of per-user data that doesn't exist yet: today's personal stats
-       (`stats.js`/`recordCompletion`) are bucketed anonymously by grid *size*, with
-       no record of *which specific puzzle* was solved. Add per-user tracking of
-       solved library-puzzle IDs (e.g. `users/{uid}/solvedLibraryPuzzles/{puzzleId}`,
-       or an array/map field), written at the same completion point personal stats
-       already are recorded from. Since cross-device pairing already re-authenticates
-       a second device onto the same underlying uid (custom token, per the existing
-       pairing design), this should work across paired devices automatically once
-       it's keyed off uid the same way personal stats already are — no separate
-       cross-device logic needed.
-    2. **A visual "solved" indicator** (badge/checkmark) on library list rows,
-       driven by the same solved-puzzle-ID tracking as #1.
-    3. **Per-puzzle stats, scope corrected by the project owner: times-solved and
-       fastest-time are PERSONAL (this user only), not a global aggregate.** Store
-       both directly in the same per-user solved-puzzle-ID record from #1 (e.g.
-       `users/{uid}/solvedLibraryPuzzles/{puzzleId}: { timesSolved, bestTimeMs }`) —
-       this is the player's own data, protected by the standard per-uid Firestore
-       rule already in place elsewhere in this app (write allowed only when
-       `request.auth.uid` matches the document's own uid), so **no Cloud Function is
-       needed for this personal piece** — a direct client write is fine here, unlike
-       the global stat below.
-       - **Separately, optional/"would be interesting," not a firm requirement this
-         round**: a GLOBAL fastest-time-across-all-users stat per puzzle (not a
-         global times-solved count — the project owner only asked for global
-         fastest-time specifically). If built, this genuinely is a public,
-         competitive, per-puzzle-document field, and the earlier gameability
-         concern still applies to it specifically: a client directly writing a
-         "fastest time" to a public `puzzles/{puzzleId}` document is gameable
-         (nothing stops a malicious client from writing a fake instant time).
-         **If/when this gets built, follow this project's established pattern**
-         (the `createPairingCode`/`redeemPairingCode` callables, which use the
-         Admin SDK server-side specifically to keep sensitive writes out of direct
-         client hands) — a callable Cloud Function that only updates a puzzle's
-         global `fastestTimeMs` if the new time genuinely improves on the stored
-         one, server-side. Treat this as a nice-to-have to slot in once the rest of
-         the library work (consolidation, personal solved/stats, filters) is done,
-         not something to build first or that should hold up the rest of this
-         round.
-    4. **Filters on the library list: Solved / Unsolved / All, and by grid size.**
-
-       Straightforward once (1) exists (solved/unsolved filtering) and given
-       dimensions are already a schema field (size filtering) — no new data needed
-       beyond what's already listed above.
-    5. **"Stats & pairing" should also move out of the Help dropdown and be grouped
-       with the library, not live as a separate Help item.** Same reasoning as the
-       library itself — this is puzzle/progress-related, not a help action, and it's
-       increasingly the same conceptual area as the library now that per-puzzle
-       solved status and stats are part of it. Exact mechanism (a tab within the same
-       modal, an adjacent button, a section of the library view) is left to Code's
-       judgment — the requirement is that it's no longer under Help and is reachable
-       from/alongside the library, not the specific UI shape.
+* **Library consolidation round — done, see Completed Tasks for the full writeup.**
+  The one deliberately-deferred piece: the optional GLOBAL fastest-time-across-all-
+  users stat per puzzle (needs a callable Cloud Function to avoid a gameable
+  client-writable public field — see Completed Tasks entry for why). Not started;
+  pick up only if/when the project owner actually wants it, per its original
+  nice-to-have framing.
 
 * **Scroll bug: sharpened, keyboard-specific repro from the project owner — the
   whitespace only appears once the on-screen keyboard has been used, and persists

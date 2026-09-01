@@ -137,21 +137,12 @@ body {
   margin-bottom: 1.25rem;
 }
 
-.toolbar__field {
+/* Library-consolidation round (see TODO.md): where the old "Puzzle" dropdown lived —
+   now the entry point for the merged library modal, plus "Stats & pairing" grouped
+   alongside it (both moved out of the Help dropdown; neither is a help action). */
+.library-entry-group {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
-  font-size: 0.9rem;
-  color: var(--text-dim);
-}
-
-.toolbar__field select {
-  background: var(--panel-bg-raised);
-  color: var(--text);
-  border: 1px solid rgba(230, 183, 63, 0.3);
-  border-radius: 0.5rem;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.9rem;
 }
 
 .toolbar__toggle {
@@ -1108,7 +1099,32 @@ body {
   font-size: 0.95rem;
 }
 
-/* ---- Puzzle library browse modal (item 9's save-to-library slice) ---- */
+/* ---- Puzzle library browse modal (library-consolidation round — see TODO.md; started
+   as item 9's save-to-library slice) ---- */
+
+.library-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
+.library-filters__field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.library-filters__field select {
+  background: var(--panel-bg-raised);
+  color: var(--text);
+  border: 1px solid rgba(230, 183, 63, 0.3);
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.85rem;
+}
 
 .library-list {
   list-style: none;
@@ -1121,11 +1137,34 @@ body {
 
 .library-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.6rem;
   padding: 0.5rem 0.6rem;
   border: 1px solid rgba(230, 183, 63, 0.2);
   border-radius: 0.5rem;
+}
+
+/* Light visual distinction between built-in and community-saved rows (nice-to-have per
+   TODO.md, not a functional requirement) — a small label, not a structural difference. */
+.library-row__badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.2rem 0.45rem;
+  border-radius: 1rem;
+  white-space: nowrap;
+}
+
+.library-row__badge--builtin {
+  color: var(--text-dim);
+  background: rgba(242, 236, 221, 0.1);
+}
+
+.library-row__badge--community {
+  color: var(--gold);
+  background: rgba(230, 183, 63, 0.14);
 }
 
 .library-row__title {
@@ -1140,6 +1179,22 @@ body {
 .library-row__size {
   color: var(--text-dim);
   font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* Solved status (library-consolidation round) — driven by
+   src/puzzleLibrary.js's fetchSolvedPuzzles; also what reveals .library-row__title's real
+   name instead of the generic "Puzzle N — RxC" placeholder. */
+.library-row__solved {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--success, #4caf7d);
+  white-space: nowrap;
+}
+
+.library-row__personal-stats {
+  font-size: 0.75rem;
+  color: var(--text-dim);
   white-space: nowrap;
 }
 

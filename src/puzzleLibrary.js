@@ -107,3 +107,68 @@ export async function renamePuzzleInLibrary(id, title) {
   const { db, mod } = await getFirestoreClient();
   await mod.updateDoc(mod.doc(db, COLLECTION, id), { title });
 }
+
+// ---- Personal solved-puzzle tracking (library-consolidation round — see TODO.md) ----
+//
+// `users/{uid}/solvedLibraryPuzzles/{puzzleId}` records, per player, which puzzles in the
+// merged browse list (app.js merges SAMPLE_PUZZLES + this module's fetchLibraryPuzzles into
+// one list) they've solved — keyed by that puzzle's own id, which works the same way for a
+// built-in ('heart-5') or a saved library puzzle (Firestore doc id): this collection never
+// needs to look the id up against `puzzles/{puzzleId}`, it's just a client-chosen doc id
+// under the player's own uid. This is what lets the browse list reveal a puzzle's real name
+// once solved (instead of the generic hidden-name placeholder — see app.js's
+// renderLibraryList) and show a solved badge + personal times-solved/best-time, and it's
+// what the Solved/Unsolved filter reads. Cross-device pairing re-authenticates a second
+// device onto the same uid (see src/stats.js's header comment), so this tracks correctly
+// across paired devices with no extra logic, exactly like the existing per-size stats do.
+//
+// Deliberately NOT the same document as `users/{uid}/stats/{size}` — that's bucketed by
+// grid size with no per-puzzle identity; this is bucketed by puzzle id with no size
+// grouping. Both are written at the same completion point (see app.js's
+// maybeShowCompletion) but serve different UI.
+
+// Resolves a Map<puzzleId, { timesSolved, bestTimeMs }> for every library-list puzzle the
+// current (or paired) user has ever solved. Throws on failure — the library modal falls
+// back to treating every puzzle as unsolved (name hidden, no badge) rather than guessing,
+// same "fail soft, don't fake it" pattern as the rest of this module's Firestore calls.
+export async function fetchSolvedPuzzles() {
+  const user = await ensureSignedIn();
+  const { db, mod } = await getFirestoreClient();
+  const snap = await mod.getDocs(mod.collection(db, 'users', user.uid, 'solvedLibraryPuzzles'));
+  const out = new Map();
+  snap.forEach((docSnap) => {
+    const d = docSnap.data();
+    out.set(docSnap.id, { timesSolved: d.timesSolved || 0, bestTimeMs: d.bestTimeMs ?? null });
+  });
+  return out;
+}
+
+// Called once per genuine completion of a library-list puzzle (see app.js's
+// maybeShowCompletion, right alongside src/stats.js's recordCompletion) — increments
+// timesSolved and lowers bestTimeMs only if this run genuinely beat it. A scan-origin
+// puzzle never has a stable identity worth tracking as "solved" (same reasoning
+// recordCompletion already uses to skip it), so it's skipped here too. Resolves true/false
+// for whether the write happened; callers don't need to react either way, matching
+// recordCompletion's fire-and-forget contract — a failed write must never affect completion
+// UI the player already sees.
+export async function recordPuzzleSolved(puzzle, timeMs) {
+  if (puzzle.source === 'scan') return false;
+  try {
+    const user = await ensureSignedIn();
+    const { db, mod } = await getFirestoreClient();
+    const ref = mod.doc(db, 'users', user.uid, 'solvedLibraryPuzzles', puzzle.id);
+    // A transaction, not a plain read-then-write, so two solves racing (e.g. two tabs) can't
+    // clobber each other's bestTimeMs — mod.increment alone would be safe for timesSolved,
+    // but "keep the lower of two times" needs to read before it writes.
+    await mod.runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      const prevBest = snap.exists() ? snap.data().bestTimeMs : null;
+      const bestTimeMs = prevBest == null ? timeMs : Math.min(prevBest, timeMs);
+      tx.set(ref, { timesSolved: mod.increment(1), bestTimeMs, solvedAt: mod.serverTimestamp() }, { merge: true });
+    });
+    return true;
+  } catch (err) {
+    console.warn('recordPuzzleSolved: write failed (offline, not deployed yet, or blocked) — ignoring', err);
+    return false;
+  }
+}
