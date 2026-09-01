@@ -32,12 +32,16 @@
   file over synthetic/guessed pixel data.** See `TODO.md`'s Completed Tasks for the full
   history, including a confirmed real ground-truth reference puzzle
   (`scratch-images/sample-mid-solve.jpg`) reusable for future OCR-accuracy verification.
-- **iOS scroll/touch bugs in this app have now failed real-device verification
-  multiple times, despite passing every check this project's own tooling can perform
-  each time.** A round-1 fix for keyboard-triggered residual viewport pan is deployed
-  but has three confirmed follow-ups still outstanding (see `TODO.md`'s Current
-  Objective) — don't treat round 1 alone as done. Always get real `?debug=scroll` data
-  from the actual device before further changes to this area.
+- **iOS scroll/touch bugs in this app have now failed real-device verification across
+  FOUR rounds** (the original scan-wizard-specific bug took four rounds itself; this
+  app-wide regression's round 1 AND round 2 have both since failed real-device testing
+  despite passing every local/preview check). **The current leading theory is a
+  coverage gap in which events trigger a re-check** — each round has added one more
+  specific event listener (focusout, resize, focusin) but a stuck pan can persist
+  through transitions none of those cover (closing a modal, navigating screens).
+  Consider a periodic/idle re-check instead of chasing individual trigger events one
+  at a time. Always get real `?debug=scroll` data from the actual device — this bug
+  class has never been reliably reproduced by this project's own tooling.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -51,45 +55,34 @@ more up to date than this file's summary below.
 Short version: the full solver/UI stack, the UI consolidation and post-ship bug-fix
 passes, the iPad-verification follow-up pass, the clue-number spacing fix, item 10
 (scan-existing-puzzle), the per-number clue gray-out fix, the save-to-library
-feature, the library-consolidation round, the UI/branding polish round (Nonogram Pro
-rebrand, trimmed toolbar, bigger X marks, Restart, All games, game-hub listing), the
+feature, the library-consolidation round, the UI/branding polish round, the
 saved/incomplete-puzzle-progress feature, and the live drag-fill cell counter are all
 done and deployed. Fully public library visibility is confirmed as the right model.
 OCR accuracy has been explicitly accepted as "good enough for now." See `TODO.md`'s
 Completed Tasks for the full history.
 
-**Current objective: round 2 of the scroll bug (the three follow-ups confirmed after
-round 1 shipped, plus the Save-progress placement fix) is now implemented and
-committed, but NOT yet real-device-verified** — treat all of it as unverified, not
-done, until confirmed on the actual iPhone:
-1. **Broadened the fix's trigger — implemented.** `correctResidualViewportPan`
-   (`app.js`) no longer just checks "is anything focused" before bailing out; when a
-   text input is focused it now checks the input's real `getBoundingClientRect()`
-   against the current `visualViewport` pan/height, and corrects via
-   `scrollIntoView` (safe while focused) rather than a blind re-zero if the field
-   isn't actually visible where the stale pan claims it is. A `focusin` listener was
-   added alongside the existing `focusout` one so a field-to-field switch (the
-   second capture's repro) gets caught too.
-2. **`.explain-panel` counter-translate fix — implemented.** Same defensive
-   treatment the diagnostic button/panel already had, applied unconditionally (not
-   gated behind `?debug=scroll`) via a small `pinExplainPanelToVisualViewport` IIFE
-   in `app.js`, alongside the main correction.
-3. **"Save progress" moved to its own main-toolbar button — implemented.** New
-   `#btn-save-progress` in `index.html`'s `.library-entry-group`, removed from the
-   Help dropdown; later trimmed to an icon-only 💾 button per a follow-up request.
+**Current objective: the scroll bug is NOT resolved, and round 2's fix (deployed and
+already reported here previously as "implemented") has now been real-device-tested
+and confirmed still failing** — with real new diagnostic data pointing at a specific,
+actionable gap:
 
-Also fixed along the way (not part of the original three, caught while placing the
-new button): a real toolbar button height mismatch — "Puzzle library" was rendering
-8px taller than its neighbors, root-caused to a Chromium quirk where a color-emoji
-glyph's own font metrics can inflate a text button's height past its specified
-`line-height`. Fixed in `styles.css` by pinning `.btn` to an explicit height with
-flex centering instead of relying on `line-height` + `padding` to imply one.
-
-Real-device verification (of round 1's fix AND all three round-2 items above) is
-the only remaining step — this bug class has failed that check multiple times
-despite passing every local/preview test, so don't treat local verification as
-sufficient on its own. See `TODO.md` for the full repro steps and both captures'
-exact timestamps.
+* A full real-device `?debug=scroll` capture shows the pan getting stuck at
+  `offsetTop: 79` and then STAYING stuck through closing the scan wizard (54+
+  seconds later) and navigating back to the main play screen — neither of those
+  transitions is a `focusout` or `visualViewport resize` event, which are the ONLY
+  two triggers round 1 and round 2's fixes listen for. **Recommended next
+  direction: stop adding individual event listeners one at a time and consider a
+  periodic/idle re-check instead** (poll every so often for "offsetTop nonzero,
+  nothing focused" and self-correct regardless of what triggered that state). See
+  `TODO.md` for the full timestamped capture and additional diagnosis notes.
+* Separately: the `.explain-panel` defensive fix from round 2 appears to actually
+  be working in this same capture (its rect stayed within viewport bounds) — a
+  real partial win worth keeping, even though the main pan issue remains open.
+* Also: the toolbar button height/alignment fix from round 2 does not appear to
+  have resolved the visual issue on the real device — "Puzzle library" still
+  looks taller than its neighbors in the project owner's screenshot, despite
+  passing the earlier desktop-preview measurement. Needs re-verification directly
+  on-device, not just via preview numbers.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,
