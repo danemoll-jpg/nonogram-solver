@@ -33,6 +33,7 @@ import { parseClueText, buildScannedPuzzle } from './scanPuzzle.js';
 import { recognizeClueStrip, terminateOcr } from './ocr.js';
 import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines } from './ocrSegment.js';
 import { classifyGridCells } from './cellStateDetect.js';
+import { isLineConsistent } from './lineSolver.js';
 import { FILLED, EMPTY, UNKNOWN } from './model.js';
 
 // Longest side, in pixels, for the canvas used for both on-screen dragging and grid-line
@@ -58,7 +59,7 @@ const MIN_RECT_SIZE = 20;
 // CSS custom properties directly.
 const GOLD = '#e6b73f';
 
-export function initScanWizard({ els, onPuzzleReady }) {
+export function initScanWizard({ els, onPuzzleReady, onClose }) {
   const state = {
     analysisCanvas: null,
     analysisCtx: null,
@@ -124,6 +125,7 @@ export function initScanWizard({ els, onPuzzleReady }) {
     els.scanBtnConfirmGrid.disabled = true;
     els.scanRowClueList.innerHTML = '';
     els.scanColClueList.innerHTML = '';
+    els.scanRecheckWarning.classList.add('hidden');
     els.scanBuildError.classList.add('hidden');
     els.scanFillstateGrid.innerHTML = '';
     showStep('upload');
@@ -146,6 +148,13 @@ export function initScanWizard({ els, onPuzzleReady }) {
     els.pageRoot.classList.remove('hidden');
     els.explainPanel.classList.remove('hidden');
     terminateOcr().catch(() => {}); // free the OCR worker's wasm/network resources
+    // Bug fix (Current Objective #2): the main board's --cell-size was last computed by
+    // fitBoardToViewport whenever the board was rendered or the window resized/rotated —
+    // neither of which fires just from unhiding #page-root again. Without this, the board
+    // stays sized for whatever the viewport looked like before the wizard opened until the
+    // player happens to trigger a resize (e.g. picking a puzzle re-renders it). onClose is
+    // app.js's fitBoardToViewport, passed in at init since sizing logic lives there, not here.
+    onClose?.();
   }
 
   // ---- step 1: load the photo onto both canvases ----
@@ -618,7 +627,61 @@ export function initScanWizard({ els, onPuzzleReady }) {
     return lineTexts.join('\n');
   }
 
-  function buildClueRow(container, labelText, canvas, prefillText) {
+  // Current Objective #1's "reduce correction tedium" idea: cross-check each line's OCR'd
+  // clue against the fill state cellStateDetect.js already detected for that same line
+  // (`fillLine`, computed once in detectFillState() before OCR even runs) — reusing data
+  // already being computed for a different purpose, not a new detection system, per the
+  // TODO's own framing.
+  //
+  // isLineConsistent (lineSolver.js) is the exact right tool here, not a bespoke heuristic:
+  // it already answers "does *some* completion of this line (treating UNKNOWN cells as still
+  // free) match this clue?" — the same DP feasibility check normal play uses to redden a
+  // clue number on a genuine contradiction. A scanned line is usually mid-solve (some cells
+  // still correctly UNKNOWN — confirmed the actual core use case, see TODO.md), so a strict
+  // "does the fill count/pattern exactly match" comparison would misfire constantly on
+  // perfectly good partial progress; isLineConsistent already tolerates that by construction,
+  // since it only fails when NO possible arrangement of the remaining unknowns could satisfy
+  // the clue — i.e. only when the clue and the detected fills are provably incompatible,
+  // which really is either a misread clue number or a fill-detection error, not just
+  // "not finished yet".
+  function lineLooksWrong(clue, fillLine) {
+    return !isLineConsistent(fillLine, clue);
+  }
+
+  // A LOT of flagged lines (rather than one or two) is a different situation from a handful
+  // of independent OCR misreads — it's the signature of a wrong row/column COUNT confirmed a
+  // step earlier (every line downstream of the miscount ends up sliced against the wrong cell
+  // width, so its detected fill pattern stops lining up with any correct clue at all). That's
+  // confirmed directly against a real large puzzle screenshot with a one-off column-count
+  // miscount — see TODO.md. Rather than leaving the player to notice the pattern themselves
+  // and hand-fix a wall of red boxes, a high flagged fraction on either axis surfaces this
+  // directly and points back at the step that actually needs revisiting.
+  const RECHECK_WARN_FRACTION = 0.3;
+
+  function updateRecheckWarning() {
+    const flaggedFraction = (container) => {
+      const rows = [...container.querySelectorAll('.scan-clue-row')];
+      if (rows.length === 0) return 0;
+      return rows.filter((r) => r.classList.contains('scan-clue-row--flagged')).length / rows.length;
+    };
+    const rowFrac = flaggedFraction(els.scanRowClueList);
+    const colFrac = flaggedFraction(els.scanColClueList);
+    if (rowFrac >= RECHECK_WARN_FRACTION || colFrac >= RECHECK_WARN_FRACTION) {
+      const which = rowFrac >= RECHECK_WARN_FRACTION && colFrac >= RECHECK_WARN_FRACTION
+        ? 'Rows and columns'
+        : rowFrac >= RECHECK_WARN_FRACTION ? 'Rows' : 'Columns';
+      els.scanRecheckWarning.textContent =
+        `${which} look wrong across a lot of lines at once, not just one or two — that usually ` +
+        'means the row/column count confirmed on the previous step was off by one, not that ' +
+        'this many numbers were individually misread. Consider canceling and rescanning with a ' +
+        'corrected count rather than fixing each line by hand.';
+      els.scanRecheckWarning.classList.remove('hidden');
+    } else {
+      els.scanRecheckWarning.classList.add('hidden');
+    }
+  }
+
+  function buildClueRow(container, labelText, canvas, prefillText, fillLine) {
     const row = document.createElement('div');
     row.className = 'scan-clue-row';
     const label = document.createElement('span');
@@ -635,6 +698,17 @@ export function initScanWizard({ els, onPuzzleReady }) {
     input.setAttribute('aria-label', `${labelText} clue numbers`);
     row.append(label, img, input);
     container.appendChild(row);
+
+    // Flag on build, and re-check live as the player edits — fixing a misread number should
+    // clear the flag immediately (the same feedback loop the flag exists to speed up),
+    // without waiting for a later re-render of the whole correction step.
+    function refreshFlag() {
+      row.classList.toggle('scan-clue-row--flagged', lineLooksWrong(parseClueText(input.value), fillLine));
+      updateRecheckWarning();
+    }
+    input.addEventListener('input', refreshFlag);
+    refreshFlag();
+
     return input;
   }
 
@@ -749,7 +823,13 @@ export function initScanWizard({ els, onPuzzleReady }) {
       const text = await recognizeStripSegmented(canvas);
       done++;
       els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
-      const input = buildClueRow(els.scanRowClueList, `Row ${i + 1}`, canvas, parseClueText(text).join(', '));
+      const input = buildClueRow(
+        els.scanRowClueList,
+        `Row ${i + 1}`,
+        canvas,
+        parseClueText(text).join(', '),
+        state.fillMarks[i]
+      );
       state.rowClueInputs.push(input);
     }
     for (let i = 0; i < colStrips.length; i++) {
@@ -757,7 +837,8 @@ export function initScanWizard({ els, onPuzzleReady }) {
       const text = await recognizeStripSegmented(canvas);
       done++;
       els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
-      const input = buildClueRow(els.scanColClueList, `Col ${i + 1}`, canvas, parseClueText(text).join(', '));
+      const colFillLine = state.fillMarks.map((row) => row[i]);
+      const input = buildClueRow(els.scanColClueList, `Col ${i + 1}`, canvas, parseClueText(text).join(', '), colFillLine);
       state.colClueInputs.push(input);
     }
 

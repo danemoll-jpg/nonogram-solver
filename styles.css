@@ -20,6 +20,25 @@
   box-sizing: border-box;
 }
 
+/* Current Objective #3: eliminate overscroll bounce/rubber-band app-wide, without disabling
+   scroll on content that's genuinely taller than the viewport. `overscroll-behavior: none` on
+   the outer scroll boundary (html + body — the scan wizard is a full-screen VIEW with no
+   nested scroll container of its own, see .scan-screen's comment below, so it scrolls via
+   this same outer boundary) stops the rubber-band glow/chain at the very top/bottom of the
+   page, which is exactly "bounce" and nothing else — it has no effect on whether the page can
+   scroll at all. Normal play shouldn't need to scroll in the first place (fitBoardToViewport
+   sizes the board to fit beneath the header down to the fixed explain panel), so this mostly
+   just kills the bounce on transient cases (e.g. a mobile browser's address bar animating
+   in/out mid-play shifting window.innerHeight by a few px before the next resize event fires)
+   rather than suppressing scroll on any real overflow. Regions that DO need their own
+   internal scroll for genuinely tall content (.modal-card__body, .scan-clue-list,
+   .scan-fillstate-grid, .explain-panel) keep `overscroll-behavior: contain` on themselves —
+   scoped to just that region, so scrolling stays intact there too. */
+html,
+body {
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -537,6 +556,9 @@ body {
   min-height: 4.5rem;
   max-height: 40vh;
   overflow-y: auto;
+  /* Current Objective #3: a long hint/mistake explanation can scroll on its own within this
+     fixed panel — contain its bounce/chaining at that boundary instead of the page's. */
+  overscroll-behavior: contain;
   background: var(--panel-bg-raised);
   border-top: 2px solid rgba(230, 183, 63, 0.35);
   box-shadow: 0 -0.5rem 1.5rem rgba(0, 0, 0, 0.3);
@@ -785,6 +807,10 @@ body {
   gap: 0.5rem;
   max-height: 22rem;
   overflow-y: auto;
+  /* Current Objective #3: this list is genuinely taller than 22rem for a large puzzle and
+     stays scrollable on purpose (see the wizard step's own intro text) — contain just its
+     own bounce/chaining rather than the outer page's, same treatment as .modal-card__body. */
+  overscroll-behavior: contain;
 }
 
 .scan-clue-row {
@@ -796,6 +822,31 @@ body {
   padding: 0.3rem;
   border: 1px solid rgba(230, 183, 63, 0.15);
   border-radius: 0.4rem;
+}
+
+/* Current Objective #1: a line whose OCR'd clue is provably incompatible with its own
+   detected fill state (see scanUI.js's lineLooksWrong/isLineConsistent) — almost always a
+   misread clue number, occasionally a fill-detection miss. Styled like the real board's
+   contradiction-red clue numbers (see .nono-clue.contradiction) for the same visual meaning:
+   "these two things disagree", not a generic error color. */
+.scan-clue-row--flagged {
+  border-color: var(--danger);
+  background: rgba(224, 101, 79, 0.12);
+}
+
+/* Current Objective #1: shown only when a large fraction of lines end up flagged — see
+   scanUI.js's updateRecheckWarning. That pattern (rather than one or two isolated misreads)
+   is a much stronger signal of a wrong row/column COUNT confirmed a step earlier than of many
+   independent OCR misreads, so this points the player back at that instead of leaving them to
+   hand-fix numbers one by one against a systematically-misaligned grid. */
+.scan-recheck-warning {
+  color: var(--danger);
+  background: rgba(224, 101, 79, 0.12);
+  border: 1px solid var(--danger);
+  border-radius: 0.4rem;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+  margin: 0 0 1rem;
 }
 
 .scan-clue-row__label {
@@ -860,6 +911,9 @@ body {
   gap: 1px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  /* Current Objective #3: same bounce-containment treatment as the other genuinely-scrollable
+     regions above, on the horizontal axis this one actually scrolls. */
+  overscroll-behavior: contain;
   background: rgba(230, 183, 63, 0.15);
   border: 1px solid rgba(230, 183, 63, 0.3);
   border-radius: 0.3rem;

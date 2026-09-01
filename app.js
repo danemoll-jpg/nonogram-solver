@@ -100,6 +100,7 @@ const els = {
   scanOcrStatus: document.getElementById('scan-ocr-status'),
   scanRowClueList: document.getElementById('scan-row-clue-list'),
   scanColClueList: document.getElementById('scan-col-clue-list'),
+  scanRecheckWarning: document.getElementById('scan-recheck-warning'),
   scanBuildError: document.getElementById('scan-build-error'),
   scanBtnBuild: document.getElementById('scan-btn-build'),
   scanFillstateGrid: document.getElementById('scan-fillstate-grid'),
@@ -809,6 +810,16 @@ function attachPointerHandlers(grid) {
     const current = board.get(r, c);
     if (current === state) return;
 
+    // Bug fix (Current Objective #4): a drag's paintState is fixed from whichever action its
+    // *first* cell performed (see pointerdown below), then reapplied to every cell it sweeps
+    // across. Applying it unconditionally meant dragging across an already-marked cell (e.g.
+    // sweeping Fill mode over a cell the player had X'd) reused that same click-to-clear
+    // logic and blanked it — a drag should only ever paint still-blank cells, never modify a
+    // cell that's already FILLED or EMPTY, regardless of the drag's mode. Single-click
+    // toggle-off-if-same-state (dragStep:false, the pointerdown call below) is unaffected —
+    // only cells the drag *sweeps into* afterward are restricted to UNKNOWN.
+    if (dragStep && current !== UNKNOWN) return;
+
     const isUnfill = current === FILLED && state === UNKNOWN;
     if (!isUnfill && (rowLockedNow(r) || colLockedNow(c))) return;
 
@@ -987,7 +998,7 @@ els.menuRemoveBad.addEventListener('click', () => {
   syncAllCellVisuals();
 });
 
-const scanWizard = initScanWizard({ els, onPuzzleReady: startScannedPuzzle });
+const scanWizard = initScanWizard({ els, onPuzzleReady: startScannedPuzzle, onClose: fitBoardToViewport });
 els.menuScan.addEventListener('click', () => {
   closeHelpMenu();
   scanWizard.open();

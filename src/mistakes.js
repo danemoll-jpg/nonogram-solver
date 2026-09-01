@@ -70,13 +70,22 @@ export function checkForMistakes(board, solution) {
 }
 
 // Always-available, silent, no explanation: clears every cell that disagrees with the
-// solution. A convenience/speed tool, not a learning tool.
+// solution. A convenience/speed tool, not a learning tool — but per the Current Objective
+// (item 5), it should still count as hint usage in stats, same as an actual hint: tagged
+// source:'hint' (computeCompletionStats in app.js and recordCompletion in stats.js both
+// derive "hints used" from history entries tagged this way, with no separate counter to keep
+// in sync) and batched into one move via setBatch, so one Remove Bad Marks click counts as
+// one hint use regardless of how many cells it happened to clear — consistent with how a
+// single multi-cell hint deduction is also just one history entry (see app.js's
+// applyWithAutoX).
 export function removeBadMarks(board, solution) {
+  const changes = [];
   for (let r = 0; r < board.rows; r++) {
     for (let c = 0; c < board.cols; c++) {
       const mark = board.get(r, c);
       if (mark === UNKNOWN) continue;
-      if (mark !== correctState(solution, r, c)) board.set(r, c, UNKNOWN);
+      if (mark !== correctState(solution, r, c)) changes.push({ row: r, col: c, state: UNKNOWN });
     }
   }
+  return board.setBatch(changes, { source: 'hint' });
 }

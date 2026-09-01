@@ -117,65 +117,96 @@ Completed Tasks
      CSS fixes, consider removing the risky structural pattern (overlay + nested scroll)
      rather than continuing to patch it — each on-device retest round has a real cost.
   8. **Status: functionally complete, confirmed working on a real device.** 493+ tests
-     passing (all real-data-driven). See Current Objective below for post-ship feedback
-     from further real-world use.
+     passing (all real-data-driven). See below for a post-ship feedback round covering
+     five more items from further real-world use.
+
+* **Five items from real-world play, after item 10 shipped — all done.** All found by the
+  project owner using the app for real, not synthetic testing.
+
+  1. **Clue OCR accuracy / correction tedium.** Added the cross-check idea from this
+     item's design sketch: `scanUI.js`'s `lineLooksWrong` reuses `isLineConsistent`
+     (`lineSolver.js` — the same DP feasibility check normal play already uses for
+     red/contradiction clue numbers) to compare each line's OCR'd clue against its own
+     detected fill state (`cellStateDetect.js`, already computed for a different purpose),
+     and visually flags a row/col whose clue is *provably* incompatible with its detected
+     fills (`.scan-clue-row--flagged`, red like the board's own contradiction styling) —
+     re-checked live as the player edits. Deliberately NOT a strict "does the count/pattern
+     match exactly" comparison, since a mid-solve scan's still-UNKNOWN cells make that
+     misfire constantly on perfectly good partial progress; `isLineConsistent` only fails
+     when no possible completion could satisfy the clue at all.
+
+     **Root-caused against a real 25x25 mid-solve screenshot** (test file provided by the
+     project owner): scanning it showed most rows fine but almost every column flagged or
+     nonsense ("1, 1, 1..." repeated, several empty). Traced with a debug build to a
+     genuine off-by-one in the grid step's auto-suggested column count — `countGridLines`
+     suggested **26** columns; manually measuring the real border/grid-line pixel positions
+     confirmed the true count is **25** (confirmed two ways: pixel-perfect against every
+     column's clue-number position when overlaid, and — decisively — re-running the whole
+     OCR pass with the count manually corrected to 25 turned the same columns from garbage
+     into plausible multi-number reads). With 26 dividing a 25-column-wide rect, every
+     even-subdivided cell/column-band was slightly too narrow, and the error compounds with
+     column index — negligible near the left edge, bad enough by column ~13 to misclassify
+     fill state and badly mis-slice OCR strips. This is exactly the "column running along
+     more of the image... seems like the likely trigger" suspicion from this item's
+     original notes, except the trigger was the confirmed **column count**, not the
+     column-band crop's coordinate math itself (`computeClueBands`/`sliceVertical` are
+     correct given a correct count and rect).
+     `countGridLines`'s line-counting heuristics were NOT changed — they're already been
+     through several fragile real-image tuning rounds (see item 10 above), and one more
+     real image isn't enough to safely retune them without risking a regression on the
+     images that already work. Instead, added a cheap, high-value safety net that reuses
+     the same per-line flagging: `updateRecheckWarning` in `scanUI.js` shows a banner in
+     the correction step when ≥30% of either axis's lines are flagged
+     (`RECHECK_WARN_FRACTION`) — a wall of flags like that is the signature of a wrong
+     row/col count confirmed a step earlier, not many independent OCR misreads, so the
+     banner points the player back at that instead of leaving them to hand-fix a wall of
+     red boxes one number at a time. **Next step if this recurs**: investigate whether
+     `countGridLines` systematically miscounts when clue-number chip widths vary a lot
+     (single-digit "1" vs. double-digit "12"/"15" chips, as in the test image) — needs
+     another real image with the same property to confirm before touching the algorithm.
+     The specific digit-confusion pairs (1↔7, 3↔5/2↔5) weren't re-confirmable against this
+     particular image's misreads (a 2→9 misread turned up instead) — worth re-collecting
+     against a real image where the column geometry is already known-good, so genuine OCR
+     misreads aren't mixed in with count-miscount noise.
+  2. **Bug: board stays undersized after closing the scan wizard — fixed.** `closeWizard`
+     (`scanUI.js`) now calls an `onClose` callback (app.js passes `fitBoardToViewport`)
+     after restoring `#page-root`, the same fit logic puzzle selection already ran.
+  3. **Page overscroll bounce — eliminated app-wide, scroll left intact.** `overscroll-
+     behavior: none` on `html, body` (styles.css) kills the rubber-band at the outer
+     scroll boundary — covers both normal play and the scan wizard's full-screen view,
+     since the latter has no nested scroll container of its own and scrolls via this same
+     boundary. `overscroll-behavior: contain` added to the other regions with genuinely
+     tall content that stay independently scrollable on purpose: `.explain-panel`,
+     `.scan-clue-list` (the correction step's per-line list), `.scan-fillstate-grid`
+     (horizontal-only) — same treatment `.modal-card__body` already had from item 10.7's
+     iOS fix. Audited whether normal play scrolls at all: it shouldn't, since
+     `fitBoardToViewport` sizes the board to fit below the header down to the fixed
+     explain panel — no separate root-cause bug found; the bounce-suppression alone is the
+     fix, matching this item's own note about mobile browser chrome (address bar
+     show/hide) causing brief `window.innerHeight` mismatches rather than a real overflow.
+  4. **Bug: drag painting overwrote already-marked cells — fixed.** `paintCell` in app.js
+     now skips any cell that isn't UNKNOWN when the call is a drag-sweep step
+     (`dragStep: true`), regardless of the drag's mode — a drag only ever paints blank
+     cells now. Single-click toggle-off-if-same-state (`dragStep: false`) is unchanged.
+     Verified in-browser: dragging in Fill mode across a pre-marked EMPTY cell no longer
+     clears it.
+  5. **"Remove bad marks" now counts as hint usage — fixed.** `removeBadMarks`
+     (mistakes.js) batches its clears into one `board.setBatch(..., { source: 'hint' })`
+     call instead of per-cell `board.set` — one click now counts as one hint use (same as
+     a multi-cell hint deduction already did), picked up automatically by both
+     `computeCompletionStats` (app.js) and `recordCompletion`'s cross-device stat (both
+     already derive "hints used" from `source: 'hint'` history entries, no separate
+     counter to keep in sync). New test in `test/mistakes.test.js` covers the batching and
+     the hint tag.
+
+  All five verified in-browser; items 1/2 specifically re-verified end-to-end against the
+  real 25x25 mid-solve screenshot per this project's established real-image-testing
+  practice for this feature area (see item 10's file-level notes). 494 tests passing.
 
 Current Objective (Focus Area)
 
-* **Five items from real-world play, after item 10 shipped.** All found by the project
-  owner using the app for real, not synthetic testing — consistent with this project's
-  established pattern of real usage surfacing bugs synthetic tests miss.
-
-  1. **Clue OCR accuracy still needs improvement, and correction is tedious.** Rows are
-     worse than columns: sometimes entire numbers are dropped or extra ones added, and
-     specific digit confusions recur (1↔7, and separately what's probably 3↔5 or 2↔5 —
-     the project owner wasn't certain which, worth re-confirming against real examples
-     rather than guessing which digit pairs to specifically target). Columns fare better
-     but line up wrong and get misinterpreted when a column's clue band runs off/across
-     half the visible screen area — worth checking whether the column-band crop
-     coordinates account for the actual rendered/scrolled position correctly, since a
-     column running along more of the image than fits in one clean crop view seems like
-     the likely trigger. **Idea for reducing correction tedium, not just chasing raw OCR
-     accuracy**: item 10 now separately detects fill state per cell (`cellStateDetect.js`)
-     — cross-check each line's OCR'd clue against its own detected fill pattern (e.g. does
-     the total filled-cell count roughly match the clue's implied total; do detected runs
-     roughly line up with clue run boundaries) and visually flag likely-wrong lines in the
-     correction step, rather than requiring the player to manually eyeball every single
-     line against the source image. This reuses data already being computed for a
-     different purpose — not a new detection system.
-  2. **Bug: returning from the scan wizard leaves the main board undersized until the
-     player picks a puzzle.** `fitBoardToViewport` isn't being re-run when `closeWizard`
-     restores the main page content — it only fires today on puzzle selection. Fix: call
-     the same fit/resize logic `closeWizard` runs (or trigger the same resize path
-     selection already triggers) so the board is correctly sized immediately on return,
-     not just after the next selection.
-  3. **Eliminate page scroll bounce/rubber-band, app-wide — confirmed with the project
-     owner: this means the overscroll bounce effect specifically, not disabling scroll on
-     content that's genuinely taller than the viewport (e.g. the scan wizard's correction
-     list or fill-state grid for a large puzzle stay scrollable as needed).** Apply
-     `overscroll-behavior: none` (or equivalent) to eliminate bounce on the outer
-     page/main play screen, which per `fitBoardToViewport` should already never need to
-     scroll at all in normal play — audit whether it currently does regardless (if the
-     board is correctly sized, the page shouldn't scroll during play; if it does, that's
-     its own bug worth root-causing, not just suppressing via CSS). For the scan wizard,
-     keep its necessary internal scroll intact but eliminate the bounce/rubber-band
-     specifically — likely `overscroll-behavior: contain` (or `none` at the outer
-     boundary) on the relevant scrollable regions, consistent with how the other modals
-     already use `overscroll-behavior: contain` per item 10.7's iOS fix above.
-  4. **Bug: dragging to fill/mark cells overwrites already-marked cells it crosses,
-     instead of leaving them alone.** E.g. dragging in Fill mode over a cell that's
-     already filled currently clears it back to unknown (since a single click's
-     already-in-that-state → clear behavior is being applied per-cell across the whole
-     drag, not just to the drag's starting cell). Fix: during a **drag** specifically
-     (not a single click — single-click toggle-off-if-same-state should stay as-is,
-     unchanged), skip any cell that isn't currently UNKNOWN entirely — a drag should only
-     ever paint blank cells with the drag's mode, never modify a cell that's already
-     FILLED or EMPTY(X) regardless of what mode the drag is in.
-  5. **"Remove bad marks" should count as hint usage in stats**, both in a single
-     puzzle's completion stats (time/hints/mistakes) and in the cross-device
-     avg-hints-used stat bucketed by grid size. Currently only moves tagged
-     `source: 'hint'` count; using Remove Bad Marks should increment the same hint-usage
-     counter used everywhere else, rather than being tracked separately or not at all.
+* None open right now — the five real-world-play items above are done. Awaiting the next
+  round of real-world feedback, or pick up an item from Next Steps below.
 
 Next Steps (Do Not Start Yet)
 
@@ -232,3 +263,14 @@ Technical Notes / Blockers
   iOS-only symptom appears elsewhere, consider whether the underlying structural pattern
   (an overlay with its own nested scroll region) is the actual problem before continuing to
   patch CSS properties on it.
+* **`countGridLines` (gridDetect.js) can miscount a real photo's column count by one** —
+  confirmed against a real 25x25 mid-solve screenshot (25 rows correct, 26 columns
+  suggested where the true count is 25). Not yet fixed — see item 1 above for the full
+  writeup and the recheck-warning mitigation that ships instead. If picking this up:
+  the test image's columns have widely varying clue-chip widths (single-digit "1" next to
+  double-digit "12"/"15" chips) — that's the leading suspect for what confuses the
+  line-counting heuristic, but isn't confirmed as the mechanism, only as a property the
+  one failing real image happens to have. Get another real image with the same property
+  before changing the algorithm — this file's whole line-counting history (see item 10
+  above) is a sequence of "fixed against one real image, needed a different fix for the
+  next" rounds, so one repro isn't enough to safely retune it.

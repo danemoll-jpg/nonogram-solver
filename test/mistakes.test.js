@@ -99,4 +99,23 @@ describe('removeBadMarks', () => {
     assertEqual(board.get(0, 1), UNKNOWN);
     assertEqual(board.get(1, 1), FILLED);
   });
+
+  test('batches its clears into one history move tagged source:hint (Current Objective #5)', () => {
+    const board = new Board(2, 2);
+    board.set(0, 0, FILLED); // correct
+    board.set(0, 1, FILLED); // wrong
+    board.set(1, 0, EMPTY); // wrong
+    const historyLenBefore = board.history.length;
+    removeBadMarks(board, solution);
+    assertEqual(board.history.length, historyLenBefore + 1);
+    assertEqual(board.history[board.history.length - 1].source, 'hint');
+  });
+
+  test('is a no-op (no new history entry) when nothing is wrong', () => {
+    const board = new Board(2, 2);
+    board.set(0, 0, FILLED); // correct
+    const historyLenBefore = board.history.length;
+    removeBadMarks(board, solution);
+    assertEqual(board.history.length, historyLenBefore);
+  });
 });
