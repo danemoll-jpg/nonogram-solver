@@ -180,72 +180,90 @@ Completed Tasks
   All five verified in-browser; items 1/2 specifically re-verified end-to-end against the
   real 25x25 mid-solve screenshot. 494 tests passing.
 
+* **Recheck-warning UX upgrade — known-count override done and verified against the real
+  25x25 screenshot; the truncated-glyph idea was tried, tested, and dropped for a documented
+  reason.**
+
+  1. **Known row/col count, entered up front, now overrides the auto-detected guess —
+     fixes the original 25-vs-26 miscount directly.** New "If you already know the puzzle's
+     size, enter it here" rows/cols fields on the grid step (`index.html`'s
+     `.scan-known-count`, before the "Looks good" button — i.e. before detection commits to
+     a guess, not just editable after). `gridDetect.js`'s `countGridLines` grew an optional
+     `expectedLines` param: when given, it skips the blind iterative pitch-guessing entirely
+     and sizes the local-run window directly off the pitch a known count implies —
+     `scanUI.js`'s `suggestLineCount` uses this to size the search window from the known
+     value, but the shown row/col count is the player's own number directly (a
+     player-confirmed ground truth beats any pixel heuristic), with a `mismatch` check
+     (`scan-known-count-mismatch` banner) surfacing a genuine disagreement between the photo
+     and the entered count rather than silently trusting it. **Confirmed directly against
+     the real 25x25 screenshot**: with rows/cols left blank, auto-detection reproduces the
+     original bug exactly (25 rows correct, 26 columns); entering 25/25 up front fixes the
+     column count to 25 immediately, with no mismatch warning (the informed local search
+     agreed). This is the actual fix for the bug that started this whole investigation.
+  2. **Truncated-glyph crop-edge signal — built, unit-tested, verified against the real
+     image, and REMOVED rather than shipped, because real-image testing showed it doesn't
+     work on this app's actual rendering.** The idea (`ocrSegment.js`'s `crossesEdge`: a
+     clue-number glyph touching its own crop's exact edge signals a misplaced slice
+     boundary) tested cleanly in isolation, but wiring it into the scan wizard and running it
+     against the real 25x25 screenshot (with the row/col count now CORRECT, via the fix
+     above) showed it firing on a large majority of otherwise-correct lines — this app
+     renders row-clue text top-anchored within its row-height slice, so the ink touches the
+     crop's top edge as a matter of course, regardless of whether the slice boundary is
+     actually right. A signal with that false-positive rate isn't localized or actionable,
+     it's just noise layered on top of the real `--flagged` (isLineConsistent) indicator, so
+     it was reverted rather than shipped — consistent with this project's own established
+     practice (see `countGridLines`'s own history above) of not force-fitting a heuristic
+     that real-image testing shows doesn't discriminate. One genuinely useful thing did come
+     out of building and testing it, and IS kept: the investigation surfaced that a clue
+     number sitting exactly at its own crop's edge gets ZERO real padding from
+     `recognizeStripSegmented`'s per-line `padCropCanvas` call (clamped to the strip canvas's
+     own bounds), reproducing the exact "Tesseract returns nothing for a glyph cropped tight
+     to its own ink" failure mode `CROP_PADDING` exists to prevent elsewhere — confirmed
+     directly (a real line's OCR result went from empty to a correct read once fixed). Fixed
+     at the source via `cropStripCanvas`'s new `STRIP_MARGIN_PX`: every strip crop now
+     includes a few extra px of real image margin on all sides before any line/number
+     detection runs, giving genuine padding to lines that would otherwise sit flush against
+     the crop edge (any resulting bleed from a neighboring line stays exactly the kind of
+     small sliver `filterNoiseLines` already exists to discard).
+  3. **Net result on the real 25x25 screenshot, with the known-count fix applied**: OCR
+     went from the original bug's "almost every column flagged or nonsense, several empty"
+     to 22/25 rows exactly correct on the first pass and non-degenerate (if occasionally
+     imperfect) column reads — the remaining handful of misreads are normal OCR imprecision
+     that the existing correction step and `--flagged` indicator already surface and handle,
+     not a systemic failure. 496 tests passing (500 during the truncated-glyph experiment,
+     back to 496 after reverting it and its 4 tests).
+
 Current Objective (Focus Area)
 
-* **Two more items from continued real-world use — the recheck-warning UX from item 1
-  above, and a scroll regression on iOS.**
-
-  1. **Replace the "wrong column count, cancel and rescan" warning with something
-     actionable — let the player supply the known row/col count up front, and detect
-     truncated/cut-off clue digits as a real signal, not just a flag-count heuristic.**
-     Current behavior is a dead end: the banner tells the player *that* the count is
-     probably wrong but not *what* the right count is or *why* detection keeps landing on
-     the same wrong number — so canceling and rescanning the same image with the same
-     detection logic just reproduces the same error, with no way for the player to break
-     the loop. Two concrete improvements, both from the project owner's own suggestions:
-     - **Let the player enter the known row/col count *before* the scan commits to a
-       guess**, when they already know it (as in the 25×25 case that surfaced this whole
-       investigation). This turns detection from "guess, then ask the player to somehow
-       fix the image if wrong" into "guess, then reconcile against known ground truth" —
-       e.g. if auto-detection or `countGridLines` finds 26 line-positions but the player
-       says 25 columns, that's a concrete, checkable discrepancy to resolve (which
-       line-detection is the spurious one) rather than an unexplained mismatch after the
-       fact. The already-editable rows/cols fields are the natural place for this — the
-       open question is only *when* the player can supply it (before vs. only after a
-       first auto-attempt) and how detection actually uses a known count to adjust its
-       line search, which needs a real implementation approach, not just a UI change.
-     - **Detect visually truncated/half-cut-off clue-number crops as a first-class
-       signal**, distinct from and more specific than the existing "too many lines flagged
-       inconsistent" heuristic. If a clue-number glyph is touching or crossing a crop
-       boundary rather than being fully contained within it, that's a direct, localized
-       signal that a *specific* line's band boundary is misplaced — pointing at where the
-       error is, not just that something in aggregate seems off. This is closer to (and
-       may be able to reuse groundwork from) `ocrSegment.js`'s existing glyph/run-finding
-       work, which was already built to reason about glyph boundaries precisely for a
-       different purpose (digit-merging).
-     - Per this feature's established practice, prototype and verify against a real
-       image (the same 25×25 mid-solve screenshot that surfaced the original off-by-one is
-       a natural first test case) rather than synthetic mockups.
-
-  2. **iOS scroll regression: unnecessary scrolling still happening, and it gets worse —
-     specifically introducing extra whitespace — once the on-screen keyboard opens.**
-     Reported after the overscroll-bounce fix (item 3 above) shipped. Two distinct
-     symptoms worth investigating separately rather than assuming one root cause:
-     - **Baseline: some scrolling happens even without the keyboard involved at all**,
-       which per the overscroll-bounce fix's own verification note shouldn't be
-       happening if the board is correctly sized — worth first confirming directly
-       whether this is genuine content overflow (something is actually taller than the
-       viewport) versus a `window.innerHeight` mismatch from mobile browser chrome
-       show/hide (which the prior fix's notes flagged as a known, different, and likely
-       harmless cause) versus something else entirely. Don't assume it's the same root
-       cause as the keyboard issue below without checking.
-     - **Worse with the keyboard open, specifically introducing whitespace.** This points
-       at the classic mobile-web keyboard-resize problem: the on-screen keyboard opening
-       shrinks the visual viewport, and depending on how layout responds to that
-       (`100vh`-based sizing is a common culprit, since `100vh` on many mobile browsers
-       doesn't shrink when the keyboard appears, leaving a gap where the keyboard now
-       covers content) that can manifest as exactly this symptom — extra blank space
-       appearing and more scroll becoming possible/necessary than before. Worth checking
-       `visualViewport` API usage (or lack of it) in the layout/fit logic, and which
-       specific elements use `vh`-based sizing versus dynamic viewport units
-       (`dvh`) or JS-measured heights.
-     - **Given this project's specific history with iOS scroll bugs (item 10.7 above —
-       four rounds, three CSS-only attempts each fixing one symptom while breaking or
-       missing the next), don't assume a first attempted fix here is complete.** Verify
-       on a real device specifically, including with an input actually focused and the
-       keyboard actually open, not just judged from a simulator or desktop responsive
-       view — this class of bug has consistently not reproduced reliably outside real
-       hardware in this project so far.
+* **iOS scroll regression: unnecessary scrolling still happening, and it gets worse —
+  specifically introducing extra whitespace — once the on-screen keyboard opens.**
+  Reported after the overscroll-bounce fix (item 3 above) shipped. Two distinct
+  symptoms worth investigating separately rather than assuming one root cause:
+  - **Baseline: some scrolling happens even without the keyboard involved at all**,
+    which per the overscroll-bounce fix's own verification note shouldn't be
+    happening if the board is correctly sized — worth first confirming directly
+    whether this is genuine content overflow (something is actually taller than the
+    viewport) versus a `window.innerHeight` mismatch from mobile browser chrome
+    show/hide (which the prior fix's notes flagged as a known, different, and likely
+    harmless cause) versus something else entirely. Don't assume it's the same root
+    cause as the keyboard issue below without checking.
+  - **Worse with the keyboard open, specifically introducing whitespace.** This points
+    at the classic mobile-web keyboard-resize problem: the on-screen keyboard opening
+    shrinks the visual viewport, and depending on how layout responds to that
+    (`100vh`-based sizing is a common culprit, since `100vh` on many mobile browsers
+    doesn't shrink when the keyboard appears, leaving a gap where the keyboard now
+    covers content) that can manifest as exactly this symptom — extra blank space
+    appearing and more scroll becoming possible/necessary than before. Worth checking
+    `visualViewport` API usage (or lack of it) in the layout/fit logic, and which
+    specific elements use `vh`-based sizing versus dynamic viewport units
+    (`dvh`) or JS-measured heights.
+  - **Given this project's specific history with iOS scroll bugs (item 10.7 above —
+    four rounds, three CSS-only attempts each fixing one symptom while breaking or
+    missing the next), don't assume a first attempted fix here is complete.** Verify
+    on a real device specifically, including with an input actually focused and the
+    keyboard actually open, not just judged from a simulator or desktop responsive
+    view — this class of bug has consistently not reproduced reliably outside real
+    hardware in this project so far.
 
 Next Steps (Do Not Start Yet)
 

@@ -190,7 +190,25 @@ function countDarkRunsLocal(profile, start, end, radius, margin) {
 // 20) narrowed the window enough to reach the true 22. A round that stops finding more lines
 // means the window has converged (or the profile genuinely has no more to find), so it's
 // safe to stop rather than needing a fixed iteration count.
-export function countGridLines(profile, start, end) {
+// `expectedLines`, when given, is a player-supplied ground-truth line count (the scan
+// wizard's "I already know the puzzle's size" field — see scanUI.js's suggestLineCount).
+// This skips the blind iterative pitch-guessing below entirely and sizes the local-run
+// window directly off the pitch that count implies — the blind guess is exactly what
+// drifted to 26 lines instead of the true 25 on the real screenshot that originally
+// surfaced this whole investigation (see TODO.md): its rough first pass had no way to know
+// which of two plausible pitches was right, where a player-confirmed count removes the
+// ambiguity outright rather than needing the guess to somehow get smarter. Still runs a
+// real local-run pass (not just trusting the number blind) so a genuine mismatch between
+// the photo and what the player entered is still detectable (see suggestLineCount's
+// `mismatch` field) rather than silently papered over.
+export function countGridLines(profile, start, end, { expectedLines } = {}) {
+  if (expectedLines >= 2) {
+    const range = end - start;
+    const estimatedPitch = range / (expectedLines - 1);
+    const radius = Math.max(3, Math.round(estimatedPitch * 0.4));
+    return countDarkRunsLocal(profile, start, end, radius, 15);
+  }
+
   const slice = profile.slice(start, end);
   const threshold = inkThreshold(slice);
   let lines = countDarkRuns(profile, start, end, threshold);

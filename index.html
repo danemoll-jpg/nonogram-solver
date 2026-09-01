@@ -201,11 +201,18 @@
         <p class="scan-grid-hint-secondary">Drag the gold handles to adjust the box, or draw a
           new one over just the grid squares — <strong>not</strong> the clue numbers around the
           edges.</p>
+        <div class="scan-known-count">
+          <p class="scan-known-count__hint">If you already know the puzzle's size, enter it
+            here — it's used directly instead of the auto-detected guess below.</p>
+          <label class="scan-known-count__field">Rows <input id="scan-known-rows-input" type="number" min="1" max="60" placeholder="auto" /></label>
+          <label class="scan-known-count__field">Columns <input id="scan-known-cols-input" type="number" min="1" max="60" placeholder="auto" /></label>
+        </div>
         <button id="scan-btn-confirm-grid" class="btn btn--primary" type="button" disabled>Looks good</button>
         <div id="scan-grid-confirm" class="scan-grid-confirm hidden">
           <label class="scan-grid-confirm__field">Rows <input id="scan-rows-input" type="number" min="1" max="30" /></label>
           <label class="scan-grid-confirm__field">Columns <input id="scan-cols-input" type="number" min="1" max="30" /></label>
-          <p class="scan-grid-confirm__hint">Detected from the photo — check these match the real puzzle before continuing.</p>
+          <p class="scan-grid-confirm__hint">Detected from the photo (or your entered count above) — check these match the real puzzle before continuing.</p>
+          <p id="scan-known-count-mismatch" class="scan-known-count-mismatch hidden"></p>
           <button id="scan-btn-scan-clues" class="btn btn--primary" type="button">Scan clue numbers</button>
         </div>
       </div>

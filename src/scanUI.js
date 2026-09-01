@@ -121,6 +121,9 @@ export function initScanWizard({ els, onPuzzleReady, onClose }) {
     state.fillMarks = null;
     els.scanFileInput.value = '';
     els.scanGridHint.textContent = '';
+    els.scanKnownRowsInput.value = '';
+    els.scanKnownColsInput.value = '';
+    els.scanKnownCountMismatch.classList.add('hidden');
     els.scanGridConfirm.classList.add('hidden');
     els.scanBtnConfirmGrid.disabled = true;
     els.scanRowClueList.innerHTML = '';
@@ -416,6 +419,51 @@ export function initScanWizard({ els, onPuzzleReady, onClose }) {
     return Math.max(2, Math.round(Math.min(width, height) * 0.01));
   }
 
+  // Parses the optional "I already know the puzzle's size" fields (Current Objective #1 —
+  // see TODO.md) into a positive cell count, or null when left blank/invalid — blank is the
+  // normal case (most photos don't have a player who already knows the exact size) and
+  // falls through to the existing auto-suggestion untouched.
+  function parseKnownCount(inputEl) {
+    const n = parseInt(inputEl.value, 10);
+    return Number.isInteger(n) && n >= 1 ? n : null;
+  }
+
+  // Suggests a row/col CELL count for one axis. With no known count, this is exactly the
+  // old behavior: countGridLines' own best guess. With a known count, the player's own
+  // number is trusted directly for the value shown — a player-confirmed ground truth beats
+  // any pixel heuristic, which is the whole point of asking for it — but a real local-run
+  // pass is still performed (via countGridLines' expectedLines option) so a genuine
+  // disagreement between the photo and what was entered still surfaces as `mismatch` rather
+  // than being silently swallowed by trusting the player unconditionally.
+  function suggestLineCount(profile, start, end, knownCells) {
+    if (knownCells) {
+      const expectedLines = knownCells + 1;
+      const detectedLines = countGridLines(profile, start, end, { expectedLines });
+      return { count: knownCells, mismatch: Math.abs(detectedLines - expectedLines) >= 2, detectedLines };
+    }
+    const lines = countGridLines(profile, start, end);
+    return { count: Math.max(1, lines - 1), mismatch: false };
+  }
+
+  function updateKnownCountMismatchHint(rowResult, colResult) {
+    const notes = [];
+    if (rowResult.mismatch) {
+      notes.push(`rows (you entered ${rowResult.count}, the photo looks more like ${Math.max(1, rowResult.detectedLines - 1)})`);
+    }
+    if (colResult.mismatch) {
+      notes.push(`columns (you entered ${colResult.count}, the photo looks more like ${Math.max(1, colResult.detectedLines - 1)})`);
+    }
+    if (notes.length) {
+      els.scanKnownCountMismatch.textContent =
+        `The photo doesn't clearly show that many grid lines for: ${notes.join('; ')}. Your ` +
+        "count is still used below — double-check the grid box actually captures the whole " +
+        'grid before continuing.';
+      els.scanKnownCountMismatch.classList.remove('hidden');
+    } else {
+      els.scanKnownCountMismatch.classList.add('hidden');
+    }
+  }
+
   // The one, always-available "proceed" action for the grid step — the fix for the bug this
   // redesign replaces (see the module-level comment). Works the same whether gridRect is
   // still exactly what auto-detection produced, or the user dragged/resized it: snaps it
@@ -440,14 +488,38 @@ export function initScanWizard({ els, onPuzzleReady, onClose }) {
     // countGridLines takes an exclusive end (it slices the profile) — without the +1 the
     // line sitting exactly on the far edge is cut off before being scanned, undercounting
     // by one line (one fewer row/col than the photo actually has).
-    const lineCountRows = countGridLines(rp, snapped.top, snapped.bottom + 1);
-    const lineCountCols = countGridLines(cp, snapped.left, snapped.right + 1);
-    els.scanRowsInput.value = String(Math.max(1, lineCountRows - 1));
-    els.scanColsInput.value = String(Math.max(1, lineCountCols - 1));
+    const knownRows = parseKnownCount(els.scanKnownRowsInput);
+    const knownCols = parseKnownCount(els.scanKnownColsInput);
+    const rowResult = suggestLineCount(rp, snapped.top, snapped.bottom + 1, knownRows);
+    const colResult = suggestLineCount(cp, snapped.left, snapped.right + 1, knownCols);
+    els.scanRowsInput.value = String(rowResult.count);
+    els.scanColsInput.value = String(colResult.count);
+    updateKnownCountMismatchHint(rowResult, colResult);
     els.scanGridConfirm.classList.remove('hidden');
   });
 
   // ---- step 3: slice + OCR every clue strip ----
+
+  // A few source-canvas px of real image margin added around every strip crop, on all four
+  // sides, before anything else touches it. Confirmed necessary against the real 25x25
+  // screenshot (see TODO.md): this app draws clue-number text close enough to its own
+  // row/column slice's edge that ink can end EXACTLY at pixel 0 or the last pixel of an
+  // otherwise perfectly-correct crop, with zero rendering margin of its own. Without this,
+  // recognizeStripSegmented's own per-line padCropCanvas call clamps its padding to the
+  // strip canvas's bounds — so a line already touching that edge gets NO real padding at
+  // all on that side, reproducing the exact "Tesseract returns nothing for a glyph cropped
+  // tight to its own ink" failure CROP_PADDING exists to prevent elsewhere (confirmed
+  // directly: this crop-margin fix took a real misread line, see TODO.md's Current
+  // Objective, from an empty OCR result to a correct one). A small, fixed amount (not a
+  // percentage of the strip's own size) — big enough to give Tesseract real breathing room,
+  // small enough that any neighboring line's content it happens to pull in stays exactly
+  // the kind of small bleed sliver findStripLines' filterNoiseLines call already exists to
+  // discard, rather than reintroducing the digit-merging problem ocrSegment.js was built to
+  // solve. Also, as a side benefit, makes findStripLines' own crossesEdge truncation signal
+  // more meaningful: genuine zero-margin (but otherwise correct) rendering no longer trips
+  // it just from lack of padding, so a line still touching this WIDER edge is a stronger
+  // signal that something (not just typography) is really being cut off.
+  const STRIP_MARGIN_PX = 4;
 
   // Crops one analysis-space rect from the full-resolution canvas (scaling it up first),
   // upscaling further if it's still shorter than OCR_MIN_HEIGHT, and binarizes it (its own
@@ -455,10 +527,16 @@ export function initScanWizard({ els, onPuzzleReady, onClose }) {
   // accuracy boost for OCR on printed text.
   function cropStripCanvas(rectAnalysis) {
     const s = state.scaleFullOverAnalysis;
-    const sx = rectAnalysis.left * s;
-    const sy = rectAnalysis.top * s;
-    const sw = Math.max(1, (rectAnalysis.right - rectAnalysis.left) * s);
-    const sh = Math.max(1, (rectAnalysis.bottom - rectAnalysis.top) * s);
+    const { width: fullW, height: fullH } = state.fullCanvas;
+    // Extend by STRIP_MARGIN_PX on every side, then clamp to the full canvas's own bounds
+    // (drawImage would otherwise happily read negative/out-of-bounds source coordinates as
+    // transparent black, corrupting the binarization step's own light/dark read).
+    const sx = Math.max(0, rectAnalysis.left * s - STRIP_MARGIN_PX);
+    const sy = Math.max(0, rectAnalysis.top * s - STRIP_MARGIN_PX);
+    const sxEnd = Math.min(fullW, rectAnalysis.right * s + STRIP_MARGIN_PX);
+    const syEnd = Math.min(fullH, rectAnalysis.bottom * s + STRIP_MARGIN_PX);
+    const sw = Math.max(1, sxEnd - sx);
+    const sh = Math.max(1, syEnd - sy);
 
     const upscale = Math.max(1, OCR_MIN_HEIGHT / sh);
     const destW = Math.max(1, Math.round(sw * upscale));
@@ -529,6 +607,20 @@ export function initScanWizard({ els, onPuzzleReady, onClose }) {
   // detection. Lines (top to bottom) exist because a clue margin can stack multiple rows of
   // numbers when a clue has more numbers than fit on one line (see computeClueBands's
   // column-clue case, which is the tall, narrow, multi-line kind).
+  // Current Objective #1's second idea (see TODO.md) was a per-line "does a clue-number
+  // glyph touch its own crop's edge" truncation signal, on the theory that a misplaced
+  // row/column slice boundary would show up as a glyph cut off at the crop edge. Built and
+  // unit-tested (ocrSegment.js's crossesEdge — still there, still correct as a pure
+  // primitive), then verified against the real 25x25 screenshot per this feature's own
+  // practice — and DROPPED after that verification, not shipped: this app renders row-clue
+  // text top-anchored within its row-height slice (confirmed directly: essentially every
+  // row strip's ink touches the crop's top edge, correctly-sliced ones included), so
+  // "touches its own crop edge" fires near-universally regardless of whether the slice
+  // boundary is actually right. A signal that flags nearly everything isn't localized or
+  // actionable — it's just noise on top of the real --flagged indicator. The one genuinely
+  // useful thing this investigation surfaced — zero-margin crops starving Tesseract of the
+  // padding it needs (see CROP_PADDING's own comment) — is still fixed below, via
+  // STRIP_MARGIN_PX on the strip crop itself.
   function findStripLines(canvas) {
     const { width, height } = canvas;
     const ctx = canvas.getContext('2d');

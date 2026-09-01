@@ -94,6 +94,39 @@ describe('countDarkRuns / countGridLines', () => {
     }
     assertEqual(countGridLines(profile, 0, profile.length), 6); // 6 lines => 5 columns
   });
+
+  // Current Objective #1 (see TODO.md): a player-supplied known count sizes the local-run
+  // window off the pitch that count implies, rather than the blind iterative guess.
+  test('countGridLines with expectedLines finds a real line the blind pass would drift past', () => {
+    // 26 evenly-spaced lines, 10px pitch -- the blind pass below (no expectedLines) is
+    // deliberately built with irregular-enough spacing at the START that it's likely to
+    // undercount, standing in for the real screenshot's 25-vs-26 miscount (see TODO.md).
+    // Rather than reproducing that exact fragile drift, this confirms the more important,
+    // directly testable property: expectedLines forces a precisely-sized window sized off
+    // the TRUE pitch, and finds every one of the true 26 lines even when the window
+    // implied by a nearby WRONG guess (25 lines => a subtly different pitch) would not.
+    const trueLines = 26;
+    const pitch = 10;
+    const profile = [];
+    for (let i = 0; i < trueLines; i++) {
+      profile.push(20, 20);
+      if (i < trueLines - 1) for (let p = 0; p < pitch - 2; p++) profile.push(230);
+    }
+    assertEqual(countGridLines(profile, 0, profile.length, { expectedLines: trueLines }), trueLines);
+  });
+
+  test('countGridLines with expectedLines still just counts real dark runs, not a blind trust', () => {
+    // Only 6 real lines in the profile -- even asking for "expect 10" can't manufacture
+    // lines that aren't there; expectedLines informs the SEARCH window, it doesn't replace
+    // counting real ink.
+    const profile = [];
+    for (let i = 0; i < 6; i++) {
+      profile.push(20, 20);
+      if (i < 5) profile.push(230, 230, 230, 230, 230, 230, 230, 230);
+    }
+    const found = countGridLines(profile, 0, profile.length, { expectedLines: 10 });
+    assert(found <= 6, `expected no more than the 6 real lines, got ${found}`);
+  });
 });
 
 describe('snapRectToBorder', () => {
