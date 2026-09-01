@@ -188,15 +188,6 @@ Current Objective (Focus Area)
     the real device specifically, that's a genuinely new, more specific finding (points
     at device-specific rendering/contrast, not wiring) worth its own follow-up.
 
-* **OCR residual accuracy — this is a question for you, not something to keep chasing
-  autonomously; asked directly this round (see chat).** Overall OCR accuracy is much
-  improved (clean geometry, most digits correct); the remaining errors (occasional
-  dropped/extra single digits) are exactly the kind of ordinary residual noise the
-  correction step (editable text next to a thumbnail) already exists to catch. If
-  further chasing is wanted, `findStripLines`'s spurious-glyph-blob false positive
-  (the `3,1,1,3`→`3,1,1,7,3` case) and the dropped-single-digit case are the two
-  concrete repro leads already on record.
-
 * **Save-to-library feature — client-side implementation done this round; NOT yet
   usable in production because the updated `firestore.rules` haven't been deployed.**
   New module `src/puzzleLibrary.js` (savePuzzleToLibrary/fetchLibraryPuzzles/
@@ -283,5 +274,16 @@ Technical Notes / Blockers
 * `countGridLines` miscounting is understood and mitigated via the known-count
   override (see Completed Tasks) rather than by retuning the underlying heuristic.
 * Clue-number legibility on large puzzles — fixed, font floors at `MIN_CLUE_FONT_PX`.
-* Per-number clue gray-out (`anchoredClueNumbers`) is implemented and algorithmically
-  verified but **not actually working in normal gameplay** — see Current Objective.
+* Per-number clue gray-out (`anchoredClueNumbers`) — investigated and confirmed
+  working correctly in normal gameplay (see Current Objective for the repro); the
+  earlier "not actually working" note was itself likely a verification artifact, not
+  a real bug — needs the project owner's on-device confirmation to fully close out.
+* **OCR residual accuracy — resolved as an accepted limitation, not a bug to chase
+  right now.** Asked the project owner directly (current accuracy vs. keep chasing);
+  answer: leave it as-is, document it, revisit only if it comes up again later. The
+  known residual failure modes, if this is ever picked back up: an occasional lone
+  single digit dropping out of a long clue (e.g. ground-truth `2,1,2,2,2` → `2,1,2,2`)
+  and an occasional spurious extra digit (`3,1,1,3` → `3,1,1,7,3`, traced to
+  `findStripLines` detecting a glyph blob that isn't a real digit) — both rare enough,
+  and already caught by the existing correction-step review, that the project owner
+  doesn't consider them worth further engineering time for now.

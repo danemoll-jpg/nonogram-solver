@@ -53,7 +53,9 @@ deployed, hardened across many real-screenshot rounds. See `TODO.md`'s Completed
 for the full history, every design tradeoff, and the confirmed ground-truth reference
 puzzle.
 
-**Current objective has three items, all found during the latest real-device round**:
+**Current objective, from the latest real-device round (one item now resolved, see #3
+below; #1 needs the project owner's device to fully close out; #2 is likely already
+fine but also awaits on-device confirmation)**:
 1. **Scroll bug — diagnostic tool investigated + hardened; underlying bug still open.**
    Confirmed `initScrollDiagnostics` already renders visibly (a real button + report
    panel, not console-only) and is already live on production (fetched the deployed
@@ -78,12 +80,11 @@ puzzle.
    a scanned puzzle's pre-filled `initialMarks` can satisfy that instantly on load.
    No code change made (didn't want to guess without a found bug) — see TODO.md for
    the exact repro steps to retry on-device.
-3. **OCR residual-error question, not a bug to silently fix**: a previously-flagged,
-   distinct dropped/extra-digit OCR issue is confirmed still present on real-device
-   testing. Asked the project owner directly this round whether the current
-   (much-improved, mostly correct) accuracy is acceptable given the correction step
-   already catches remaining errors, rather than assuming further chasing is
-   automatically worthwhile.
+3. **OCR residual-error question — resolved.** Asked the project owner directly;
+   decision was to leave the current accuracy as-is and just document it (occasional
+   dropped/extra single digit, already caught by the correction-step review) rather
+   than keep chasing it — see TODO.md's Technical Notes for the repro leads, kept on
+   record only in case this gets revisited later.
 4. **Save-to-library feature — client-side implementation done, NOT yet deployed.**
    Save a scanned puzzle to a public shared library, reusing the scan wizard as the
    authoring tool (`src/puzzleLibrary.js`, plus wiring in `src/scanUI.js`/`app.js`/
