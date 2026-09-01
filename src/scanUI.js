@@ -59,7 +59,7 @@ const MIN_RECT_SIZE = 20;
 // CSS custom properties directly.
 const GOLD = '#e6b73f';
 
-export function initScanWizard({ els, onPuzzleReady, onClose }) {
+export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   const state = {
     analysisCanvas: null,
     analysisCtx: null,
@@ -144,6 +144,11 @@ export function initScanWizard({ els, onPuzzleReady, onClose }) {
     els.explainPanel.classList.add('hidden');
     els.scanModal.classList.remove('hidden');
     window.scrollTo(0, 0); // start at the top of the fresh screen, not wherever the page was scrolled to
+    // iOS scroll regression fix (see TODO.md): body's padding-bottom now tracks the explain
+    // panel's REAL height via app.js's syncExplainPanelSpace (--explain-panel-space), rather
+    // than a static reservation — hiding the panel here needs that recalculated too (down to
+    // 0), or the scan screen would keep reserving space for a panel that isn't there.
+    onOpen?.();
   }
 
   function closeWizard() {

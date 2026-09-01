@@ -235,35 +235,76 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **iOS scroll regression: unnecessary scrolling still happening, and it gets worse —
-  specifically introducing extra whitespace — once the on-screen keyboard opens.**
-  Reported after the overscroll-bounce fix (item 3 above) shipped. Two distinct
-  symptoms worth investigating separately rather than assuming one root cause:
-  - **Baseline: some scrolling happens even without the keyboard involved at all**,
-    which per the overscroll-bounce fix's own verification note shouldn't be
-    happening if the board is correctly sized — worth first confirming directly
-    whether this is genuine content overflow (something is actually taller than the
-    viewport) versus a `window.innerHeight` mismatch from mobile browser chrome
-    show/hide (which the prior fix's notes flagged as a known, different, and likely
-    harmless cause) versus something else entirely. Don't assume it's the same root
-    cause as the keyboard issue below without checking.
-  - **Worse with the keyboard open, specifically introducing whitespace.** This points
-    at the classic mobile-web keyboard-resize problem: the on-screen keyboard opening
-    shrinks the visual viewport, and depending on how layout responds to that
-    (`100vh`-based sizing is a common culprit, since `100vh` on many mobile browsers
-    doesn't shrink when the keyboard appears, leaving a gap where the keyboard now
-    covers content) that can manifest as exactly this symptom — extra blank space
-    appearing and more scroll becoming possible/necessary than before. Worth checking
-    `visualViewport` API usage (or lack of it) in the layout/fit logic, and which
-    specific elements use `vh`-based sizing versus dynamic viewport units
-    (`dvh`) or JS-measured heights.
-  - **Given this project's specific history with iOS scroll bugs (item 10.7 above —
-    four rounds, three CSS-only attempts each fixing one symptom while breaking or
-    missing the next), don't assume a first attempted fix here is complete.** Verify
-    on a real device specifically, including with an input actually focused and the
-    keyboard actually open, not just judged from a simulator or desktop responsive
-    view — this class of bug has consistently not reproduced reliably outside real
-    hardware in this project so far.
+* **iOS scroll regression — root-caused and fixed for both the baseline and keyboard
+  symptoms in the browser preview; STILL NEEDS REAL iOS DEVICE VERIFICATION (keyboard
+  genuinely open) before this can be considered done.** Per this project's own established
+  history with this exact bug class (item 10.7 — four rounds, three CSS-only attempts each
+  fixing one symptom while breaking or missing the next), a fix that looks complete in a
+  desktop/simulator check has repeatedly not been complete on a real device, so this is
+  deliberately being left open rather than marked done on browser-preview evidence alone.
+
+  1. **Baseline symptom (scroll with no keyboard involved) — three separate real,
+     confirmed causes found and fixed, not one:**
+     - `body`'s `padding-bottom` (reserves room for the fixed `#explain-panel`) was a
+       hardcoded rem value that had to be hand-kept in sync with the panel's own
+       `min-height` and had already drifted out of sync (88px reserved vs. the panel's
+       72px normal minimum; 104px vs. 88px on narrow screens) — confirmed directly: a
+       375px mobile viewport with a 10x10 puzzle measured 34px of real `scrollHeight`
+       beyond `innerHeight` even though the board itself rendered with room to spare.
+       Fixed by making it derive from the panel's actual rendered height instead of a
+       second number to maintain by hand: `app.js`'s new `syncExplainPanelSpace` writes
+       `--explain-panel-space` (consumed by `body`'s `padding-bottom` in `styles.css`),
+       called from `fitBoardToViewport`, `scanUI.js`'s `openWizard` (new `onOpen`
+       callback — the panel goes to 0 height while the wizard is open), and backed by a
+       `ResizeObserver` on the panel itself for any other height change. That
+       `ResizeObserver` did NOT fire reliably in this project's own browser-preview
+       tooling during testing (confirmed directly: zero callbacks, even forcing a real
+       height change) — kept as a backstop since it may still help on real Safari, but
+       NOT relied on alone; the explicit call sites above are what's actually verified.
+     - `fitBoardToViewport` (`app.js`) never subtracted `.page`'s own bottom padding
+       (breathing room after the board-panel, before the reserved explain-panel space)
+       from its available-height budget — ~18-24px more overflow, additive with the
+       above.
+     - `fitBoardToViewport` also never subtracted `#board-root`'s own vertical padding
+       (`.board-root { padding: 0.5rem }`, styles.css — its horizontal padding WAS
+       already subtracted for width, just not top/bottom for height) from the same
+       budget — the last ~8px.
+     - **All three confirmed fixed together in the browser preview**: the same 375x812
+       mobile-viewport repro across all four sample puzzles (5x5/8x8/10x10/10x10) now
+       measures exactly 0px of `scrollHeight` beyond `clientHeight`, vs. the original
+       34px on the worst case.
+  2. **Keyboard symptom (extra whitespace once the keyboard opens)** — the classic
+     mobile-web keyboard-resize problem, confirmed as a real gap in this codebase: NO use
+     of the `visualViewport` API anywhere before this fix, `body`'s `min-height: 100vh`
+     and `.explain-panel`/`.modal-card__body`'s `max-height: NNvh` all use the LAYOUT
+     viewport (`vh`), which iOS Safari does not shrink when the keyboard opens (only the
+     VISUAL viewport shrinks), and `fitBoardToViewport` sized off `window.innerHeight`
+     (also the layout viewport) with recalculation wired only to `window`'s own `resize`/
+     `orientationchange` events, which iOS does not reliably fire just for the keyboard
+     opening/closing (`visualViewport`'s own `resize` event is the one iOS actually fires
+     for that). Fixed on both fronts:
+     - `styles.css`: `100vh` → `100dvh` (dynamic viewport, shrinks with the keyboard) as
+       a progressive-enhancement override (the `vh` line stays first as the fallback for
+       browsers without `dvh` support) on `body`'s `min-height`, `.explain-panel`'s
+       `max-height`, and `.modal-card__body`'s `max-height`.
+     - `app.js`: `fitBoardToViewport` now sizes off `window.visualViewport?.height ??
+       window.innerHeight` instead of `window.innerHeight` alone, and a new
+       `window.visualViewport?.addEventListener('resize', ...)` triggers recalculation
+       (in addition to, not instead of, the existing `window` resize/orientationchange
+       listeners) specifically for keyboard show/hide.
+     - **Verified in the browser preview only as far as the tooling allows**: patching
+       `window.visualViewport`'s `height` to simulate a ~300px keyboard and dispatching
+       its `resize` event does correctly shrink `--cell-size` and keep overflow at 0px —
+       confirms the code path is wired correctly, but this is NOT the same as a real
+       iOS Safari keyboard (which keeps the LAYOUT viewport full-size while only the
+       VISUAL viewport shrinks, a distinction this project's own tooling can't fully
+       reproduce) — **only real hardware can confirm the actual fix**.
+  3. **What's still needed to close this out**: verify on a real iOS device — normal
+     play (no keyboard) on a few different puzzle sizes for the baseline fix, and
+     focusing a text field (the scan wizard's clue-correction inputs, the known-count
+     fields, or the pairing-code input) with the keyboard genuinely open for the keyboard
+     fix — and report back what's actually seen. Given this bug class's history here, do
+     not treat this as done until that real-device check comes back clean.
 
 Next Steps (Do Not Start Yet)
 

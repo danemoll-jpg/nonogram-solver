@@ -43,15 +43,30 @@ body {
 body {
   margin: 0;
   min-height: 100vh;
+  /* iOS scroll regression fix (see TODO.md): 100vh is the LAYOUT viewport, which does not
+     shrink when the on-screen keyboard opens, leaving the page reserving room for space
+     that's no longer visible. 100dvh (the DYNAMIC viewport — shrinks with the keyboard)
+     overrides it in browsers that support it; unsupported browsers simply keep the 100vh
+     line above, since an unrecognized value falls back to whatever was already set rather
+     than clearing it. */
+  min-height: 100dvh;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: var(--text);
   background:
     radial-gradient(ellipse at top, rgba(230, 183, 63, 0.08), transparent 60%),
     linear-gradient(180deg, var(--felt-dark), var(--felt-darker));
   background-attachment: fixed;
-  /* Reserve room for the fixed explain panel (see .explain-panel) so it never covers the
-     bottom of a tall board — kept in sync with that panel's own min-height. */
-  padding-bottom: 5.5rem;
+  /* Reserve room for the fixed #explain-panel (see its own comment) so it never covers the
+     bottom of a tall board. --explain-panel-space is written by app.js's
+     syncExplainPanelSpace from the panel's own REAL rendered height (via a ResizeObserver),
+     not a second hardcoded number — this used to be a plain rem value that had to be
+     hand-kept in sync with the panel's min-height and had already drifted out of sync by a
+     few pixels (confirmed directly: real, if small, scrollable overflow on a mobile
+     viewport with no keyboard involved — see TODO.md's "baseline" symptom), and would drift
+     further any time the panel's content made it taller than its own min-height. The 5.5rem
+     fallback only matters for the brief window before the ResizeObserver's first callback
+     fires (or if JS fails to load at all).  */
+  padding-bottom: var(--explain-panel-space, 5.5rem);
 }
 
 .page {
@@ -473,6 +488,8 @@ body {
 
 .modal-card__body {
   max-height: min(28rem, 60vh);
+  /* See body's min-height comment (styles.css top) — same keyboard-resize reasoning. */
+  max-height: min(28rem, 60dvh);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch; /* smooth momentum scrolling on iOS Safari */
   /* Stops this region's own scroll from chaining to the page behind the modal once it hits
@@ -556,6 +573,9 @@ body {
   z-index: 30;
   min-height: 4.5rem;
   max-height: 40vh;
+  /* See body's min-height comment — same keyboard-resize reasoning applies to this fixed
+     panel's own cap. */
+  max-height: 40dvh;
   overflow-y: auto;
   /* Current Objective #3: a long hint/mistake explanation can scroll on its own within this
      fixed panel — contain its bounce/chaining at that boundary instead of the page's. */
@@ -603,12 +623,10 @@ body {
      override here — a hardcoded width at this breakpoint would fight the JS-computed size
      and stop the board from actually filling the available space on small screens. */
 
-  /* Explanation text wraps more on narrow screens — give the panel a bit more headroom
-     so short hints still fit without scrolling, and keep body padding in sync. */
-  body {
-    padding-bottom: 6.5rem;
-  }
-
+  /* Explanation text wraps more on narrow screens — give the panel a bit more headroom so
+     short hints still fit without scrolling. No separate body padding-bottom override
+     needed here any more (see body's own comment) — --explain-panel-space tracks whatever
+     height this rule (or the panel's actual content) produces automatically. */
   .explain-panel {
     min-height: 5.5rem;
   }

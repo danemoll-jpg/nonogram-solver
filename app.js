@@ -351,6 +351,7 @@ const CLUE_PER_DIGIT = 1.1 / 1.9;
 const CLUE_BASE = 0.3 / 1.9;
 
 function fitBoardToViewport() {
+  syncExplainPanelSpace();
   if (!puzzle) return;
   const grid = els.boardRoot.querySelector('.nono-grid');
   if (!grid) return;
@@ -367,20 +368,44 @@ function fitBoardToViewport() {
   // Available height = viewport space below the board-root's own top (which already
   // reflects everything stacked above it — page padding, header, toolbar, board-panel
   // padding) minus everything stacked below it (status line, board-panel's bottom
-  // padding/border) minus the fixed explain panel's actual current height, minus a small
-  // buffer so the board never visually touches either edge.
+  // padding/border, .page's own bottom padding) minus the fixed explain panel's actual
+  // current height, minus a small buffer so the board never visually touches either edge.
   const boardPanel = els.boardRoot.closest('.board-panel');
   const panelStyle = getComputedStyle(boardPanel);
   const statusLineRect = els.statusLine.getBoundingClientRect();
   const statusLineStyle = getComputedStyle(els.statusLine);
+  // Bug fix (iOS scroll regression, "baseline" symptom — see TODO.md): .page's own bottom
+  // padding (breathing room after board-panel, before body's reserved explain-panel space)
+  // was never subtracted here, so the page's real flow height could end up a bit taller
+  // than the viewport even though the board itself fit within its own computed budget —
+  // confirmed directly: a 375px mobile viewport with a 10x10 puzzle still overflowed by
+  // ~18px after fixing the --explain-panel-space sync bug elsewhere in this same
+  // investigation, traced to exactly this missing term.
+  const pagePaddingBottom = parseFloat(getComputedStyle(els.pageRoot).paddingBottom);
   const belowBoardRoot =
     statusLineRect.height +
     parseFloat(statusLineStyle.marginTop) +
     parseFloat(panelStyle.paddingBottom) +
-    parseFloat(panelStyle.borderBottomWidth);
+    parseFloat(panelStyle.borderBottomWidth) +
+    pagePaddingBottom;
   const explainPanelHeight = document.getElementById('explain-panel').offsetHeight;
   const BUFFER_PX = 16;
-  const availableHeight = window.innerHeight - rootRect.top - belowBoardRoot - explainPanelHeight - BUFFER_PX;
+  // visualViewport.height, not window.innerHeight, when available: innerHeight reflects the
+  // LAYOUT viewport, which iOS Safari does not shrink when the on-screen keyboard opens —
+  // sizing the board off it would keep the board (and the page height it drives) sized for
+  // room that's no longer actually visible once the keyboard covers part of the screen,
+  // exactly the "extra whitespace becomes scrollable" symptom this fixes (see TODO.md).
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+  // Bug fix (iOS scroll regression, "baseline" symptom — see TODO.md): rootRect.top is
+  // board-root's OUTER edge, before ITS OWN padding (.board-root { padding: 0.5rem } —
+  // availableWidth above already subtracts the left/right half of this, but nothing
+  // subtracted the top/bottom half here) — so the grid, sized directly off availableHeight,
+  // could render up to a full board-root-padding taller than the room actually measured for
+  // it. Confirmed directly as the last piece of a real (if modest, ~8px) baseline overflow
+  // that survived the two fixes above it.
+  const rootVerticalPadding = parseFloat(rootStyle.paddingTop) + parseFloat(rootStyle.paddingBottom);
+  const availableHeight =
+    viewportHeight - rootRect.top - rootVerticalPadding - belowBoardRoot - explainPanelHeight - BUFFER_PX;
 
   const cellPx = Math.max(
     MIN_CELL_PX,
@@ -393,6 +418,39 @@ function fitBoardToViewport() {
   grid.style.gridTemplateColumns = `${clueColWidth}px repeat(${puzzle.cols}, ${cellPx}px)`;
   grid.style.gridTemplateRows = `${clueRowHeight}px repeat(${puzzle.rows}, ${cellPx}px)`;
 }
+
+// Bug fix (iOS scroll regression, "baseline" symptom — see TODO.md): body's own
+// `padding-bottom` (styles.css) exists purely to reserve room for the fixed #explain-panel
+// so it never covers board content, but it used to be a SECOND hardcoded rem value that had
+// to be hand-kept in sync with the panel's own min-height — and had already drifted out of
+// sync (5.5rem/88px reserved vs. a 4.5rem/72px minimum normally, 6.5rem/104px vs. 5.5rem/88px
+// on narrow screens), so the page's real scrollable height was always a few pixels TALLER
+// than anything visible actually needed, independent of board sizing (confirmed directly: a
+// 375px-wide mobile viewport with a 10x10 puzzle measured 34px of scrollHeight beyond
+// innerHeight even though the board itself rendered with room to spare above the panel).
+// Rather than picking new numbers to re-sync by hand (the same trap that caused the drift),
+// this reads the panel's REAL rendered height and writes it to a CSS variable
+// (--explain-panel-space, consumed by body's padding-bottom in styles.css) so there's only
+// ever one source of truth. A ResizeObserver on the panel itself would be the obvious way
+// to catch every height change automatically (content reflow, the panel being hidden
+// entirely for the scan wizard) — kept below as a belt-and-suspenders backstop, but NOT
+// relied on alone: confirmed directly that it doesn't fire reliably in this project's own
+// browser-preview tooling (no callback at all, even on a genuine forced height change), so
+// this is also called explicitly from every place that actually changes the panel's
+// height/visibility — fitBoardToViewport (itself already called on resize/orientationchange/
+// visualViewport-resize/setExplain/wizard-close) and scanUI.js's openWizard (via the
+// onOpen callback below, for the "wizard opens, panel hidden" case fitBoardToViewport isn't
+// otherwise called for).
+function syncExplainPanelSpace() {
+  document.documentElement.style.setProperty('--explain-panel-space', `${els.explainPanel.offsetHeight}px`);
+}
+try {
+  new ResizeObserver(syncExplainPanelSpace).observe(els.explainPanel);
+} catch {
+  // ResizeObserver missing entirely on some old browser — the explicit call sites above
+  // still keep this correct without it.
+}
+syncExplainPanelSpace();
 
 function debounce(fn, ms) {
   let timer = null;
@@ -1001,7 +1059,12 @@ els.menuRemoveBad.addEventListener('click', () => {
   syncAllCellVisuals();
 });
 
-const scanWizard = initScanWizard({ els, onPuzzleReady: startScannedPuzzle, onClose: fitBoardToViewport });
+const scanWizard = initScanWizard({
+  els,
+  onPuzzleReady: startScannedPuzzle,
+  onClose: fitBoardToViewport,
+  onOpen: syncExplainPanelSpace,
+});
 els.menuScan.addEventListener('click', () => {
   closeHelpMenu();
   scanWizard.open();
@@ -1160,3 +1223,12 @@ populatePuzzleSelect();
 loadPuzzle(SAMPLE_PUZZLES[0].id);
 window.addEventListener('resize', debounce(fitBoardToViewport, 100));
 window.addEventListener('orientationchange', () => setTimeout(fitBoardToViewport, 50));
+// iOS scroll regression, "keyboard" symptom (see TODO.md): the on-screen keyboard opening
+// shrinks the VISUAL viewport but does not reliably fire a plain `window` 'resize' event on
+// iOS Safari, so fitBoardToViewport (which reads window.innerHeight — the LAYOUT viewport,
+// unaffected by the keyboard either way) could stay sized for the pre-keyboard viewport.
+// visualViewport's own 'resize' event is the one iOS actually fires for this. Listened for
+// in addition to (not instead of) the window listener above, since visualViewport isn't
+// universally available and the window listener already covers ordinary
+// desktop/orientation resizes correctly on its own.
+window.visualViewport?.addEventListener('resize', debounce(fitBoardToViewport, 100));
