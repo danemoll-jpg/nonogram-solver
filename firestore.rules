@@ -29,6 +29,12 @@ rules_version = '2';
 //     these rules entirely — so client access is locked down completely rather than given
 //     its own (harder to get right) rule.
 //
+//   users/{uid}/inProgressPuzzles/{puzzleId} — saved mid-solve board state (Current
+//     Objective's saved/incomplete-progress item, src/puzzleLibrary.js's
+//     saveInProgressPuzzle/loadInProgressPuzzle/fetchInProgressPuzzles/
+//     deleteInProgressPuzzle), keyed the same uniform way as solvedLibraryPuzzles above.
+//     Same owning-uid-only rule and reasoning — a personal save, never a public value.
+//
 //   puzzles/{puzzleId} — the public shared puzzle library (item 9's save-to-library slice,
 //     see src/puzzleLibrary.js and TODO.md). Public read for this first version (no
 //     friends-only/private sharing yet). create is open to any authenticated (including
@@ -43,6 +49,10 @@ service cloud.firestore {
     }
 
     match /users/{uid}/solvedLibraryPuzzles/{puzzleId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{uid}/inProgressPuzzles/{puzzleId} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 

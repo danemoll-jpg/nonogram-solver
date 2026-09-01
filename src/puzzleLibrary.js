@@ -28,6 +28,7 @@
 
 import { ensureSignedIn, getFirestoreClient } from './firebase.js';
 import { parseClueText, buildScannedPuzzle } from './scanPuzzle.js';
+import { UNKNOWN, FILLED, EMPTY } from './model.js';
 
 const COLLECTION = 'puzzles';
 
@@ -171,4 +172,83 @@ export async function recordPuzzleSolved(puzzle, timeMs) {
     console.warn('recordPuzzleSolved: write failed (offline, not deployed yet, or blocked) — ignoring', err);
     return false;
   }
+}
+
+// ---- Saved/incomplete puzzle progress (TODO.md's Current Objective) ----
+//
+// `users/{uid}/inProgressPuzzles/{puzzleId}` — a per-user snapshot of one puzzle's board
+// state mid-solve, keyed exactly like solvedLibraryPuzzles above (works uniformly for a
+// built-in or a saved library puzzle's id; cross-device pairing tracks it automatically for
+// the same reason that comment gives). Save cadence is explicit, in-app-triggered only —
+// see app.js's saveProgressIfApplicable and its call sites — never a per-move write.
+//
+// Firestore can't store a nested array-of-arrays directly (a documented limitation — an
+// array field can't itself contain another array), so the board's grid — normally
+// Array<Array<UNKNOWN|FILLED|EMPTY>> — is serialized the same way rowClues/colClues already
+// are above: one compact string per row (one character per cell), rows joined by '|'. This
+// also keeps the doc small regardless of puzzle size, unlike one Firestore field per cell.
+const GRID_CHAR = { [UNKNOWN]: 'u', [FILLED]: 'f', [EMPTY]: 'x' };
+const GRID_STATE = { u: UNKNOWN, f: FILLED, x: EMPTY };
+
+function serializeGrid(grid) {
+  return grid.map((row) => row.map((cell) => GRID_CHAR[cell]).join('')).join('|');
+}
+
+function deserializeGrid(str) {
+  return str.split('|').map((row) => row.split('').map((ch) => GRID_STATE[ch]));
+}
+
+// Writes (or overwrites) the saved in-progress state for one puzzle. `grid` is the board's
+// raw `Board.grid` — the same shape `puzzle.initialMarks` already expects (see model.js's
+// Board.fromGrid), so resuming is a straight reuse of the scan wizard's existing seeding
+// path (see loadInProgressPuzzle below), per TODO.md's scoping note. Throws on failure;
+// callers treat this the same fire-and-forget way as recordPuzzleSolved (a save failing —
+// offline, not deployed — must never interrupt play).
+export async function saveInProgressPuzzle(puzzleId, grid, elapsedMs, hintsUsed) {
+  const user = await ensureSignedIn();
+  const { db, mod } = await getFirestoreClient();
+  const ref = mod.doc(db, 'users', user.uid, 'inProgressPuzzles', puzzleId);
+  await mod.setDoc(ref, {
+    grid: serializeGrid(grid),
+    elapsedMs,
+    hintsUsed,
+    updatedAt: mod.serverTimestamp(),
+  });
+}
+
+// Removes a puzzle's saved in-progress state — called once it's genuinely solved (see
+// app.js's maybeShowCompletion; a completed puzzle has nothing left to "resume") or once the
+// player explicitly restarts it from scratch (see app.js's Restart handler).
+export async function deleteInProgressPuzzle(puzzleId) {
+  const user = await ensureSignedIn();
+  const { db, mod } = await getFirestoreClient();
+  await mod.deleteDoc(mod.doc(db, 'users', user.uid, 'inProgressPuzzles', puzzleId));
+}
+
+// Resolves a Map<puzzleId, { elapsedMs, hintsUsed }> for every puzzle the current (or
+// paired) user has saved progress on — what the library modal's "Incomplete" filter reads,
+// and what shows the in-progress badge/elapsed-time on a matching row (see app.js's
+// renderLibraryList). Same "fail soft" contract as fetchSolvedPuzzles.
+export async function fetchInProgressPuzzles() {
+  const user = await ensureSignedIn();
+  const { db, mod } = await getFirestoreClient();
+  const snap = await mod.getDocs(mod.collection(db, 'users', user.uid, 'inProgressPuzzles'));
+  const out = new Map();
+  snap.forEach((docSnap) => {
+    const d = docSnap.data();
+    out.set(docSnap.id, { elapsedMs: d.elapsedMs || 0, hintsUsed: d.hintsUsed || 0 });
+  });
+  return out;
+}
+
+// Loads one puzzle's saved in-progress state, resolving null if there isn't one (rather than
+// throwing) — a stale/already-cleared save is a normal "nothing to resume" case, not an
+// error, for callers like app.js's library "Play" handler that check this opportunistically.
+export async function loadInProgressPuzzle(puzzleId) {
+  const user = await ensureSignedIn();
+  const { db, mod } = await getFirestoreClient();
+  const snap = await mod.getDoc(mod.doc(db, 'users', user.uid, 'inProgressPuzzles', puzzleId));
+  if (!snap.exists()) return null;
+  const d = snap.data();
+  return { grid: deserializeGrid(d.grid), elapsedMs: d.elapsedMs || 0, hintsUsed: d.hintsUsed || 0 };
 }

@@ -145,15 +145,6 @@ body {
   gap: 0.5rem;
 }
 
-.toolbar__toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.9rem;
-  color: var(--text-dim);
-  margin-left: auto;
-}
-
 .mode-toggle {
   display: inline-flex;
   border: 1px solid rgba(230, 183, 63, 0.3);
@@ -196,8 +187,14 @@ body {
   margin-left: auto;
 }
 
-.toolbar__toggle + .help-menu {
-  margin-left: 0;
+/* UI/branding polish round (see TODO.md): trimmed from a text "Help ▾" button to a plain "?"
+   icon — square like .mute-toggle right next to it, so the two icon buttons read as a
+   matched pair rather than one looking like an accident. */
+.help-menu__trigger {
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0.45rem 0.75rem;
 }
 
 .help-menu__list {
@@ -236,6 +233,17 @@ body {
 
 .help-menu__item--danger {
   color: var(--danger);
+}
+
+/* Auto-check, relocated into the Help menu from the toolbar (UI/branding polish round — see
+   TODO.md): a checkbox row, not a one-shot button — `.help-menu__item` above already gives it
+   matching width/padding/hover since it's shared across both, this just adds the
+   label-wraps-a-checkbox layout `<label>` needs that a plain `<button>` item doesn't. */
+.help-menu__item--toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
 }
 
 .help-menu__divider {
@@ -416,10 +424,15 @@ body {
   cursor: not-allowed;
 }
 
+/* UI/branding polish round (see TODO.md): bumped from 0.35 opacity / 0.53x cell-size — the
+   old mark read as too faint to register at a glance, especially on a large/zoomed-out
+   puzzle. Bolder weight too, not just bigger/more opaque, so it stays a crisp "✕" rather than
+   a bigger blur at small cell sizes. */
 .nono-cell.empty::after {
   content: "✕";
-  color: rgba(242, 236, 221, 0.35);
-  font-size: calc(var(--cell-size, 1.9rem) * 0.53);
+  color: rgba(242, 236, 221, 0.62);
+  font-weight: 700;
+  font-size: calc(var(--cell-size, 1.9rem) * 0.68);
 }
 
 .nono-cell.reasoning {
@@ -428,6 +441,30 @@ body {
 
 .nono-cell.result {
   box-shadow: inset 0 0 0 3px var(--highlight-result);
+}
+
+/* Live drag-fill cell counter (Current Objective — see TODO.md and app.js's
+   dragCountBadge section): small floating badge that tracks the pointer while the player
+   drags a fill/X stroke, so they can watch the count hit a clue's run length instead of
+   counting cells by eye afterward. position:fixed + JS-set left/top (clientX/Y) rather than
+   anchored to the swept cell, so it reads as "attached to your finger/cursor," not to the
+   board; pointer-events:none so it can never itself intercept the drag's own hit-testing
+   (app.js's cellAt uses elementFromPoint at the same coordinates). Offset up-and-centered by
+   the transform below rather than sitting directly on the coordinate, so a touch drag doesn't
+   hide the badge under the player's own finger. */
+.drag-count-badge {
+  position: fixed;
+  z-index: 15;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 14px));
+  background: var(--gold);
+  color: #241a04;
+  font-weight: 800;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.35);
 }
 
 .status-line {
@@ -1189,6 +1226,17 @@ body {
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--success, #4caf7d);
+  white-space: nowrap;
+}
+
+/* Saved/incomplete-progress item (see TODO.md) — driven by
+   src/puzzleLibrary.js's fetchInProgressPuzzles; the "Incomplete" filter's counterpart to
+   .library-row__solved above (mutually exclusive per row — see renderLibraryList's own
+   comment). --warn rather than --success: this is "unfinished," not an accomplishment. */
+.library-row__in-progress {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--warn);
   white-space: nowrap;
 }
 

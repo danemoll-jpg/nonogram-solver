@@ -19,6 +19,10 @@ import {
   renamePuzzleInLibrary,
   fetchSolvedPuzzles,
   recordPuzzleSolved,
+  saveInProgressPuzzle,
+  deleteInProgressPuzzle,
+  fetchInProgressPuzzles,
+  loadInProgressPuzzle,
 } from './src/puzzleLibrary.js';
 import { ensureSignedIn } from './src/firebase.js';
 
@@ -61,7 +65,9 @@ const els = {
   menuCheck: document.getElementById('menu-check'),
   menuRemoveBad: document.getElementById('menu-remove-bad'),
   menuScan: document.getElementById('menu-scan'),
-  menuClearAll: document.getElementById('menu-clear-all'),
+  menuSaveProgress: document.getElementById('menu-save-progress'),
+  menuRestart: document.getElementById('menu-restart'),
+  menuAllGames: document.getElementById('menu-all-games'),
   explainBody: document.getElementById('explain-panel-body'),
   btnContradiction: document.getElementById('btn-contradiction'),
   mistakePopup: document.getElementById('mistake-popup'),
@@ -193,13 +199,21 @@ function setExplain(content) {
 // straight back where their photo already was, with the existing mistake-checking tools
 // (autoCheckMark/checkForMistakes) immediately able to point at whatever's wrong, rather than
 // silently discarding real progress the way scanning used to (see TODO.md's history).
+// `puzzle.resumed` + `puzzle.resumeElapsedMs`/`resumeHintsUsed`, when present (loaded via
+// the library's "Incomplete" resume flow — see the library "Play" handler below and
+// TODO.md's saved/incomplete-progress item), carry forward stats from BEFORE this session:
+// board.history only ever records moves made in the current session (a save is a grid
+// snapshot, not a full move log — see src/puzzleLibrary.js), so puzzleStartTime is offset
+// backwards by resumeElapsedMs (making elapsed-time display include prior time for free,
+// with no separate accumulator) and computeCompletionStats adds resumeHintsUsed onto
+// whatever it derives from this session's own history.
 function startPuzzle(p) {
   puzzle = p;
   board = puzzle.initialMarks ? Board.fromGrid(puzzle.initialMarks) : new Board(puzzle.rows, puzzle.cols);
   board.hasHistory = puzzle.source !== 'scan';
   highlightedCells = [];
   autoXCells = new Set();
-  puzzleStartTime = Date.now();
+  puzzleStartTime = Date.now() - (puzzle.resumeElapsedMs || 0);
   puzzleCompleteShown = false;
   setExplain(null);
   els.btnContradiction.classList.add('hidden');
@@ -573,6 +587,10 @@ function computeCompletionStats() {
       if (cell.next !== correct) mistakes++;
     }
   }
+  // Resumed-puzzle baseline (see startPuzzle's own comment) — hints given BEFORE this
+  // session aren't in board.history at all, so they'd otherwise silently vanish from both
+  // the completion modal and the next progress save.
+  hintsUsed += puzzle.resumeHintsUsed || 0;
   return { hintsUsed, mistakes };
 }
 
@@ -593,10 +611,66 @@ function maybeShowCompletion() {
   // recording stats against, size-bucketed or per-puzzle.
   recordCompletion(puzzle, { timeMs, hintsUsed, mistakes }).catch(() => {});
   recordPuzzleSolved(puzzle, timeMs).catch(() => {});
+  // A genuinely solved puzzle has nothing left to "resume" — clear any stale in-progress
+  // save so it stops showing under the library's Incomplete filter (see TODO.md's
+  // saved/incomplete-progress item). Same fire-and-forget contract as the two calls above;
+  // skips scan-origin puzzles the same way saveProgressIfApplicable does (see its own
+  // comment) since they were never eligible to be saved in the first place.
+  if (puzzle.source !== 'scan') deleteInProgressPuzzle(puzzle.id).catch(() => {});
 }
 
 els.btnCompleteClose.addEventListener('click', () => {
   els.completeModal.classList.add('hidden');
+});
+
+// ---- saved/incomplete puzzle progress (Current Objective — see TODO.md) ----
+//
+// Save cadence, confirmed with the project owner: explicit in-app-triggered saves only — no
+// per-move writes, no browser-level "leaving" detection. Three call sites: the "Save
+// progress" Help-menu item (explicit), opening the library modal (auto — "exits back to the
+// library"), and picking a different puzzle in the library (auto — "switches puzzles"); see
+// each one's own comment. All funnel through this one function so the eligibility rules
+// below only need to stay in sync in one place.
+//
+// Eligible puzzles only: scan-origin snapshots have no stable identity worth saving against
+// (same reasoning recordCompletion/recordPuzzleSolved already use to skip them), and a
+// puzzle with no known solution can't produce the hintsUsed/mistakes stats this feature
+// tracks anyway. A completed board has nothing left to "resume" (maybeShowCompletion already
+// deletes any stale save on a genuine solve; a complete-but-wrong board is a rare edge case
+// better left to Check my work / Remove bad marks than folded in here). An untouched
+// (all-UNKNOWN) board deletes any stale save instead of writing an empty one — covers the
+// case where a player resumed a puzzle, then manually cleared it back to blank by hand
+// (short of a full Restart) without ever adding a new mark worth preserving.
+async function saveProgressIfApplicable() {
+  if (!puzzle || !board || puzzle.source === 'scan' || !puzzle.solution) return;
+  if (board.isComplete()) return;
+  const hasAnyMarks = board.grid.some((row) => row.some((cell) => cell !== UNKNOWN));
+  if (!hasAnyMarks) {
+    await deleteInProgressPuzzle(puzzle.id);
+    return;
+  }
+  const { hintsUsed } = computeCompletionStats();
+  const elapsedMs = Date.now() - puzzleStartTime;
+  await saveInProgressPuzzle(puzzle.id, board.grid, elapsedMs, hintsUsed);
+}
+
+els.menuSaveProgress.addEventListener('click', async () => {
+  closeHelpMenu();
+  if (puzzle.source === 'scan') {
+    setExplain("A scanned puzzle can't be saved — it has no stable identity to save progress against.");
+    return;
+  }
+  if (!puzzle.solution) {
+    setExplain("This puzzle can't be saved yet.");
+    return;
+  }
+  try {
+    await saveProgressIfApplicable();
+    setExplain('Progress saved — find it under the library’s "Incomplete" filter.');
+  } catch (err) {
+    console.warn('saveProgressIfApplicable failed:', err);
+    setExplain("Couldn't save progress — offline, or not deployed yet.");
+  }
 });
 
 // ---- confirm dialog (item: fix "Clear all" doing nothing) ----
@@ -858,8 +932,37 @@ function applyUnfillWithSound(r, c, opts, { dragStep = false } = {}) {
   return applied;
 }
 
+// ---- live drag-fill cell counter (Current Objective — see TODO.md) ----
+//
+// A small floating badge that follows the pointer while the player is click-and-dragging a
+// fill (or X) stroke, showing how many cells have been painted so far — lets them watch it
+// hit a clue's run length instead of counting cells by eye after the fact. Deliberately a
+// single lazily-created element reused across every drag (not recreated per-stroke): drags
+// happen often enough during normal play that per-stroke DOM churn isn't worth it, and
+// nothing about the badge needs to persist between strokes.
+let dragCountBadgeEl = null;
+function dragCountBadge() {
+  if (!dragCountBadgeEl) {
+    dragCountBadgeEl = document.createElement('div');
+    dragCountBadgeEl.className = 'drag-count-badge hidden';
+    dragCountBadgeEl.setAttribute('aria-hidden', 'true'); // transient visual feedback only — status-line/board state already carry the real info for a11y
+    document.body.appendChild(dragCountBadgeEl);
+  }
+  return dragCountBadgeEl;
+}
+function showDragCountBadge(x, y, count) {
+  const el = dragCountBadge();
+  el.textContent = String(count);
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+  el.classList.remove('hidden');
+}
+function hideDragCountBadge() {
+  dragCountBadgeEl?.classList.add('hidden');
+}
+
 function attachPointerHandlers(grid) {
-  let dragging = null; // { paintState, touched: Set<string> }
+  let dragging = null; // { paintState, touched: Set<string>, count: number }
 
   grid.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -875,11 +978,13 @@ function attachPointerHandlers(grid) {
   // dragStep distinguishes the drag's first cell (a click — fill-click/x-click) from cells
   // it sweeps across afterward (drag-sweep — see src/sounds.js) for sound purposes only;
   // it doesn't change what mark gets applied.
+  // Returns true iff this call actually changed the board (used by the drag-fill counter
+  // above to count only genuine paints, not every cell the pointer merely passed over).
   function paintCell(el, state, { dragStep = false } = {}) {
     const r = Number(el.dataset.row);
     const c = Number(el.dataset.col);
     const current = board.get(r, c);
-    if (current === state) return;
+    if (current === state) return false;
 
     // Bug fix (Current Objective #4): a drag's paintState is fixed from whichever action its
     // *first* cell performed (see pointerdown below), then reapplied to every cell it sweeps
@@ -889,21 +994,22 @@ function attachPointerHandlers(grid) {
     // cell that's already FILLED or EMPTY, regardless of the drag's mode. Single-click
     // toggle-off-if-same-state (dragStep:false, the pointerdown call below) is unaffected —
     // only cells the drag *sweeps into* afterward are restricted to UNKNOWN.
-    if (dragStep && current !== UNKNOWN) return;
+    if (dragStep && current !== UNKNOWN) return false;
 
     const isUnfill = current === FILLED && state === UNKNOWN;
-    if (!isUnfill && (rowLockedNow(r) || colLockedNow(c))) return;
+    if (!isUnfill && (rowLockedNow(r) || colLockedNow(c))) return false;
 
     const applied = isUnfill
       ? applyUnfillWithSound(r, c, undefined, { dragStep })
       : applyMoveWithSound([{ row: r, col: c, state }], undefined, { dragStep });
-    if (applied.length === 0) return;
+    if (applied.length === 0) return false;
     for (const cell of applied) {
       const cellEl = cellEls.get(`${cell.row},${cell.col}`);
       cellEl.classList.toggle('filled', cell.next === FILLED);
       cellEl.classList.toggle('empty', cell.next === EMPTY);
     }
     for (const cell of applied) onCellChanged(cell.row, cell.col);
+    return true;
   }
 
   function cellAt(x, y) {
@@ -922,26 +1028,43 @@ function attachPointerHandlers(grid) {
     const r = Number(el.dataset.row);
     const c = Number(el.dataset.col);
     const newState = targetStateFor(board.get(r, c));
-    dragging = { paintState: newState, touched: new Set([`${r},${c}`]) };
+    dragging = { paintState: newState, touched: new Set([`${r},${c}`]), count: 0 };
     startDragSweep(); // no-op unless the 'stretch' drag-sweep prototype mode is active
-    paintCell(el, newState);
+    const changed = paintCell(el, newState);
+    // Only show/count for a genuine fill or X paint — not a plain click-to-clear (newState
+    // UNKNOWN), which isn't "painting a run" and wouldn't make sense to badge (see this
+    // section's header comment).
+    if (changed && newState !== UNKNOWN) {
+      dragging.count = 1;
+      showDragCountBadge(e.clientX, e.clientY, dragging.count);
+    }
     syncAllCellVisuals();
   });
 
   grid.addEventListener('pointermove', (e) => {
     if (!dragging) return;
+    if (dragging.paintState !== UNKNOWN) {
+      // Keep the badge glued to the pointer between cell boundaries too, not just on a new
+      // cell — the whole point is glanceable feedback right where the player is looking.
+      if (dragging.count > 0) showDragCountBadge(e.clientX, e.clientY, dragging.count);
+    }
     const el = cellAt(e.clientX, e.clientY);
     if (!el) return;
     const key = `${el.dataset.row},${el.dataset.col}`;
     if (dragging.touched.has(key)) return;
     dragging.touched.add(key);
-    paintCell(el, dragging.paintState, { dragStep: true });
+    const changed = paintCell(el, dragging.paintState, { dragStep: true });
+    if (changed && dragging.paintState !== UNKNOWN) {
+      dragging.count++;
+      showDragCountBadge(e.clientX, e.clientY, dragging.count);
+    }
     syncAllCellVisuals();
   });
 
   function endDrag() {
     dragging = null;
     stopDragSweep();
+    hideDragCountBadge(); // transient in-stroke feedback only — see this section's header comment
   }
   grid.addEventListener('pointerup', endDrag);
   grid.addEventListener('pointercancel', endDrag);
@@ -1069,9 +1192,18 @@ els.menuRemoveBad.addEventListener('click', () => {
   syncAllCellVisuals();
 });
 
+// Auto-save trigger #3, scan flavor (see TODO.md's saved/incomplete-progress item and the
+// library "Play" handler's own comment): finishing the scan wizard replaces the current
+// puzzle with a freshly scanned one, same as picking a different puzzle from the library —
+// save the OUTGOING puzzle's progress first, before startPuzzle discards it.
+async function handleScannedPuzzleReady(p) {
+  await saveProgressIfApplicable().catch(() => {});
+  startPuzzle(p);
+}
+
 const scanWizard = initScanWizard({
   els,
-  onPuzzleReady: startPuzzle,
+  onPuzzleReady: handleScannedPuzzleReady,
   onClose: fitBoardToViewport,
   onOpen: syncExplainPanelSpace,
 });
@@ -1094,6 +1226,9 @@ els.menuScan.addEventListener('click', () => {
 // re-fetches from Firestore.
 let libraryEntriesCache = [];
 let solvedPuzzlesCache = new Map(); // puzzleId -> { timesSolved, bestTimeMs }
+// Saved/incomplete-progress item (see TODO.md) — backs the library's "Incomplete" filter and
+// each matching row's in-progress badge, same caching contract as solvedPuzzlesCache above.
+let inProgressPuzzlesCache = new Map(); // puzzleId -> { elapsedMs, hintsUsed }
 let libraryMyUid = null;
 
 function builtinLibraryEntries() {
@@ -1131,10 +1266,14 @@ function populateLibrarySizeFilter(entries) {
 // rename affordance shows at all — the Firestore rule is what actually enforces who can
 // rename (see firestore.rules), this just avoids showing a control that would fail for
 // everyone but the creator; built-in entries never get one.
-function renderLibraryList(entries, solvedPuzzles, myUid) {
+function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, myUid) {
   els.libraryList.innerHTML = '';
   for (const entry of entries) {
     const solved = solvedPuzzles.get(entry.id);
+    // A puzzle only ever carries in-progress state if it's NOT solved (maybeShowCompletion
+    // deletes the save the moment a solve is recorded — see its own comment) — checked
+    // defensively rather than assumed, so a stale/racing save can't show both badges at once.
+    const inProgress = !solved ? inProgressPuzzles.get(entry.id) : null;
 
     const li = document.createElement('li');
     li.className = 'library-row';
@@ -1167,19 +1306,41 @@ function renderLibraryList(entries, solvedPuzzles, myUid) {
       const best = solved.bestTimeMs != null ? ` · best ${formatDuration(solved.bestTimeMs)}` : '';
       statsSpan.textContent = `${times}${best}`;
       li.append(solvedBadge, statsSpan);
+    } else if (inProgress) {
+      const inProgressBadge = document.createElement('span');
+      inProgressBadge.className = 'library-row__in-progress';
+      inProgressBadge.textContent = '⏳ In progress';
+      const statsSpan = document.createElement('span');
+      statsSpan.className = 'library-row__personal-stats';
+      statsSpan.textContent = `${formatDuration(inProgress.elapsedMs)} so far`;
+      li.append(inProgressBadge, statsSpan);
     }
 
     const playBtn = document.createElement('button');
     playBtn.className = 'btn btn--primary';
     playBtn.type = 'button';
-    playBtn.textContent = 'Play';
+    playBtn.textContent = inProgress ? 'Resume' : 'Play';
     playBtn.addEventListener('click', async () => {
       playBtn.disabled = true;
       els.libraryStatus.textContent = '';
       try {
-        const p = entry.builtin
+        const base = entry.builtin
           ? SAMPLE_PUZZLES.find((sp) => sp.id === entry.id)
           : await loadLibraryPuzzle(entry.id);
+        // Resuming (see TODO.md's saved/incomplete-progress item): merge the saved snapshot
+        // onto the base puzzle definition rather than trusting the base's own solve — the
+        // built-in/library puzzle object is re-fetched/re-solved fresh above every time, so
+        // this can't go stale even if the puzzle definition itself never changes.
+        // loadInProgressPuzzle resolving null (a stale/already-cleared save racing this
+        // click) falls back to a normal fresh start, not an error.
+        const saved = inProgress ? await loadInProgressPuzzle(entry.id) : null;
+        const p = saved
+          ? { ...base, initialMarks: saved.grid, resumeElapsedMs: saved.elapsedMs, resumeHintsUsed: saved.hintsUsed, resumed: true }
+          : base;
+        // Auto-save trigger #3 (see TODO.md): switching to a different puzzle. Saves the
+        // OUTGOING puzzle's progress before this one replaces it — a no-op if there's
+        // nothing worth saving (see saveProgressIfApplicable).
+        await saveProgressIfApplicable().catch(() => {});
         els.libraryModal.classList.add('hidden');
         startPuzzle(p);
       } catch (err) {
@@ -1219,7 +1380,7 @@ function renderLibraryList(entries, solvedPuzzles, myUid) {
             entry.title = newTitle;
             // Simplest correct way back to a normal row: re-render from the (now-updated)
             // entries array rather than hand-reassembling this one row's children.
-            renderLibraryList(entries, solvedPuzzles, myUid);
+            renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, myUid);
           } catch (err) {
             console.warn('renamePuzzleInLibrary failed:', err);
             els.libraryStatus.textContent = `Couldn't rename — ${err?.message || 'try again.'}`;
@@ -1232,7 +1393,7 @@ function renderLibraryList(entries, solvedPuzzles, myUid) {
         cancelBtn.type = 'button';
         cancelBtn.textContent = 'Cancel';
         cancelBtn.addEventListener('click', () => {
-          renderLibraryList(entries, solvedPuzzles, myUid);
+          renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, myUid);
         });
 
         li.replaceChildren(input, saveBtn, cancelBtn);
@@ -1263,11 +1424,12 @@ async function refreshLibraryList() {
   }
 
   // Anonymous sign-in only (no UI, no prompt) — needed for "is this my own puzzle" (rename
-  // affordance) and for the solved-puzzle lookup; browsing/reading the library itself is
-  // public and doesn't require it (see firestore.rules).
-  const [user, solvedPuzzles] = await Promise.all([
+  // affordance) and for the solved-puzzle/in-progress lookups; browsing/reading the library
+  // itself is public and doesn't require it (see firestore.rules).
+  const [user, solvedPuzzles, inProgressPuzzles] = await Promise.all([
     ensureSignedIn().catch(() => null),
     fetchSolvedPuzzles().catch(() => new Map()),
+    fetchInProgressPuzzles().catch(() => new Map()),
   ]);
 
   const merged = builtinLibraryEntries().concat(saved.map((p) => ({ ...p, builtin: false })));
@@ -1277,6 +1439,7 @@ async function refreshLibraryList() {
 
   libraryEntriesCache = merged;
   solvedPuzzlesCache = solvedPuzzles;
+  inProgressPuzzlesCache = inProgressPuzzles;
   libraryMyUid = user?.uid ?? null;
   populateLibrarySizeFilter(merged);
 
@@ -1286,14 +1449,24 @@ async function refreshLibraryList() {
   applyLibraryFilters();
 }
 
-// Applies the Solved/Unsolved and Size filters to the cached merged list and re-renders —
-// doesn't re-fetch, so switching a filter is instant.
+// Applies the Solved/Unsolved/Incomplete and Size filters to the cached merged list and
+// re-renders — doesn't re-fetch, so switching a filter is instant. "Incomplete" (saved/
+// incomplete-progress item — see TODO.md) is a strict subset of "unsolved" — a puzzle can be
+// unsolved with nothing saved yet — so it's its own value alongside solved/unsolved, not a
+// modifier on top of them.
 function applyLibraryFilters() {
   const solvedFilter = els.libraryFilterSolved.value;
   const sizeFilter = els.libraryFilterSize.value;
   let filtered = libraryEntriesCache;
   if (solvedFilter === 'solved') filtered = filtered.filter((e) => solvedPuzzlesCache.has(e.id));
   else if (solvedFilter === 'unsolved') filtered = filtered.filter((e) => !solvedPuzzlesCache.has(e.id));
+  // Excludes an already-solved puzzle even if it also has a stale in-progress save (e.g. one
+  // solved before this feature existed, then later re-opened and saved mid-replay without
+  // re-solving it) — matches renderLibraryList's own solved-takes-priority display rule
+  // (see its comment) so a row never shows here only to render as "✓ Solved" once you look.
+  else if (solvedFilter === 'incomplete') {
+    filtered = filtered.filter((e) => inProgressPuzzlesCache.has(e.id) && !solvedPuzzlesCache.has(e.id));
+  }
   if (sizeFilter !== 'all') filtered = filtered.filter((e) => `${e.rows}x${e.cols}` === sizeFilter);
 
   if (filtered.length === 0) {
@@ -1302,14 +1475,22 @@ function applyLibraryFilters() {
     return;
   }
   els.libraryStatus.textContent = '';
-  renderLibraryList(filtered, solvedPuzzlesCache, libraryMyUid);
+  renderLibraryList(filtered, solvedPuzzlesCache, inProgressPuzzlesCache, libraryMyUid);
 }
 
 els.libraryFilterSolved.addEventListener('change', applyLibraryFilters);
 els.libraryFilterSize.addEventListener('change', applyLibraryFilters);
 
-els.btnOpenLibrary.addEventListener('click', () => {
+// Auto-save trigger #2 (see TODO.md's saved/incomplete-progress item): opening the library
+// modal is "exiting the current puzzle back to the library". The modal itself opens
+// immediately for responsiveness (refreshLibraryList already shows its own "Loading…" while
+// it fetches), but the save is awaited BEFORE that fetch starts, not fire-and-forget like
+// maybeShowCompletion's cleanup calls — otherwise this puzzle's own just-triggered save could
+// race fetchInProgressPuzzles and the library could open not yet reflecting it.
+els.btnOpenLibrary.addEventListener('click', async () => {
   els.libraryModal.classList.remove('hidden');
+  els.libraryStatus.textContent = 'Loading…';
+  await saveProgressIfApplicable().catch(() => {});
   refreshLibraryList();
 });
 
@@ -1317,13 +1498,56 @@ els.btnLibraryClose.addEventListener('click', () => {
   els.libraryModal.classList.add('hidden');
 });
 
-// "Clear all" is the old always-visible Reset button, relocated into the Help menu — since
-// it wipes the board and move history with no undo, it asks for confirmation first (via
-// showConfirm, not window.confirm — see that function's comment for why).
-els.menuClearAll.addEventListener('click', async () => {
+// "Restart" — renamed from "Clear all" (UI/branding polish round, see TODO.md). Wipes the
+// board, move history, hints-used count, and elapsed time back to this attempt's starting
+// state — not just the marks, which is all the old "Clear all" name implied. Still asks for
+// confirmation first (via showConfirm, not window.confirm — see that function's comment for
+// why), since it's still irreversible.
+//
+// Re-invoking startPuzzle(puzzle) already zeroes hints-used and elapsed time for free (both
+// are derived fresh — see computeCompletionStats and puzzleStartTime — not carried on the
+// puzzle object), so a plain re-init is enough EXCEPT for a resumed in-progress puzzle (see
+// TODO.md's saved/incomplete-progress item): `puzzle.resumed` carries an `initialMarks` +
+// `resumeElapsedMs`/`resumeHintsUsed` baseline from the save it was loaded from, and a plain
+// startPuzzle(puzzle) would re-seed right back to THAT saved snapshot rather than truly
+// blank — correct for "restart this session" in general (see startPuzzle's own comment on
+// why a scan's initialMarks is deliberately preserved across a restart the same way), but
+// not what "as if starting the attempt over from scratch" means for a resumed puzzle
+// specifically: the player is intentionally abandoning saved progress, not just this
+// session's changes on top of it. So this one case strips the resume baseline first and
+// deletes the stale save (a restart wouldn't leave a phantom "Incomplete" library entry for
+// progress that no longer exists anywhere).
+els.menuRestart.addEventListener('click', async () => {
   closeHelpMenu();
-  if (!(await showConfirm("Clear this puzzle and start over? This can't be undone."))) return;
-  startPuzzle(puzzle);
+  if (!(await showConfirm(
+    "Restart this puzzle from scratch? This clears your marks, hints used, and elapsed time — it can't be undone."
+  ))) return;
+  // Clear any saved in-progress state for THIS puzzle regardless of which branch below runs
+  // — not just the resumed case. An explicit "Save progress" click (or an earlier
+  // auto-save) could have saved THIS SAME session before the player decided to restart it;
+  // leaving that save in place would let a later "Resume" silently undo the restart by
+  // loading the pre-restart snapshot back in. Fire-and-forget, same contract as every other
+  // progress-save cleanup call (see maybeShowCompletion).
+  if (puzzle.source !== 'scan') deleteInProgressPuzzle(puzzle.id).catch(() => {});
+  if (puzzle.resumed) {
+    const { initialMarks, resumeElapsedMs, resumeHintsUsed, resumed, ...fresh } = puzzle;
+    startPuzzle(fresh);
+  } else {
+    startPuzzle(puzzle);
+  }
+});
+
+// ---- "All games" (UI/branding polish round — see TODO.md): navigate back to the game-hub
+// launcher, with the same in-page confirm pattern as every other destructive/navigating
+// action here (see showConfirm's own comment for why not window.confirm). Saves progress
+// first (same as opening the library — see btnOpenLibrary above) since leaving the app
+// entirely is exactly the kind of exit a lost-progress save is meant to catch. ----
+const GAME_HUB_URL = 'https://dansgamehub.netlify.app/';
+els.menuAllGames.addEventListener('click', async () => {
+  closeHelpMenu();
+  if (!(await showConfirm('Leave this puzzle and go back to All games?'))) return;
+  await saveProgressIfApplicable().catch(() => {});
+  window.location.href = GAME_HUB_URL;
 });
 
 // ---- Help dropdown (item: UI consolidation pass) ----

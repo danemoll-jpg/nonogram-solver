@@ -3,16 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Nonogram</title>
-  <meta name="description" content="A nonogram (picross) app with a strategic hint engine that explains the next logical move." />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧩</text></svg>" />
+  <title>Nonogram Pro</title>
+  <meta name="description" content="Nonogram Pro — a nonogram (picross) app with a strategic hint engine that explains the next logical move." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏁</text></svg>" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="page" id="page-root">
+    <!-- Rebrand round (see TODO.md): the old tagline ("Pick a puzzle, fill it in...") that
+         used to live here as a <p class="header__subtitle"> is gone from the play screen on
+         purpose — it now lives on the game-hub listing instead (a "what is this game" blurb
+         fits a launcher card better than cluttering the actual play screen every session). -->
     <header class="header">
-      <h1 class="header__title"><span aria-hidden="true">🧩</span> Nonogram</h1>
-      <p class="header__subtitle">Pick a puzzle, fill it in, and ask for a hint when you're stuck — it'll explain the reasoning, not just the answer.</p>
+      <h1 class="header__title"><span aria-hidden="true">🏁</span> Nonogram Pro</h1>
     </header>
 
     <main class="layout">
@@ -27,24 +30,25 @@
                and personal stats are part of the library. -->
           <div class="library-entry-group">
             <button id="btn-open-library" class="btn btn--primary" type="button">📚 Puzzle library</button>
-            <button id="btn-open-stats" class="btn" type="button">📊 Stats & pairing</button>
+            <button id="btn-open-stats" class="btn" type="button">📊 Stats</button>
           </div>
           <div class="mode-toggle" role="group" aria-label="Marking mode">
             <button id="mode-fill" class="mode-btn" type="button" aria-pressed="true">Fill</button>
             <button id="mode-x" class="mode-btn" type="button" aria-pressed="false">✕ Mark empty</button>
           </div>
-          <label class="toolbar__toggle">
-            <input type="checkbox" id="toggle-autocheck" />
-            Auto-check
-          </label>
 
           <button id="mute-toggle" class="btn mute-toggle" type="button" aria-pressed="false" aria-label="Mute sound">
             <span aria-hidden="true">🔊</span>
           </button>
 
+          <!-- UI/branding polish round (see TODO.md): trimmed from a text "Help ▾" button to a
+               plain "?" icon — aria-label carries the accessible name now that the visible
+               glyph alone doesn't. Auto-check moved in here from the toolbar (a checkbox menu
+               item, not a one-shot action — its change handler deliberately doesn't close the
+               menu, unlike every button item below it). -->
           <div class="help-menu">
-            <button id="help-menu-btn" class="btn help-menu__trigger" type="button" aria-haspopup="true" aria-expanded="false">
-              Help <span aria-hidden="true">▾</span>
+            <button id="help-menu-btn" class="btn help-menu__trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Help">
+              ?
             </button>
             <ul id="help-menu-list" class="help-menu__list hidden" role="menu" aria-label="Help">
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-how-to-play">How to play</button></li>
@@ -52,8 +56,16 @@
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-check">Check my work</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-remove-bad">Remove bad marks</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-scan">Scan a puzzle</button></li>
+              <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-save-progress">Save progress</button></li>
+              <li role="none" class="help-menu__toggle-item">
+                <label class="help-menu__item help-menu__item--toggle">
+                  <input type="checkbox" id="toggle-autocheck" />
+                  Auto-check
+                </label>
+              </li>
               <li class="help-menu__divider" role="none" aria-hidden="true"></li>
-              <li role="none"><button class="help-menu__item help-menu__item--danger" role="menuitem" type="button" id="menu-clear-all">Clear all</button></li>
+              <li role="none"><button class="help-menu__item help-menu__item--danger" role="menuitem" type="button" id="menu-restart">Restart</button></li>
+              <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-all-games">🎮 All games</button></li>
             </ul>
           </div>
         </div>
@@ -109,7 +121,11 @@
           <li><strong>Auto-check</strong> flags a mistake the moment you make it; without it, use
             <strong>Check my work</strong> any time</li>
           <li><strong>Remove bad marks</strong> clears every cell that doesn't match the solution</li>
-          <li><strong>Clear all</strong> resets the puzzle and move history — it can't be undone</li>
+          <li><strong>Save progress</strong> lets you pick this puzzle back up later, right where
+            you left off — it also saves automatically when you switch puzzles or head back to
+            the library</li>
+          <li><strong>Restart</strong> resets the puzzle back to its starting state — marks, hints
+            used, and elapsed time all included — it can't be undone</li>
         </ul>
       </div>
       <button id="btn-howtoplay-close" class="btn btn--primary" type="button">Got it</button>
@@ -304,6 +320,7 @@
               <option value="all">All</option>
               <option value="solved">Solved</option>
               <option value="unsolved">Unsolved</option>
+              <option value="incomplete">Incomplete (saved)</option>
             </select>
           </label>
           <label class="library-filters__field">

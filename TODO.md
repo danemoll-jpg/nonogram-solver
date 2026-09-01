@@ -121,6 +121,49 @@ Completed Tasks
   right model — no separate friends-only/private sharing tier is needed.** This
   resolves the "friends-only/private sharing" question that was previously listed
   as open remaining scope under item 9 — it's now closed, not deferred.
+* **UI/branding polish round — done, verified end-to-end in browser preview against
+  real Firestore/Netlify-hub data.** Toolbar tightened (Stats & pairing → Stats,
+  Auto-check moved into the Help menu as a checkbox item that deliberately doesn't
+  close the menu on toggle, Help trigger → a plain "?" icon); rebrand to "Nonogram
+  Pro" (title, header, favicon — new 🏁 checkered-flag icon replacing the puzzle
+  piece) with the old play-screen tagline removed and moved into a new listing in
+  the game-hub repo (`C:\Users\danmo\game-hub\games.js`, live at
+  https://dansgamehub.netlify.app/ — confirmed real; an earlier guessed URL,
+  dansgameroom.netlify.app, was wrong and caught before shipping); bigger/bolder X
+  marks (`.nono-cell.empty::after`: 0.35→0.62 opacity, 0.53×→0.68× cell-size, added
+  font-weight 700); "Clear all" renamed to "Restart" with real hint-count/elapsed-
+  time reset (already implicit in a fresh `startPuzzle` call, made explicit for the
+  new resumed-puzzle case below); new "All games" toolbar-menu item navigating to
+  the hub with the same in-page confirm-modal pattern as every other destructive
+  action here.
+* **Saved/incomplete puzzle progress — done, deployed, verified end-to-end
+  (real Firestore save → library "Incomplete" filter → Resume → elapsed time
+  correctly continuing from the saved baseline, not resetting).**
+  `src/puzzleLibrary.js` (saveInProgressPuzzle/loadInProgressPuzzle/
+  fetchInProgressPuzzles/deleteInProgressPuzzle) backs a new
+  `users/{uid}/inProgressPuzzles/{puzzleId}` collection — grid state serialized as
+  one compact string per row (Firestore can't store a nested array-of-arrays
+  directly), elapsedMs, hintsUsed. Firestore rules deployed (owning-uid-only, same
+  pattern as solvedLibraryPuzzles). Save cadence as scoped: an explicit "Save
+  progress" Help-menu item, plus auto-save on opening the library, picking a
+  different library puzzle, or finishing the scan wizard — all funnel through one
+  `saveProgressIfApplicable()` gate (skips scan-origin/solutionless/complete/
+  untouched boards). Resuming merges the saved grid onto a freshly-solved base
+  puzzle as `initialMarks` + `resumeElapsedMs`/`resumeHintsUsed`, which
+  `startPuzzle`/`computeCompletionStats` fold in as a baseline — real board history
+  only ever covers the current session, so this is what lets elapsed time and
+  hints-used keep counting from before a resume rather than silently losing them.
+  Restart clears any stale save for the puzzle regardless of resumed status (a
+  save made just before restarting, or a resumed puzzle's own loaded baseline,
+  would otherwise let a later "Resume" undo the restart). A real edge case was
+  caught live in testing and fixed: the Incomplete filter needed to explicitly
+  exclude already-solved puzzles too (a puzzle solved in a session before this
+  feature existed could carry a stray in-progress save from later re-opening it),
+  not just rely on the row-render logic's own solved-takes-priority check.
+* **Live running count of cells painted while drag-filling — done, verified**
+  (floating gold badge, follows the pointer, increments per genuine paint — not
+  per cell merely swept over — hides on pointerup). Fill- and X-mode both
+  supported (any drag whose paint state isn't a clear-to-blank click shows it).
 
 Current Objective (Focus Area)
 
@@ -164,81 +207,6 @@ Current Objective (Focus Area)
   under-documented) iOS Safari quirk, not specific to this app's own CSS/JS sizing.
   See the fix summary at the top of this item for what's now implemented and
   what's still needed (real-device verification) before this can be called done.
-
-* **New: UI/branding polish round.**
-  1. **Tighten the toolbar** — rename "Stats & pairing" to just "Stats"; move
-     Auto-check into the Help menu (off the main toolbar); change the Help
-     button/dropdown trigger to a plain "?" icon instead of a text "Help ▾" button.
-  2. **Rebrand**: app name becomes "Nonogram Pro" (matching the live domain,
-     nonogrampro.netlify.app); remove the current tagline/description text
-     ("Pick a puzzle, fill it in...") from the main page entirely — see item 4
-     below for where that description text should actually go instead. Replace the
-     current puzzle-piece icon with something that actually reads as a nonogram
-     (e.g. a small filled-grid/checkerboard-pattern icon) — specific icon choice is
-     Code's call unless the project owner has a preference.
-  3. **Bigger/more visible X marks** on the board — current rendering isn't
-     obvious enough to read at a glance.
-  4. **List this game in the game-hub repo** (`C:\Users\danmo\game-hub`, a sibling
-     project Code can access directly — confirmed, not a cross-repo handoff
-     blocker). Match that repo's existing listing style/pattern. **This is where
-     the tagline/description text removed from the main nonogram page in item 2
-     should end up** — the game-hub listing is the more appropriate place for a
-     "what is this game" blurb than cluttering the actual play screen.
-  5. **"Clear" becomes "Restart"** — not just a rename: restarting should reset
-     this attempt's hint-used count and elapsed time, not only clear the board's
-     marks. Today's Clear-all only resets marks/history; a genuine restart should
-     put the puzzle back to the exact state it was in when first loaded, stats
-     included, as if starting the attempt over from scratch. Keep the existing
-     confirm-before-acting behavior (per the earlier `window.confirm`-reliability
-     fix — reuse the in-page confirm dialog, not a native one).
-  6. **New "All games" button, returning to the game-hub, with a confirmation
-     dialog before navigating away** (same in-page confirm pattern as the rest of
-     this app, not a native `confirm()`).
-
-* **New: saved/incomplete puzzle progress — a real feature, not a quick add, fully
-  scoped now including save cadence.** The project owner asked directly how
-  complicated this is: moderate, not trivial, but it reuses existing groundwork
-  rather than starting from scratch (the same board-seeding mechanism already built
-  for scanned puzzles' `initialMarks` → `Board.fromGrid` can seed a resumed board
-  from saved progress the same way). Scope:
-  - New per-user record of in-progress puzzle state (e.g.
-    `users/{uid}/inProgressPuzzles/{puzzleId}`): the current fill/X grid state,
-    elapsed time so far, hints used so far, last-updated timestamp.
-  - New "Incomplete" category in the library's filters, alongside the existing
-    Solved/Unsolved/size filters — showing puzzles with saved in-progress state.
-  - Selecting an "Incomplete" library entry resumes play from the saved state
-    (board pre-seeded, stats continuing from where they left off) rather than
-    starting blank.
-  - **Save cadence, confirmed with the project owner: explicit, in-app-triggered
-    saves only — not every move, and not a browser-level "leaving" signal.**
-    Progress saves on: (1) an explicit "Save" action/button the player can trigger
-    anytime; (2) automatically when the player switches to a different puzzle;
-    (3) automatically when the player exits the current puzzle back to the
-    library. All three are deliberate in-app navigation/UI events Code can hook
-    directly and reliably — no need for browser tab-close/backgrounding
-    detection, which is notoriously unreliable on mobile Safari and was the main
-    risk with a pure "save on leave" approach. This keeps Firestore writes low
-    (no per-move writes) while still saving at every point progress could
-    otherwise be lost within the app's own flow.
-
-* **New: live running count of cells painted while drag-filling.** While the
-  player is click-and-dragging to fill a run of cells (the existing drag-paint
-  behavior, which already only paints blank cells per the earlier drag-overwrite
-  fix), show a live, continuously-updating count of how many cells have been
-  painted in the current drag stroke — helps the player match a clue's run length
-  by watching the count as they drag, rather than counting cells by eye
-  afterward. Scope notes:
-  - Primarily useful for Fill-mode drags specifically (since a run length maps to
-    a clue number); worth also showing the same live count for Mark-empty (X)
-    drags for consistency, but that's the lower-priority half if effort needs to
-    be split.
-  - Display location is a UI design choice, not specified — likely most useful
-    right at/near the drag point (a small floating badge following the
-    cursor/touch position) rather than a fixed location elsewhere on screen,
-    since the whole point is glanceable feedback without looking away from where
-    you're dragging. Code's call on the exact placement/styling.
-  - Should disappear/reset once the drag ends (pointerup) — this is transient
-    in-drag feedback, not a persistent UI element.
 
 Next Steps (Do Not Start Yet)
 

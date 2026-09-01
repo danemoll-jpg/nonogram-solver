@@ -50,43 +50,33 @@ more up to date than this file's summary below.
 Short version: the full solver/UI stack, the UI consolidation and post-ship bug-fix
 passes, the iPad-verification follow-up pass, the clue-number spacing fix, item 10
 (scan-existing-puzzle), the per-number clue gray-out fix, the save-to-library
-feature, and the library-consolidation round (merged puzzle-selection UI, per-puzzle
-solved tracking + personal stats + filters, deployed and verified live) are all done.
-Fully public library visibility is confirmed as the right model — no friends-only
-tier needed. OCR accuracy has been explicitly accepted as "good enough for now."
-See `TODO.md`'s Completed Tasks for the full history.
+feature, the library-consolidation round (merged puzzle-selection UI, per-puzzle
+solved tracking + personal stats + filters, deployed and verified live), the UI/
+branding polish round (Nonogram Pro rebrand, trimmed toolbar, bigger X marks,
+Restart, All games, game-hub listing), the saved/incomplete-puzzle-progress
+feature (Firestore-backed save/resume, deployed and verified live), and the
+live drag-fill cell counter are all done. Fully public library visibility is
+confirmed as the right model — no friends-only tier needed. OCR accuracy has
+been explicitly accepted as "good enough for now." See `TODO.md`'s Completed
+Tasks for the full history.
 
-**Current objective has three items**:
-1. **Scroll bug — ROOT CAUSE CONFIRMED, ready for a targeted fix.** Real
-   `?debug=scroll` history from the project owner's device caught a full keyboard
-   open/close cycle: iOS panned the visual viewport by 408px to clear a focused
-   input, then only reversed 329px of that pan on keyboard close, leaving
-   `visualViewport.offsetTop` stuck at 79 — confirmed still 79 a full second after
-   focus was gone entirely, exactly matching the tool's own "excess scrollable
-   space" measurement. This is a known iOS Safari quirk (the visual-viewport pan
-   not fully resetting on keyboard dismiss), not a sizing bug in this app's own
-   CSS/JS — don't touch `fitBoardToViewport`'s sizing math. Fix direction: detect
-   "keyboard closed but `offsetTop` still nonzero" and issue a corrective
-   `window.scrollTo` to force iOS to re-zero the pan. See `TODO.md` for the full
-   data and fix approach.
-2. **New UI/branding polish round**: tighter toolbar (Stats & pairing → Stats,
-   Auto-check into the Help menu, Help becomes a "?" icon), rebrand to "Nonogram
-   Pro" with the tagline moved off the play screen and into a new game-hub listing
-   (sibling repo, directly accessible), a better icon, bigger/more visible X marks,
-   "Clear" becoming a real "Restart" (also resets hint count and elapsed time, not
-   just marks), and a new "All games" button back to the hub with a confirmation
-   dialog. See `TODO.md` for the full breakdown.
-3. **New: saved/incomplete puzzle progress — fully scoped, ready to build.**
-   Moderate complexity, reuses the existing scanned-puzzle board-seeding
-   mechanism. Save cadence confirmed: explicit in-app triggers only (a "Save"
-   button, plus automatic saves on switching puzzles or exiting to the library)
-   — no per-move writes, no unreliable browser-level leave detection. See
-   `TODO.md` for the full scope.
-4. **New: live running count of cells painted while drag-filling** — a small,
-   glanceable, transient counter (likely following the cursor/touch point) that
-   updates as the player drags, so they can watch it hit a clue's run length
-   instead of counting by eye. Primarily for Fill-mode drags; X-mode is a
-   lower-priority nice-to-have for consistency.
+**Current objective has one item left**:
+1. **Scroll bug — fix implemented, NOT YET VERIFIED ON A REAL DEVICE.** Root
+   cause: real `?debug=scroll` history from the project owner's device caught a
+   full keyboard open/close cycle — iOS panned the visual viewport by 408px to
+   clear a focused input, then only reversed 329px of that pan on keyboard
+   close, leaving `visualViewport.offsetTop` stuck at 79, confirmed still 79 a
+   full second after focus was gone entirely. A known iOS Safari quirk (the
+   visual-viewport pan not fully resetting on keyboard dismiss), not a sizing
+   bug in this app's own CSS/JS — `fitBoardToViewport`'s sizing math was NOT
+   touched. Fix implemented in `app.js` (`correctResidualViewportPan`): on
+   `focusout` of a text input and on every `visualViewport` `resize`, if
+   `offsetTop` is nonzero and no text input is focused, issue a corrective
+   `window.scrollTo` to force iOS to re-zero the pan. **This bug class has
+   failed real-device verification multiple times before despite passing every
+   local check — do not consider it done until confirmed on the actual iPhone
+   with `?debug=scroll`.** See `TODO.md` for the full data and verification
+   steps.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,
