@@ -145,46 +145,33 @@ Completed Tasks
   one compact string per row (Firestore can't store a nested array-of-arrays
   directly), elapsedMs, hintsUsed. Firestore rules deployed (owning-uid-only, same
   pattern as solvedLibraryPuzzles). Save cadence as scoped: an explicit "Save
-  progress" Help-menu item, plus auto-save on opening the library, picking a
-  different library puzzle, or finishing the scan wizard — all funnel through one
+  progress" action (see Current Objective below — currently a Help-menu item, but
+  this needs to move to a main-toolbar button per the project owner's later
+  clarification), plus auto-save on opening the library, picking a different
+  library puzzle, or finishing the scan wizard — all funnel through one
   `saveProgressIfApplicable()` gate (skips scan-origin/solutionless/complete/
   untouched boards). Resuming merges the saved grid onto a freshly-solved base
   puzzle as `initialMarks` + `resumeElapsedMs`/`resumeHintsUsed`, which
   `startPuzzle`/`computeCompletionStats` fold in as a baseline — real board history
   only ever covers the current session, so this is what lets elapsed time and
   hints-used keep counting from before a resume rather than silently losing them.
-  Restart clears any stale save for the puzzle regardless of resumed status (a
-  save made just before restarting, or a resumed puzzle's own loaded baseline,
-  would otherwise let a later "Resume" undo the restart). A real edge case was
-  caught live in testing and fixed: the Incomplete filter needed to explicitly
-  exclude already-solved puzzles too (a puzzle solved in a session before this
-  feature existed could carry a stray in-progress save from later re-opening it),
-  not just rely on the row-render logic's own solved-takes-priority check.
+  Restart clears any stale save for the puzzle regardless of resumed status. A real
+  edge case was caught live in testing and fixed: the Incomplete filter needed to
+  explicitly exclude already-solved puzzles too (a puzzle solved in a session
+  before this feature existed could carry a stray in-progress save from later
+  re-opening it), not just rely on the row-render logic's own solved-takes-priority
+  check.
 * **Live running count of cells painted while drag-filling — done, verified**
   (floating gold badge, follows the pointer, increments per genuine paint — not
   per cell merely swept over — hides on pointerup). Fill- and X-mode both
   supported (any drag whose paint state isn't a clear-to-blank click shows it).
-
-Current Objective (Focus Area)
-
-* **Scroll bug — fix implemented (`app.js`, `correctResidualViewportPan`), NOT YET
-  VERIFIED ON A REAL DEVICE.** Per this bug class's history (failed real-device
-  verification multiple times despite passing every local check), do not consider
-  this done until confirmed on the actual iPhone with `?debug=scroll`: focus
-  `#scan-known-rows-input` (or any text input), dismiss the keyboard, and confirm
-  `visualViewport.offsetTop` returns to 0 shortly after (the history log's
-  "focusout" and following "visualViewport resize" lines should show it settle at
-  0, not stay stuck like the pre-fix 79px repro below). The fix: on `focusout` of a
-  text input (100ms delay) and on every `visualViewport` `resize` (150ms debounce),
-  if `offsetTop` is nonzero and no text input is currently focused, issue a
-  corrective no-op-looking `window.scrollTo(window.scrollX, window.scrollY)` —
-  deliberately doesn't touch `fitBoardToViewport`'s sizing math, per the root-cause
-  finding below that it was never the problem.
-
-  Root cause (confirmed via real on-device diagnostic data before this fix). Real
-  `?debug=scroll` history from the
-  project owner's device, timestamped through an actual keyboard open/close cycle
-  on `#scan-known-rows-input`:
+* **Scroll bug, round 1 fix — implemented and deployed, but this shipped BEFORE
+  two follow-up refinements the project owner asked for after further real-device
+  testing; see Current Objective below for what's still outstanding on top of
+  this.** Root cause (confirmed via real on-device `?debug=scroll` data before
+  this fix): iOS's visual-viewport pan (used to keep a focused input clear of the
+  on-screen keyboard) doesn't fully reset back to `offsetTop: 0` once the keyboard
+  closes.
   ```
   2:50:57 PM — focusin — vv.height=1048 vv.offsetTop=0
   2:50:57 PM — resize (keyboard opens) Δ-408px — vv.height=640 vv.offsetTop=0
@@ -193,20 +180,74 @@ Current Objective (Focus Area)
   2:51:00 PM — scroll/pan — vv.height=969 vv.offsetTop=79
   2:51:01 PM — focusout — vv.height=969 vv.offsetTop=79 active=(none)
   ```
-  Live snapshot one second after focusout: `visualViewport.offsetTop: 79`,
-  `document.activeElement: (none)` (keyboard genuinely closed, nothing focused),
-  and the tool's own "EXCESS (scrollable beyond visible viewport)" reads exactly
-  **79px** — matching `offsetTop` precisely. **Confirmed: this is not extra
-  content, not a sizing bug, and not something `handleViewportResize`'s
-  recompute logic is getting wrong** — the board/page content itself is the
-  correct size throughout. It's purely that **iOS's visual-viewport pan (used to
-  keep a focused input clear of the on-screen keyboard) doesn't fully reset back
-  to `offsetTop: 0` once the keyboard closes** — it opened with a 408px pan and
-  closed with only 329px of that reversed, leaving a stuck 79px residual pan that
-  the app currently has no logic to detect or correct. This is a known (if
-  under-documented) iOS Safari quirk, not specific to this app's own CSS/JS sizing.
-  See the fix summary at the top of this item for what's now implemented and
-  what's still needed (real-device verification) before this can be called done.
+  Live snapshot one second after focusout: `offsetTop: 79`, nothing focused,
+  matching the tool's own "EXCESS scrollable" reading of exactly 79px. Confirmed
+  not a sizing bug — `fitBoardToViewport`'s math was untouched. Fix implemented in
+  `app.js` (`correctResidualViewportPan`): on `focusout` of a text input (100ms
+  delay) and on every `visualViewport` `resize` (150ms debounce), if `offsetTop`
+  is nonzero **and no text input is currently focused**, issue a corrective
+  no-op-looking `window.scrollTo(window.scrollX, window.scrollY)` to force iOS to
+  re-zero the pan.
+
+Current Objective (Focus Area)
+
+* **Three follow-ups on the scroll fix + one placement fix, all confirmed with the
+  project owner but shipped AFTER the round-1 fix above — Code should treat these
+  as still outstanding, not already covered by round 1.**
+
+  1. **Broaden the scroll-fix trigger: a second real capture shows the residual
+     pan can settle to a nonzero value WHILE an input is still actively focused**,
+     not only after `focusout` — round 1's fix explicitly requires "no text input
+     currently focused" before correcting, so this case isn't covered yet.
+     ```
+     4:02:53 PM — focusin #scan-known-rows-input — offsetTop=0
+     4:02:53 PM — resize (keyboard opens) Δ-408px — offsetTop=0
+     4:02:53 PM — scroll/pan — offsetTop=408
+     4:02:57 PM — focusout #scan-known-rows-input — offsetTop=408 (unchanged)
+     4:02:57 PM — focusin #scan-known-cols-input — offsetTop=408 (unchanged,
+                  keyboard stays open switching fields)
+     4:03:03 PM — resize (likely keyboard) Δ+329px — offsetTop=79 — **active
+                  STILL #scan-known-cols-input, not focusout yet**
+     4:03:03 PM — scroll/pan — offsetTop=79 — still focused
+     4:03:06 PM — focusout #scan-known-cols-input — offsetTop=79 (unchanged)
+     ```
+     The project owner directly confirmed the visible symptom now shows up while
+     the keyboard is still up, not only after it closes ("the white space is
+     there and stays there"). **Correcting the pan while a field is genuinely
+     still focused would break the input's visibility above the keyboard**, so
+     this isn't "just remove the no-focus condition" — the real fix is detecting
+     when the *current* `offsetTop` no longer matches what the *actual, current*
+     keyboard state calls for (e.g. comparing against the expected pan implied by
+     the current `visualViewport.height` deficit) and correcting to that expected
+     value even while focused, rather than only fully re-zeroing once nothing is
+     focused. Needs real thought on the right comparison, not a blind widen of
+     the existing condition.
+  2. **New, related symptom: the persistent bottom explain/hint panel
+     (`.explain-panel`) disappears while this stuck-pan state is active** —
+     confirmed by the project owner. Almost certainly the same class of issue as
+     the earlier diagnostic-button-visibility fix (a `position: fixed` element
+     getting pushed out of the visible area by the stuck pan), which was fixed
+     for the diagnostic button/panel specifically by counter-translating them
+     against `visualViewport.offsetTop` — that same defensive treatment was never
+     applied to the real player-facing `.explain-panel`. **Apply it now, as a
+     safety net alongside (not instead of) the main pan-correction fix** — the
+     main fix should prevent the stuck pan from occurring at all, but the panel
+     shouldn't be vulnerable to disappearing even if some residual pan slips
+     through before the main fix catches it.
+  3. **"Save progress" needs to move from the Help menu to its own main-toolbar
+     button.** Confirmed by the project owner after round 1 shipped it under
+     Help — the same "this isn't really a help action" reasoning already applied
+     to moving Library and Stats out of Help applies here too, and the toolbar
+     tightening from the UI polish round frees up the room for it.
+
+  **Also still outstanding from round 1 itself, unresolved regardless of the
+  above**: real-device verification. Per this bug class's history (failed
+  real-device verification multiple times despite passing every local check), do
+  not consider ANY of this — round 1's fix or the three follow-ups above — done
+  until confirmed on the actual iPhone with `?debug=scroll`: focus a text input,
+  dismiss the keyboard (and separately, try switching between two inputs without
+  fully dismissing, per follow-up #1's repro), and confirm `offsetTop` settles to
+  the value it actually should have at each point, not a stuck stale one.
 
 Next Steps (Do Not Start Yet)
 
@@ -231,7 +272,8 @@ Technical Notes / Blockers
 * No CI is configured — run `npm test` (or `node test/run.js`) locally before pushing.
 * Node.js 20→22 runtime bump — done and deployed.
 * Firestore security rules: in active use for `users/{uid}/stats/*`, `pairingCodes/*`,
-  `puzzles/{puzzleId}`, and `users/{uid}/solvedLibraryPuzzles/{puzzleId}`.
+  `puzzles/{puzzleId}`, `users/{uid}/solvedLibraryPuzzles/{puzzleId}`, and
+  `users/{uid}/inProgressPuzzles/{puzzleId}`.
 * Hint phrasing has an invisible-by-design fallback — "a hint appeared" is not proof
   the LLM call actually succeeded; check console/Cloud Function logs after any Cloud
   Function change.
@@ -242,16 +284,15 @@ Technical Notes / Blockers
   repeatedly fixed against real screenshots, not synthetic mockups alone** — prefer
   testing against a real image file over guessing at plausible synthetic pixel values.
 * **iOS scroll/touch bugs in this app have now failed real-device verification
-  multiple times.** The latest round narrowed the repro to specifically
-  keyboard-triggered, persisting afterward, and upgraded the diagnostic tool to
-  capture the iOS visual-viewport pan amount specifically. Use `?debug=scroll` for
-  real on-device data — remember it requires tapping an on-screen button (bottom-
-  anchored) to open its report panel, which the project owner initially missed.
+  multiple times.** Two real diagnostic captures have now been collected — see
+  Completed Tasks (round 1) and Current Objective (the second, broader capture) —
+  use `?debug=scroll` for any further verification, remembering it requires
+  tapping an on-screen button (bottom-anchored) to open its report panel.
 * `countGridLines` miscounting is understood and mitigated via the known-count
   override (see Completed Tasks) rather than by retuning the underlying heuristic.
 * Clue-number legibility on large puzzles — fixed, font floors at `MIN_CLUE_FONT_PX`.
 * OCR residual accuracy — accepted as a known limitation per the project owner,
   confirmed twice now; not currently being pursued further.
 * Sibling repo `game-hub` (`C:\Users\danmo\game-hub`) is directly accessible to
-  Code — confirmed by the project owner, not a cross-repo handoff blocker for the
-  new game-hub listing item above.
+  Code — the game-hub listing (Completed Tasks) is live at
+  https://dansgamehub.netlify.app/.
