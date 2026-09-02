@@ -483,6 +483,26 @@ Completed Tasks
   Mark-empty mode. All 812 tests still pass. **CONFIRMED on the real device by the
   project owner.**
 
+* **New feature — dedicated Eraser mode, built and preview-verified.** Third option
+  in the mode toggle (`#mode-erase` in `index.html`, `.mode-btn`/`.mode-toggle` CSS
+  unchanged/reused), alongside Fill and Mark-empty. Click/tap on a FILLED or EMPTY
+  cell clears it back to UNKNOWN; a click on an already-UNKNOWN cell is a no-op; a
+  drag clears every FILLED/EMPTY cell along its path (reusing the existing Bresenham
+  `cellsOnLine` walk from the fast-drag-skips-cells fix), leaving UNKNOWN cells
+  untouched — the mirror image of Fill/Mark-empty's own "drag only paints
+  still-blank cells" rule, which is unchanged for those two modes. Implementation
+  reuses `computeUnfillChanges`/`applyUnfillWithSound` (`app.js`) exactly as planned
+  rather than adding new logic — that function turned out to already be fully
+  state-agnostic (it just forces the target cell to UNKNOWN and recomputes
+  row/col-satisfaction diffs), so generalizing Eraser's `isUnfill` check from
+  "current is FILLED" to "current is FILLED or EMPTY" was enough to cover X-mark
+  erasure too, including a locked line's auto-X siblings correctly reverting when
+  erasing a FILLED cell drops the line out of satisfaction. Verified in browser
+  preview: single-click erase of a FILLED cell (with correct auto-X-sibling
+  revert), a multi-cell drag-erase across filled cells in one stroke, single-click
+  erase of an X mark, and a no-op click on an already-UNKNOWN cell. All 812 tests
+  still pass. Not yet confirmed on the real device.
+
 Current Objective (Focus Area)
 
 * **New: remove the routine per-cell sound effects — the constant "dinging" on every
@@ -518,43 +538,6 @@ Current Objective (Focus Area)
   branching on state type where it shouldn't be. Reproduce via a drag-placed
   X-mode batch specifically, matching the project owner's own repro, before
   concluding a fix actually resolves it.
-
-* **New feature, decided by the project owner after talking through the
-  alternative: add a dedicated Eraser mode, as a third option alongside Fill and
-  Mark-empty — not an attempt to infer "erase intent" from what a drag happens
-  to cross.** The project owner initially described a narrower ask (a drag that
-  crosses an already-filled line should erase it), then explicitly decided
-  against that in favor of an unambiguous dedicated mode instead: **"Actually I
-  really want the eraser. Let's add it."** This supersedes the narrower ask —
-  build the eraser, not drag-content-inference.
-  - **Mode toggle becomes three-way**: Fill / Mark-empty / Eraser, extending the
-    existing pill toggle (`els.modeFill`/`els.modeX` in `app.js`, `.mode-toggle`
-    in the markup/CSS). Icon/label for the new option is Code's call.
-  - **Behavior**: in Eraser mode, a click/tap on a FILLED or EMPTY cell clears it
-    back to UNKNOWN; a click on an already-UNKNOWN cell does nothing (there's
-    nothing to erase). A drag in Eraser mode should clear every FILLED/EMPTY
-    cell along its path — reuse the existing Bresenham line-walk
-    (`cellsOnLine`, from the recent fast-drag-skips-cells fix) for full drag-path
-    coverage, same as Fill/Mark-empty already get, rather than only checking the
-    single cell under the pointer per event.
-  - **Reuse existing logic, don't reinvent it**: clearing a FILLED cell in
-    Eraser mode is the exact same operation "click an already-filled cell in
-    Fill mode" already performs — `computeUnfillChanges`/`applyUnfillWithSound`
-    (`app.js`) already handle this correctly, including reverting a satisfied
-    line's auto-X'd cells back to UNKNOWN when the line becomes unsatisfied
-    again. Route Eraser-mode FILLED-cell clears through that same existing path
-    rather than writing new logic for it. Clearing an EMPTY/X cell doesn't have
-    the same line-unlock concern (auto-X is never triggered by an EMPTY
-    placement) — a plain revert to UNKNOWN is sufficient there.
-  - **Explicitly does NOT change Fill/Mark-empty's own existing drag behavior**
-    (a drag in those modes still only paints cells that are currently UNKNOWN,
-    per the earlier fast-drag-overwrite fix) — Eraser is a separate third mode
-    with the opposite rule (only touches non-blank cells), not a modification of
-    how the other two already work.
-  - **Worth keeping in mind alongside the Undo/X-marks bug above**: both touch
-    similar code paths (drag batching, `Board.setBatch`/undo) — not necessarily
-    the same root cause, but worth Code having both in view together rather
-    than treating them as fully unrelated.
 
 * **Round 4's scroll fix (`healStuckViewportHeight`) has now been tested on the real
   device, including the manual "Force heal viewport height now" button — and the

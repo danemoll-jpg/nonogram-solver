@@ -29,7 +29,7 @@ import { ensureSignedIn } from './src/firebase.js';
 let puzzle = null;
 let board = null;
 let autoCheckEnabled = false;
-let activeMode = 'fill'; // 'fill' | 'x' — which mark a click/drag applies (item 7.1)
+let activeMode = 'fill'; // 'fill' | 'x' | 'erase' — which mark a click/drag applies (item 7.1)
 let highlightedCells = []; // { row, col, kind: 'reasoning' | 'result' }
 let puzzleStartTime = 0;
 let puzzleCompleteShown = false;
@@ -65,6 +65,7 @@ const els = {
   statusLine: document.getElementById('status-line'),
   modeFill: document.getElementById('mode-fill'),
   modeX: document.getElementById('mode-x'),
+  modeErase: document.getElementById('mode-erase'),
   toggleAutocheck: document.getElementById('toggle-autocheck'),
   muteToggle: document.getElementById('mute-toggle'),
   helpMenuBtn: document.getElementById('help-menu-btn'),
@@ -752,21 +753,28 @@ els.mistakePopupLearn.addEventListener('click', () => {
   runOnDemandCheck({ fromPopup: true });
 });
 
-// ---- pointer interaction: a mode toggle picks Fill or Mark-empty, click applies it,
-// clicking an already-marked cell in that state clears it, drag paints a stroke using
-// whichever action the first cell in the drag performed (item 7.1). ----
+// ---- pointer interaction: a mode toggle picks Fill, Mark-empty, or Eraser (Current
+// Objective — see TODO.md), click applies it, clicking an already-marked cell in that state
+// clears it, drag paints a stroke using whichever action the first cell in the drag performed
+// (item 7.1). Eraser was chosen over inferring "erase intent" from what a drag happens to
+// cross — it's a third, unambiguous mode, not a modification of how Fill/Mark-empty behave. ----
 
 function setMode(mode) {
   activeMode = mode;
   els.modeFill.setAttribute('aria-pressed', String(mode === 'fill'));
   els.modeX.setAttribute('aria-pressed', String(mode === 'x'));
+  els.modeErase.setAttribute('aria-pressed', String(mode === 'erase'));
 }
 
 els.modeFill.addEventListener('click', () => setMode('fill'));
 els.modeX.addEventListener('click', () => setMode('x'));
+els.modeErase.addEventListener('click', () => setMode('erase'));
 
 function targetStateFor(current) {
   if (activeMode === 'fill') return current === FILLED ? UNKNOWN : FILLED;
+  // Eraser always aims at UNKNOWN — paintCell's current === state check already no-ops a
+  // click/drag-sweep over a cell that's UNKNOWN already (nothing to erase there).
+  if (activeMode === 'erase') return UNKNOWN;
   return current === EMPTY ? UNKNOWN : EMPTY;
 }
 
@@ -1068,9 +1076,17 @@ function attachPointerHandlers(grid) {
     // cell that's already FILLED or EMPTY, regardless of the drag's mode. Single-click
     // toggle-off-if-same-state (dragStep:false, the pointerdown call below) is unaffected —
     // only cells the drag *sweeps into* afterward are restricted to UNKNOWN.
-    if (dragStep && current !== UNKNOWN) return false;
+    // Eraser mode is the mirror image of that rule (Current Objective — see TODO.md): it
+    // should only ever touch already-marked cells while sweeping, never blank ones, so the
+    // "sweep only touches UNKNOWN" restriction above doesn't apply to it.
+    if (dragStep && activeMode !== 'erase' && current !== UNKNOWN) return false;
 
-    const isUnfill = current === FILLED && state === UNKNOWN;
+    // Eraser mode clearing a FILLED or EMPTY cell is the same operation as Fill mode's
+    // click-an-already-filled-cell-to-clear-it (computeUnfillChanges/applyUnfillWithSound),
+    // just generalized to EMPTY cells too — clearing an X mark has no line-unlock side effect
+    // to compute (computeUnfillChanges is state-agnostic already), so reuse rather than
+    // reinvent. Non-erase modes keep their original FILLED-only definition unchanged.
+    const isUnfill = activeMode === 'erase' ? current !== UNKNOWN : current === FILLED && state === UNKNOWN;
     if (!isUnfill && (rowLockedNow(r) || colLockedNow(c))) return false;
 
     const applied = isUnfill

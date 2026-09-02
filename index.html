@@ -45,6 +45,10 @@
           <div class="mode-toggle" role="group" aria-label="Marking mode">
             <button id="mode-fill" class="mode-btn" type="button" aria-pressed="true">Fill</button>
             <button id="mode-x" class="mode-btn" type="button" aria-pressed="false">✕ Mark empty</button>
+            <!-- Current Objective (see TODO.md): dedicated Eraser mode, chosen over inferring
+                 "erase intent" from what a drag happens to cross. Clears FILLED/EMPTY back to
+                 UNKNOWN; a click/drag over an already-UNKNOWN cell is a no-op. -->
+            <button id="mode-erase" class="mode-btn" type="button" aria-pressed="false">🧹 Erase</button>
           </div>
 
           <button id="mute-toggle" class="btn mute-toggle" type="button" aria-pressed="false" aria-label="Mute sound">

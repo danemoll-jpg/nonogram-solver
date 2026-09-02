@@ -76,6 +76,17 @@
   the page's viewport meta tag, so pinch-zoom stays available elsewhere as an
   accessibility aid on large puzzles. Applied to every toolbar/menu button, not just
   Undo, since any rapidly-tapped control is exposed to the same gesture.
+- **Dedicated Eraser mode built and preview-verified** — a third option alongside
+  Fill/Mark-empty, chosen over inferring "erase intent" from what a drag happens to
+  cross ("Actually I really want the eraser. Let's add it."). Click/tap on a FILLED
+  or EMPTY cell clears it back to UNKNOWN (no-op on an already-UNKNOWN cell); a drag
+  clears every FILLED/EMPTY cell along its path via the existing Bresenham
+  `cellsOnLine` walk, the mirror image of Fill/Mark-empty's own "drag only paints
+  still-blank cells" rule (unchanged for those two). Reuses
+  `computeUnfillChanges`/`applyUnfillWithSound` (`app.js`) as planned — that
+  function turned out to already be state-agnostic, so generalizing from
+  "FILLED-only" to "FILLED or EMPTY" covered X-mark erasure too, including correct
+  auto-X-sibling revert when erasing drops a locked line out of satisfaction.
 - **Real bug found and fixed: dragging across more than a few cells could silently skip
   some, even with the finger never leaving the screen or crossing an already-marked
   cell.** A different bug class from the double-tap-zoom fix above (a plain sampling
@@ -115,12 +126,15 @@ Undo/highlight/auto-publish/key-mismatch/Firebase-timeout set is preview-verifie
 including a full save→Incomplete-filter→Resume round trip on a community, non-built-in
 puzzle — but not yet real-device-confirmed). The double-tap-zoom fix and the
 fast-drag-skips-cells fix (both above) are also done and preview-verified, reported
-directly from real iPad use but not yet re-confirmed on-device after the fix. Fully
+directly from real iPad use but not yet re-confirmed on-device after the fix. The
+new dedicated Eraser mode (see above) is likewise done and preview-verified, not yet
+real-device-confirmed. Fully
 public library visibility is confirmed as the right model. General OCR digit-level
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective has four items**:
+**Current objective has three items** (a fourth, the dedicated Eraser mode, is now
+built and preview-verified — see above):
 
 1. **New: remove the routine per-cell sound effects** (`fillClick`, `xClick`, the
    drag-sweep sound) — the constant dinging on every mark/drag is annoying per the
@@ -133,19 +147,9 @@ enough for now." See `TODO.md`'s Completed Tasks for the full history.
    EMPTY asymmetry — the revert logic should be state-agnostic. Not yet scoped
    whether this is drag-specific or affects all X undos, or whether Fill undo is
    unaffected — verify both before concluding a fix is complete.
-3. **New: a dedicated Eraser mode, decided after the project owner explicitly
-   preferred it over a narrower drag-content-inference approach** ("Actually I
-   really want the eraser. Let's add it."). Third option in the Fill/Mark-empty
-   toggle; clears FILLED/EMPTY cells back to UNKNOWN on click or drag (using the
-   existing Bresenham line-walk for full drag-path coverage), leaving UNKNOWN
-   cells untouched. Reuse `computeUnfillChanges`/`applyUnfillWithSound` for
-   FILLED-cell clears (already handles auto-X line-unlock correctly) rather than
-   writing new logic. Does not change Fill/Mark-empty's own existing drag
-   behavior. Worth considering alongside item 2 above — both touch similar
-   drag-batching/undo code paths.
-4. **The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
+3. **The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
    real device** — both verified by the project owner directly.
-5. **Round 4's scroll fix FAILED real-device verification — the sixth straight
+4. **Round 4's scroll fix FAILED real-device verification — the sixth straight
    round to fail on this bug class.** A real before/after capture (manually
    forcing the "heal" button) proved the technique only recomputes
    `window.innerHeight`, never `visualViewport.height` — the visible symptom
