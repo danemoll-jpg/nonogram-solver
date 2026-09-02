@@ -417,6 +417,34 @@ Completed Tasks
   puzzles was equally affected by the same key mismatch and is fixed by the same
   change** (both `solvedLibraryPuzzles` and `inProgressPuzzles` key off the same
   `puzzle.id`) — not separately reported, but worth knowing if it comes up.
+* **Real-device report: the puzzle library got stuck on "Loading…" forever on the live
+  site — root-caused and fixed, a genuine pre-existing gap unrelated to push/deploy
+  state.** `src/firebase.js`'s Firebase bootstrapping (CDN module imports, the
+  Anonymous Auth sign-in handshake) had no timeout anywhere — a silently
+  blocked/stalled network request (an ad-blocker/privacy extension or firewall
+  dropping requests to `gstatic.com`/Google's Identity Toolkit is the common real-world
+  cause) left the relevant promise pending forever, and since every caller's `.catch()`
+  fallback only guards against a *rejection*, a promise that never settles at all just
+  hangs the whole chain — matching "claims to load, never completes" exactly. Made
+  worse by this round's scan-auto-publish change: "Play it" on a fresh scan now also
+  depends on this same sign-in succeeding (`savePuzzleToLibrary` calls
+  `ensureSignedIn()`), where before a fresh scan needed no network at all — so the same
+  stuck-auth cause could now also freeze the core scan-and-play flow, not just the
+  library. **Confirmed directly by the project owner**: closing and fully restarting
+  the web app made it work again — consistent with the exact mechanism found: every
+  Firebase promise in the old code was cached at module scope and NEVER cleared on
+  failure, so one stuck attempt permanently doomed every later attempt in that same
+  page session (only a full reload resets the caches to `null`), even once the
+  underlying block was transient/gone. Fix: added a small `withTimeout` wrapper
+  (8-second budget) around every CDN dynamic import and the sign-in handshake, and
+  every cached promise (`appPromise`, `functionsPromise`, `authPromise`,
+  `firestorePromise`, `signedInUserPromise`) is now reset to `null` on failure so a
+  later retry (reopening the library, pressing Save progress again) gets a genuine
+  fresh attempt instead of needing a full app restart. Verified: the timeout mechanism
+  itself (a promise that never settles correctly rejects after the budget) confirmed
+  directly in-browser; the normal (non-blocked) happy path re-verified unaffected
+  (library still loads all 7 entries, no console errors). All 812 tests still pass
+  (this module is inert during `npm test` either way — see its own header comment).
 
 Current Objective (Focus Area)
 

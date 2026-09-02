@@ -58,6 +58,18 @@
   (a publish/save race, an optimistic confirmation) was the actual cause — both traced
   and cleared directly. Fixed by dropping the unnecessary `lib-` prefix everywhere;
   verified end-to-end on a community puzzle (not a built-in) in browser preview.
+- **Real bug found and fixed: `src/firebase.js` had no timeout anywhere, so a
+  silently blocked/stalled Firebase request (ad-blocker/firewall dropping
+  `gstatic.com`/Google auth traffic — a real-world cause, not this app's fault) left
+  the puzzle library stuck on "Loading…" forever, with the scan-auto-publish flow
+  above now exposed to the same risk.** Every cached Firebase promise in that file
+  was also never cleared on failure, so one stuck attempt permanently doomed every
+  later attempt in the same page session — matching the project owner's own
+  confirmation that a full app restart (not just retrying) was what fixed it.
+  Fixed: an 8-second `withTimeout` wrapper around every CDN import and the sign-in
+  handshake, plus resetting every cache to `null` on failure so a later retry works
+  without needing a restart. Verified: the timeout mechanism itself, and the normal
+  (non-blocked) happy path unaffected.
 - **When a project owner describes a visual bug in plain language, take it literally
   before assuming a more complex/technical cause.** The toolbar-alignment bug took two
   misdiagnosed rounds (chasing a size difference) before the project owner's direct
