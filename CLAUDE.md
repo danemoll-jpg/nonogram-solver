@@ -70,6 +70,21 @@
   handshake, plus resetting every cache to `null` on failure so a later retry works
   without needing a restart. Verified: the timeout mechanism itself, and the normal
   (non-blocked) happy path unaffected.
+- **Real bug found and fixed: repeatedly tapping a toolbar button (reported via the new
+  Undo button) triggered iOS Safari's native double-tap-to-zoom gesture.** The shared
+  `.btn`/`.mode-btn` classes (`styles.css`) had no `touch-action` set at all. Fixed
+  with `touch-action: manipulation` on both — kills double-tap-zoom without touching
+  the page's viewport meta tag, so pinch-zoom stays available elsewhere as an
+  accessibility aid on large puzzles. Applied to every toolbar/menu button, not just
+  Undo, since any rapidly-tapped control is exposed to the same gesture.
+- **Real bug found and fixed: dragging across more than a few cells could silently skip
+  some, even with the finger never leaving the screen or crossing an already-marked
+  cell.** A different bug class from the double-tap-zoom fix above (a plain sampling
+  gap, not a gesture conflict) — `pointermove` (`app.js`) only ever painted the single
+  cell exactly under the pointer at each event, and a fast swipe over small cells can
+  jump more than one cell between samples. Fixed with a Bresenham line-walk
+  (`cellsOnLine`) that paints every cell the pointer's path crossed since the last
+  sample, not just its final resting point.
 - **When a project owner describes a visual bug in plain language, take it literally
   before assuming a more complex/technical cause.** The toolbar-alignment bug took two
   misdiagnosed rounds (chasing a size difference) before the project owner's direct
@@ -93,21 +108,24 @@ saved/incomplete-puzzle-progress feature, the live drag-fill cell counter, the
 toolbar alignment fix, a real geometry bug behind a row-OCR failure (a filled first
 row defeating the border-detection heuristic), a focused-input-vs-scroll fix, a
 scan-correction numeric-keyboard fix, a repeatable Undo button, a row/column
-interaction highlight, making every played scan auto-publish to the library, and the
-`lib-<id>` key-mismatch bug that broke save/solved tracking for community puzzles
-(see above) are all done, deployed, and **confirmed working on the real device** (not
-just preview — see `TODO.md`'s Completed Tasks; the Undo/highlight/auto-publish/
-key-mismatch-fix set is preview-verified — including a full save→Incomplete-filter→
-Resume round trip on a community, non-built-in puzzle — but not yet real-device-
-confirmed). Fully public library visibility is confirmed as the right model. General
-OCR digit-level noise (as opposed to the geometry bug above) has been explicitly
-accepted as "good enough for now." See `TODO.md`'s Completed Tasks for the full
-history.
+interaction highlight, making every played scan auto-publish to the library, the
+`lib-<id>` key-mismatch bug that broke save/solved tracking for community puzzles,
+and the Firebase-hang timeout fix (see above) are all done, deployed, and **confirmed
+working on the real device** (not just preview — see `TODO.md`'s Completed Tasks; the
+Undo/highlight/auto-publish/key-mismatch/Firebase-timeout set is preview-verified —
+including a full save→Incomplete-filter→Resume round trip on a community, non-built-in
+puzzle — but not yet real-device-confirmed). The double-tap-zoom fix and the
+fast-drag-skips-cells fix (both above) are also done and preview-verified, reported
+directly from real iPad use but not yet re-confirmed on-device after the fix. Fully
+public library visibility is confirmed as the right model. General OCR digit-level
+noise (as opposed to the geometry bug above) has been explicitly accepted as "good
+enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
 **Current objective**: waiting on the project owner for real-device verification of
-the round-4 scroll-bug fix (`healStuckViewportHeight`) — not this round's active build
-work; the ball is in the project owner's court to test on real hardware and report
-back with `?debug=scroll` data.
+the round-4 scroll-bug fix (`healStuckViewportHeight`) and the two newest fixes above
+(double-tap-zoom, fast-drag cell-skipping) — not this round's active build work; the
+ball is in the project owner's court to test on real hardware and report back (with
+`?debug=scroll` data for the scroll bug specifically).
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,
