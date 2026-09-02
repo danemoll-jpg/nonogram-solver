@@ -1821,7 +1821,22 @@ window.visualViewport?.addEventListener('resize', debounce(correctResidualViewpo
 // reads and returns immediately whenever offsetTop is already 0 (the common case), so polling a
 // few times a second costs effectively nothing but closes the gap regardless of what transition
 // (or lack of one) caused the stuck state.
-setInterval(correctResidualViewportPan, 400);
+//
+// Round 3 real-device verification (see TODO.md): this made ZERO observable difference — "doing
+// the exact same thing" as before the poll existed. Since the poll closes the exact trigger-
+// coverage gap round 2 diagnosed, a continued total failure points at `correctResidualViewportPan`
+// itself (specifically its `window.scrollTo` branch) possibly not working on this device/iOS
+// version at all, not at when it runs. Two counters below exist purely to let `?debug=scroll`
+// confirm the poll is actually executing on the real device (TODO.md's "cheap complementary
+// check") independently of the separate manual-force test (initScrollDiagnostics, below) that
+// isolates whether the correction itself is effective once invoked.
+let scrollPollCount = 0;
+let scrollLastPollAt = null;
+setInterval(() => {
+  scrollPollCount++;
+  scrollLastPollAt = new Date();
+  correctResidualViewportPan();
+}, 400);
 
 // ---- Current Objective #2: keep the player-facing explain panel visible through the same
 // stuck-pan state (see TODO.md) ----
@@ -1948,6 +1963,12 @@ function initScrollDiagnostics() {
     lines.push(`document.body.scrollHeight: ${bodyScrollHeight}`);
     lines.push(`window.scrollY: ${window.scrollY}`);
     lines.push(`document.activeElement: ${describeElement(document.activeElement)}`);
+    // Confirms whether the round-3 periodic poll is actually executing on THIS device at all
+    // (see TODO.md's Current Objective) — a cheap check that's independent of, and a
+    // prerequisite for interpreting, the manual "Force correct now" test below: if the poll
+    // has never fired, its failure to fix the bug says nothing about whether the correction
+    // itself works.
+    lines.push(`Periodic poll (every 400ms): fired ${scrollPollCount} time(s) since page load; last fired ${scrollLastPollAt ? scrollLastPollAt.toLocaleTimeString() : '(never)'}`);
     lines.push(`EXCESS (scrollable beyond visible viewport): ${excess}px`);
     lines.push('');
     lines.push('Per-element (only currently-rendered ones shown; sorted worst offender first):');
@@ -2106,6 +2127,17 @@ function initScrollDiagnostics() {
 
   const actions = document.createElement('div');
   actions.className = 'scroll-diag-panel__actions';
+  // Current Objective (see TODO.md): round 3's poll made zero observable difference on the
+  // real device despite closing the trigger-coverage gap round 2 diagnosed — which points at
+  // the correction itself (`correctResidualViewportPan`'s `window.scrollTo` branch) possibly
+  // not working on this device, not at when it runs. This button isolates that: it calls the
+  // *exact same* correction function on demand, so the project owner can reproduce the stuck
+  // pan, tap it, and read directly off the device whether `offsetTop` actually changes at all —
+  // rather than inferring it indirectly from whether the whole bug looks fixed.
+  const forceBtn = document.createElement('button');
+  forceBtn.type = 'button';
+  forceBtn.className = 'btn';
+  forceBtn.textContent = 'Force correct now';
   const copyBtn = document.createElement('button');
   copyBtn.type = 'button';
   copyBtn.className = 'btn';
@@ -2118,7 +2150,7 @@ function initScrollDiagnostics() {
   closeBtn.type = 'button';
   closeBtn.className = 'btn btn--primary';
   closeBtn.textContent = 'Close';
-  actions.append(copyBtn, copyHistoryBtn, closeBtn);
+  actions.append(forceBtn, copyBtn, copyHistoryBtn, closeBtn);
   panel.append(snapshotHeading, pre, historyHeading, historyPre, actions);
   document.body.appendChild(panel);
   pinToVisualViewport(panel);
@@ -2129,6 +2161,27 @@ function initScrollDiagnostics() {
       () => { button.textContent = 'Copy failed — select text manually'; }
     );
   }
+  // Records offsetTop immediately before and immediately after calling the correction, plus a
+  // follow-up read a moment later (scrollTo's effect isn't guaranteed to land on the same tick
+  // on iOS) — both go straight into the history log and the button's own label, so "does the
+  // number actually change" is answered directly on the device, no console/inspector needed.
+  forceBtn.addEventListener('click', () => {
+    const vv = window.visualViewport;
+    const before = vv?.offsetTop ?? '(unavailable)';
+    const activeAt = describeElement(document.activeElement);
+    correctResidualViewportPan();
+    const afterImmediate = vv?.offsetTop ?? '(unavailable)';
+    logHistory(`MANUAL FORCE — offsetTop before=${before} immediately-after=${afterImmediate} (active=${activeAt})`);
+    forceBtn.textContent = `Forced: ${before} → ${afterImmediate}`;
+    pre.textContent = buildReport();
+    setTimeout(() => {
+      const afterDelay = vv?.offsetTop ?? '(unavailable)';
+      logHistory(`MANUAL FORCE follow-up (150ms later) — offsetTop=${afterDelay}`);
+      forceBtn.textContent = `Forced: ${before} → ${afterImmediate} (150ms: ${afterDelay})`;
+      pre.textContent = buildReport();
+      setTimeout(() => { forceBtn.textContent = 'Force correct now'; }, 2500);
+    }, 150);
+  });
   copyBtn.addEventListener('click', () => copyText(pre.textContent, copyBtn, 'Copy snapshot'));
   copyHistoryBtn.addEventListener('click', () => copyText(historyPre.textContent, copyHistoryBtn, 'Copy history'));
   closeBtn.addEventListener('click', () => panel.classList.add('hidden'));

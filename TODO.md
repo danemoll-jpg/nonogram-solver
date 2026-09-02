@@ -208,37 +208,36 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **Scroll bug — round 3's periodic poll has NOW ALSO been tested on the real device
-  and confirmed to make no difference at all: "nothing has changed, it is doing the
-  exact same thing."** This is a significant new finding, not just another failed
-  round the same way as before. Round 3 specifically eliminated the trigger-coverage
-  gap (round 2's diagnosis) by polling unconditionally every 400ms regardless of what
-  event, if any, just fired — and it still doesn't fix the real device. **That
-  strongly suggests the problem is no longer about WHEN the correction runs, but
-  whether the correction itself (`window.scrollTo`) actually does anything on this
-  real device/iOS version at all.** Nothing in this project's history has directly
-  confirmed that the `window.scrollTo` corrective action ever successfully resets
-  `visualViewport.offsetTop` back to 0 when it fires on real hardware — every round
-  so far has only confirmed the trigger logic runs (or doesn't), never isolated
-  whether the correction itself is effective once invoked.
-  - **Required next step before writing any more trigger/polling logic**: isolate
-    mechanism from trigger. Add a manual "force correct now" button to the
-    `?debug=scroll` panel that calls the exact same correction code
-    (`correctResidualViewportPan`, or just `window.scrollTo(window.scrollX,
-    window.scrollY)` directly) on demand, so the project owner can reproduce the
-    stuck-pan state, tap the button, and directly observe whether `offsetTop`
-    actually changes at all. If it does NOT change even when manually and
-    deliberately invoked, that confirms the corrective action itself doesn't work on
-    this device — a different problem than trigger coverage, and round 3's polling
-    (or any future polling/event tuning) would never have fixed it regardless of how
-    often or reliably it ran. If manually forcing it DOES work, that's a different,
-    more surprising finding (something is preventing the automatic poll/listeners
-    from actually firing/executing at all, e.g. the interval not starting, being
-    cleared, or running in a context where it silently no-ops) and points back at
-    the trigger/wiring side instead.
-  - Also worth directly confirming the poll is even running at all (e.g. a visible
-    counter or last-poll-timestamp in the debug panel) as a cheap complementary
-    check alongside the manual-force test above.
+* **Scroll bug — mechanism-vs-trigger isolation tooling implemented, awaiting
+  real-device verification.** Added to `?debug=scroll` (`app.js`,
+  `initScrollDiagnostics`), per round 3's required next step:
+  1. A **"Force correct now" button** in the panel's action row that calls the
+     exact same `correctResidualViewportPan()` used by every automatic trigger,
+     on demand. It records `visualViewport.offsetTop` immediately before, then
+     an "immediately-after" reading, then a "150ms later" follow-up (in case
+     `scrollTo`'s effect isn't synchronous on iOS) — all three land as
+     `MANUAL FORCE` lines in the auto-captured history log, and the before→after
+     numbers also show directly on the button label for a few seconds. Verified
+     locally: clicking it does invoke the real correction function and logs real
+     before/after `offsetTop` values (both 0 in desktop preview, as expected with
+     no pan present).
+  2. A **periodic-poll liveness counter** (`scrollPollCount`/`scrollLastPollAt`,
+     module-scope next to the round-3 `setInterval`), surfaced as a new line in
+     the snapshot report: `Periodic poll (every 400ms): fired N time(s) since page
+     load; last fired <time>`. This directly confirms the round-3 poll is actually
+     executing on a given device, independent of whether it's fixing anything —
+     verified locally (count increments over time in preview).
+  - **Still required**: real on-device testing. Reproduce the stuck-pan state,
+    open `?debug=scroll`, confirm the poll counter is incrementing, then tap
+    "Force correct now" and read the logged before/after `offsetTop` values. If
+    they stay stuck even when manually forced, the correction itself doesn't work
+    on this device (a `window.scrollTo` limitation, not a trigger-coverage gap) —
+    a different fix is needed, not more trigger/polling tuning. If manual forcing
+    DOES reset `offsetTop`, the automatic poll/listeners aren't actually
+    firing/executing despite the source looking right, and the wiring side needs
+    another look.
+* Toolbar alignment is a separate, already-closed item — round 4's fix is confirmed
+  on the real device (see Completed Tasks). No further action needed there.
 
 Next Steps (Do Not Start Yet)
 
