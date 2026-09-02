@@ -1091,6 +1091,36 @@ function attachPointerHandlers(grid) {
     return el && el.classList && el.classList.contains('nono-cell') ? el : null;
   }
 
+  // Real-device report (see TODO.md): dragging across more than a few cells, finger never
+  // leaving the screen and never crossing an already-marked cell, would sometimes still leave
+  // some cells unpainted. Root cause: pointermove only ever painted whichever single cell was
+  // exactly under the pointer at the moment each event fired (see below) — on a fast swipe,
+  // especially over small cells (a large puzzle's cells shrink toward MIN_CELL_PX), two
+  // consecutive samples can easily land in non-adjacent cells, silently skipping whatever was
+  // in between even though the finger visually passed straight over it without lifting.
+  // Standard Bresenham line algorithm between two grid cells (inclusive of both endpoints) —
+  // grid cells are just integer (row, col) coordinates, no different from pixels here — lets
+  // pointermove paint every cell the pointer's path crossed since the last sample, not just
+  // its final resting point.
+  function cellsOnLine(r0, c0, r1, c1) {
+    const cells = [];
+    const dr = Math.abs(r1 - r0);
+    const dc = Math.abs(c1 - c0);
+    const sr = r0 < r1 ? 1 : -1;
+    const sc = c0 < c1 ? 1 : -1;
+    let err = dr - dc;
+    let r = r0;
+    let c = c0;
+    while (true) {
+      cells.push([r, c]);
+      if (r === r1 && c === c1) break;
+      const e2 = 2 * err;
+      if (e2 > -dc) { err -= dc; r += sr; }
+      if (e2 < dr) { err += dr; c += sc; }
+    }
+    return cells;
+  }
+
   // ---- row/column crosshair highlight (Current Objective — see TODO.md) ----
   //
   // Highlights the full row and column of whichever cell is currently being pressed or
@@ -1130,7 +1160,7 @@ function attachPointerHandlers(grid) {
     const c = Number(el.dataset.col);
     setCrosshairHighlight(r, c);
     const newState = targetStateFor(board.get(r, c));
-    dragging = { paintState: newState, touched: new Set([`${r},${c}`]), count: 0 };
+    dragging = { paintState: newState, touched: new Set([`${r},${c}`]), count: 0, lastRow: r, lastCol: c };
     startDragSweep(); // no-op unless the 'stretch' drag-sweep prototype mode is active
     const changed = paintCell(el, newState);
     // Only show/count for a genuine fill or X paint — not a plain click-to-clear (newState
@@ -1152,15 +1182,31 @@ function attachPointerHandlers(grid) {
     }
     const el = cellAt(e.clientX, e.clientY);
     if (!el) return;
-    setCrosshairHighlight(Number(el.dataset.row), Number(el.dataset.col));
-    const key = `${el.dataset.row},${el.dataset.col}`;
-    if (dragging.touched.has(key)) return;
-    dragging.touched.add(key);
-    const changed = paintCell(el, dragging.paintState, { dragStep: true });
-    if (changed && dragging.paintState !== UNKNOWN) {
-      dragging.count++;
-      showDragCountBadge(e.clientX, e.clientY, dragging.count);
+    const r1 = Number(el.dataset.row);
+    const c1 = Number(el.dataset.col);
+    setCrosshairHighlight(r1, c1);
+
+    // Walk every cell between where the drag last was and where it is now (see cellsOnLine's
+    // own comment) instead of only painting this one sampled point — a fast swipe can easily
+    // jump more than one cell between two pointermove events. touched still dedupes (a cell
+    // this line re-crosses, or one already handled by an earlier event, is skipped exactly as
+    // before), so this only ever paints strictly more of what a drag already visually covered.
+    let anyChanged = false;
+    for (const [r, c] of cellsOnLine(dragging.lastRow, dragging.lastCol, r1, c1)) {
+      const key = `${r},${c}`;
+      if (dragging.touched.has(key)) continue;
+      dragging.touched.add(key);
+      const cellEl = cellEls.get(key);
+      if (!cellEl) continue;
+      const changed = paintCell(cellEl, dragging.paintState, { dragStep: true });
+      if (changed && dragging.paintState !== UNKNOWN) {
+        dragging.count++;
+        anyChanged = true;
+      }
     }
+    dragging.lastRow = r1;
+    dragging.lastCol = c1;
+    if (anyChanged) showDragCountBadge(e.clientX, e.clientY, dragging.count);
     syncAllCellVisuals();
   });
 

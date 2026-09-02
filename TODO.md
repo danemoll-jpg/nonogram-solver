@@ -458,6 +458,28 @@ Completed Tasks
   is just the one control in this app actually designed to be tapped repeatedly.
   Verified: the property applies correctly to every affected button in browser preview,
   and a normal click/undo round trip still works unaffected. All 812 tests still pass.
+* **Real-device report: dragging across more than a few cells, finger never leaving the
+  screen and never crossing an already-marked cell, would sometimes still leave some
+  cells unpainted — root-caused and fixed. A different bug class from the double-tap-
+  zoom fix above (a gesture/browser-chrome conflict), not the same thing:** this one is
+  a plain sampling gap. `pointermove` (`app.js`'s `attachPointerHandlers`) only ever
+  painted whichever single cell was exactly under the pointer at the moment each event
+  fired — on a fast swipe, especially over small cells (a large puzzle's cells shrink
+  toward `MIN_CELL_PX`), two consecutive samples can easily land in non-adjacent cells,
+  silently skipping whatever was in between even though the finger visually passed
+  straight over it without lifting. Fix: a standard Bresenham line-walk
+  (`cellsOnLine`) between the drag's last known cell and its current one, painting
+  every cell the pointer's path crossed since the last sample instead of only its
+  final resting point — grid cells are just integer (row, col) coordinates, no
+  different from pixels for this purpose. `dragging.touched` still dedupes as before,
+  so this only ever paints strictly more of what a drag already visually covered, never
+  something new. Verified in browser preview two ways: a simulated fast horizontal
+  swipe (a single pointermove jumping straight from column 0 to column 4 on a 10x10
+  puzzle, skipping columns 1-3 entirely) correctly painted all 4 intervening cells —
+  confirmed correct via the row's own clue (a run of 4) triggering real auto-X on the
+  cell right after, exactly as a genuine cell-by-cell drag would; and a simulated fast
+  diagonal swipe (row+col both jumping 3) correctly painted all 4 diagonal cells in
+  Mark-empty mode. All 812 tests still pass.
 
 Current Objective (Focus Area)
 
