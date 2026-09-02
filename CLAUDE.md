@@ -32,17 +32,16 @@
   file over synthetic/guessed pixel data.** See `TODO.md`'s Completed Tasks for the full
   history, including a confirmed real ground-truth reference puzzle
   (`scratch-images/sample-mid-solve.jpg`) reusable for future OCR-accuracy verification.
-- **The main scroll bug's diagnosis was overturned by real captures spanning the bug's
-  full timeline: it is NOT a stuck `visualViewport.offsetTop`/pan (what rounds 1-3
-  targeted) — it's a stuck-shrunk `visualViewport.height` that never recovers to match
-  `window.innerHeight`, independent of pan/scroll state.** `window.scrollTo` (every
-  earlier round's corrective action) can only affect scroll position, never viewport
-  height — it was never capable of fixing this. Round 4 shipped a real, documented
-  WebKit viewport-recompute workaround (`healStuckViewportHeight` in `app.js`) targeting
-  the height variable directly — **still awaiting real-device verification**, since this
-  project's own preview tooling can't reproduce the real iOS bug and five straight prior
-  rounds needed real hardware to confirm or refute. Don't assume it's fixed just because
-  it's a real technique and passed local testing.
+- **Round 4's scroll fix has now FAILED real-device verification too — the sixth
+  straight round to fail on this bug class.** The diagnosis (a stuck-shrunk
+  `visualViewport.height`, not a stuck pan) was correct, but `healStuckViewportHeight`'s
+  chosen technique (`display:none`→reflow→`''`) turned out to only recompute
+  `window.innerHeight`, never `visualViewport.height` itself — a real before/after
+  device capture showed the visible symptom (EXCESS) completely unchanged (79px both
+  times) even after manually forcing the fix. **Do not tweak this technique's
+  threshold/timing — research a genuinely different approach that specifically
+  targets `visualViewport.height`.** See `TODO.md`'s Current Objective for the full
+  data.
 - **Scanned puzzles now auto-publish to the library the moment they're played** (no more
   separate optional "Save to library" step) — this closed the original "Save progress
   does nothing for a scanned puzzle" gap by making a played scan a completely normal
@@ -121,11 +120,38 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective**: waiting on the project owner for real-device verification of
-the round-4 scroll-bug fix (`healStuckViewportHeight`) and the two newest fixes above
-(double-tap-zoom, fast-drag cell-skipping) — not this round's active build work; the
-ball is in the project owner's court to test on real hardware and report back (with
-`?debug=scroll` data for the scroll bug specifically).
+**Current objective has four items**:
+
+1. **New: remove the routine per-cell sound effects** (`fillClick`, `xClick`, the
+   drag-sweep sound) — the constant dinging on every mark/drag is annoying per the
+   project owner directly. Keep the meaningful sounds (`lock`/`unlock`, `error`,
+   `batchCompleteChime`, `completeFanfare`) since those signal something notable,
+   not routine noise. Partial confirmation: X marks are confirmed silent; double-
+   check Fill marks were equally silenced, since only X was explicitly confirmed.
+2. **New real bug: Undo does not correctly undo X marks**, found via a drag-placed
+   run of X's. Check `Board.undoLast`/`undoToMove` (`model.js`) for a FILLED-vs-
+   EMPTY asymmetry — the revert logic should be state-agnostic. Not yet scoped
+   whether this is drag-specific or affects all X undos, or whether Fill undo is
+   unaffected — verify both before concluding a fix is complete.
+3. **New: a dedicated Eraser mode, decided after the project owner explicitly
+   preferred it over a narrower drag-content-inference approach** ("Actually I
+   really want the eraser. Let's add it."). Third option in the Fill/Mark-empty
+   toggle; clears FILLED/EMPTY cells back to UNKNOWN on click or drag (using the
+   existing Bresenham line-walk for full drag-path coverage), leaving UNKNOWN
+   cells untouched. Reuse `computeUnfillChanges`/`applyUnfillWithSound` for
+   FILLED-cell clears (already handles auto-X line-unlock correctly) rather than
+   writing new logic. Does not change Fill/Mark-empty's own existing drag
+   behavior. Worth considering alongside item 2 above — both touch similar
+   drag-batching/undo code paths.
+4. **The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
+   real device** — both verified by the project owner directly.
+5. **Round 4's scroll fix FAILED real-device verification — the sixth straight
+   round to fail on this bug class.** A real before/after capture (manually
+   forcing the "heal" button) proved the technique only recomputes
+   `window.innerHeight`, never `visualViewport.height` — the visible symptom
+   (EXCESS) was completely unchanged, 79px both before and after. Don't tweak
+   the existing technique further; research a genuinely different approach that
+   actually targets `visualViewport.height`. See `TODO.md` for the full data.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,

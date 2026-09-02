@@ -458,6 +458,7 @@ Completed Tasks
   is just the one control in this app actually designed to be tapped repeatedly.
   Verified: the property applies correctly to every affected button in browser preview,
   and a normal click/undo round trip still works unaffected. All 812 tests still pass.
+  **CONFIRMED on the real device by the project owner.**
 * **Real-device report: dragging across more than a few cells, finger never leaving the
   screen and never crossing an already-marked cell, would sometimes still leave some
   cells unpainted — root-caused and fixed. A different bug class from the double-tap-
@@ -479,19 +480,141 @@ Completed Tasks
   confirmed correct via the row's own clue (a run of 4) triggering real auto-X on the
   cell right after, exactly as a genuine cell-by-cell drag would; and a simulated fast
   diagonal swipe (row+col both jumping 3) correctly painted all 4 diagonal cells in
-  Mark-empty mode. All 812 tests still pass.
+  Mark-empty mode. All 812 tests still pass. **CONFIRMED on the real device by the
+  project owner.**
 
 Current Objective (Focus Area)
 
-* **Waiting on the project owner: real-device verification of the round-4 scroll-bug
-  fix (`healStuckViewportHeight`, see Completed Tasks above).** This project's own
-  preview tooling can't reproduce the real iOS bug, so this can't be confirmed further
-  without real hardware — reproduce the stuck-shrunk-height state (open the scan
-  wizard, focus a text field to trigger the keyboard, close the wizard) and check
-  `?debug=scroll`'s new gap line and "Force heal viewport height now" button. Five
-  straight prior rounds on this bug class needed real hardware to confirm or refute, so
-  this one should be treated the same way — not assumed fixed just because the
-  technique is real/documented and passed local testing.
+* **New: remove the routine per-cell sound effects — the constant "dinging" on every
+  fill/mark click and drag-sweep is annoying, per the project owner directly.**
+  Scoped interpretation (Code's call to confirm/adjust if this reads too narrow or
+  too broad): cut `fillClick`, `xClick`, and the drag-sweep sound
+  (`onDragSweepCell`) specifically — these fire on every single routine mark, which
+  is exactly what's being described as excessive. Keep the other sounds as
+  distinct, meaningful signals rather than routine noise: `lock`/`unlock` (a line
+  completing/reopening), `error` (a mistake caught), `batchCompleteChime` (a
+  multi-cell hint or auto-X batch), and `completeFanfare` (solving the puzzle) —
+  these mark something worth noticing, not just ordinary clicking/dragging. The
+  existing mute toggle stays as the blunt full-on/off option for anyone who wants
+  silence entirely; this is a separate, narrower change to what plays by default
+  during normal play specifically.
+  - **Partial confirmation from the project owner**: X marks are confirmed silent
+    now ("I can't hear x's"). They didn't separately comment on Fill marks —
+    worth Code double-checking that `fillClick` was equally silenced, not just
+    `xClick`, since only the X side was explicitly confirmed.
+
+* **New real bug, found via real play: Undo does not correctly undo X marks.**
+  Direct report: after drag-placing a run of X marks across a puzzle, pressing
+  Undo doesn't revert them. Not yet confirmed whether this is specific to
+  drag-placed X's or X marks generally (single-click X's untested/unreported),
+  or whether Fill-mode undo works correctly by contrast (implied by the report
+  only flagging X's, but not directly confirmed either way) — Code should check
+  both to scope this precisely rather than assume. **Investigate `Board.undoLast`/
+  `undoToMove` (`model.js`) for any asymmetry in how a FILLED-vs-EMPTY revert is
+  handled** — the revert logic should be state-agnostic (just restore whatever
+  the cell's previous value was, regardless of what it was), so a bug specific to
+  EMPTY/X reverts suggests something in that logic (or in how a drag batch
+  specifically records its `prev`/`next` values for X-mode moves) is checking or
+  branching on state type where it shouldn't be. Reproduce via a drag-placed
+  X-mode batch specifically, matching the project owner's own repro, before
+  concluding a fix actually resolves it.
+
+* **New feature, decided by the project owner after talking through the
+  alternative: add a dedicated Eraser mode, as a third option alongside Fill and
+  Mark-empty — not an attempt to infer "erase intent" from what a drag happens
+  to cross.** The project owner initially described a narrower ask (a drag that
+  crosses an already-filled line should erase it), then explicitly decided
+  against that in favor of an unambiguous dedicated mode instead: **"Actually I
+  really want the eraser. Let's add it."** This supersedes the narrower ask —
+  build the eraser, not drag-content-inference.
+  - **Mode toggle becomes three-way**: Fill / Mark-empty / Eraser, extending the
+    existing pill toggle (`els.modeFill`/`els.modeX` in `app.js`, `.mode-toggle`
+    in the markup/CSS). Icon/label for the new option is Code's call.
+  - **Behavior**: in Eraser mode, a click/tap on a FILLED or EMPTY cell clears it
+    back to UNKNOWN; a click on an already-UNKNOWN cell does nothing (there's
+    nothing to erase). A drag in Eraser mode should clear every FILLED/EMPTY
+    cell along its path — reuse the existing Bresenham line-walk
+    (`cellsOnLine`, from the recent fast-drag-skips-cells fix) for full drag-path
+    coverage, same as Fill/Mark-empty already get, rather than only checking the
+    single cell under the pointer per event.
+  - **Reuse existing logic, don't reinvent it**: clearing a FILLED cell in
+    Eraser mode is the exact same operation "click an already-filled cell in
+    Fill mode" already performs — `computeUnfillChanges`/`applyUnfillWithSound`
+    (`app.js`) already handle this correctly, including reverting a satisfied
+    line's auto-X'd cells back to UNKNOWN when the line becomes unsatisfied
+    again. Route Eraser-mode FILLED-cell clears through that same existing path
+    rather than writing new logic for it. Clearing an EMPTY/X cell doesn't have
+    the same line-unlock concern (auto-X is never triggered by an EMPTY
+    placement) — a plain revert to UNKNOWN is sufficient there.
+  - **Explicitly does NOT change Fill/Mark-empty's own existing drag behavior**
+    (a drag in those modes still only paints cells that are currently UNKNOWN,
+    per the earlier fast-drag-overwrite fix) — Eraser is a separate third mode
+    with the opposite rule (only touches non-blank cells), not a modification of
+    how the other two already work.
+  - **Worth keeping in mind alongside the Undo/X-marks bug above**: both touch
+    similar code paths (drag batching, `Board.setBatch`/undo) — not necessarily
+    the same root cause, but worth Code having both in view together rather
+    than treating them as fully unrelated.
+
+* **Round 4's scroll fix (`healStuckViewportHeight`) has now been tested on the real
+  device, including the manual "Force heal viewport height now" button — and the
+  real data shows the technique doesn't touch the actual broken variable. This is
+  round SIX to fail on this bug class.** Two real captures, before and after
+  pressing the manual force-heal button, ~84 seconds apart:
+  ```
+  BEFORE force-heal (6:16:50 PM):
+    visualViewport.height: 969    window.innerHeight: 969   (MATCHED — gap: 0px)
+    offsetTop: 79, pageTop: 79, scrollY: 79                 (pan stuck)
+    EXCESS: 79px
+
+  AFTER force-heal (6:18:14 PM):
+    visualViewport.height: 969    window.innerHeight: 1048  (NOW DIVERGED — gap: 79px)
+    offsetTop: 0, pageTop: 0, scrollY: 0                    (pan now corrected)
+    EXCESS: 79px                                            (COMPLETELY UNCHANGED)
+  ```
+  **What this proves**: pressing the force-heal button corrected the pan and pushed
+  `window.innerHeight` up to its true full value (1048) — but `visualViewport.height`
+  itself never moved, staying frozen at 969, which actually CREATED a fresh 79px gap
+  that didn't exist before (heights matched pre-heal). **The visible symptom (EXCESS)
+  never changed at all, before or after — exactly 79px in both readings.** This means
+  `healStuckViewportHeight`'s `display:none`→reflow→`''` technique recomputes the
+  LAYOUT viewport (`window.innerHeight`), not the VISUAL viewport
+  (`visualViewport.height`) — the one variable that's actually the root cause. It was
+  never touching the real broken value in the first place; whatever correction
+  happened to `offsetTop`/`innerHeight` may just be the periodic poll's unrelated
+  `correctResidualViewportPan` doing its own (already-confirmed-working) job during
+  that ~84-second window, coincidental to the heal button rather than caused by it.
+  - **Independent confirmation this is a genuine, non-pan-related overflow now**: the
+    scan-modal's own per-element numbers in the "after" reading show
+    `offsetHeight=1048` (its real rendered height) against a visible area of only 969
+    — `overflowPastViewportBottom=79px`, a real, directly-measured overflow of the
+    element's own box past what's actually visible, not an artifact of scroll
+    position or pan.
+  - **Do not attempt another tweak to `healStuckViewportHeight`'s existing technique**
+    (threshold, timing, trigger condition) — the display-toggle/reflow approach itself
+    has now been shown not to affect `visualViewport.height` at all on this real
+    device, so refining around it won't help. **Research is needed on a genuinely
+    different technique that specifically targets `visualViewport.height` itself**,
+    not `window.innerHeight` or scroll position — neither of which has ever been the
+    actual broken variable once isolated by real data. This is now the SIXTH straight
+    round to fail real-device verification on this general bug class (four rounds on
+    the original scan-wizard-specific bug, plus rounds 1-3 and now round 4 on this
+    app-wide regression) — treat continued guessing with real skepticism; a genuinely
+    new research pass on the specific technique is warranted before shipping another
+    attempt.
+  - **A follow-up single capture (6:24:09 PM, a fresh page load, poll only 81 firings
+    in) adds two useful data points**: first, this is the FIRST confirmed capture of
+    the classic pan-stuck pattern (`round 4's stuck-height gap: 0px` — heights
+    matched, only the pan was off) happening on the MAIN PLAY SCREEN rather than
+    inside the scan wizard — every earlier pan-stuck capture happened specifically
+    while the scan wizard was open, so this broadens the bug's confirmed scope: it's
+    a general keyboard-interaction issue, not specific to the scan wizard's own
+    layout. Second, `offsetTop` (74) and `scrollY` (79) didn't quite match this time
+    — a small discrepancy not seen in any earlier capture, possibly just a snapshot
+    caught mid-correction (the periodic poll running between the two reads) rather
+    than a new distinct symptom, but worth Code keeping in mind if it recurs. EXCESS
+    was still exactly 79px in this capture too — the visible symptom, unresolved
+    regardless of screen/context.
 
 Next Steps (Do Not Start Yet)
 
