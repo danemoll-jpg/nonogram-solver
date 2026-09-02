@@ -1127,6 +1127,11 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     els.scanBtnPlay.disabled = true;
     els.scanPlayStatus.textContent = 'Adding to the puzzle library…';
     try {
+      // Bug fix (real-device regression — see TODO.md): `p.id` must be the bare Firestore doc
+      // id, matching loadLibraryPuzzle's own convention exactly (see its comment) — a `lib-`
+      // prefix here was the actual cause of "Save progress claims success but nothing shows
+      // up," since it silently mismatched the unprefixed id the library browse list looks
+      // in-progress/solved state up by.
       const libraryId = await savePuzzleToLibrary({
         rows: p.rows,
         cols: p.cols,
@@ -1134,9 +1139,8 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
         colClues: p.colClues,
         title: 'Scanned puzzle',
       });
-      p.id = `lib-${libraryId}`;
+      p.id = libraryId;
       p.source = 'authored';
-      p.libraryId = libraryId;
     } catch (err) {
       console.warn('savePuzzleToLibrary failed — playing locally without save/stats support', err);
     }

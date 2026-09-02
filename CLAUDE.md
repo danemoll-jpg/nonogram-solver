@@ -46,13 +46,18 @@
 - **Scanned puzzles now auto-publish to the library the moment they're played** (no more
   separate optional "Save to library" step) — this closed the original "Save progress
   does nothing for a scanned puzzle" gap by making a played scan a completely normal
-  authored/library puzzle (`lib-<id>`, `source: 'authored'`) with real history, Undo,
-  stats, and Incomplete-filter visibility. **However, the project owner has since
-  reported the mid-solve "Save progress" step on one of these still doesn't produce a
-  findable save on the real device**, despite passing preview testing of this exact
-  path — see `TODO.md`'s Current Objective; leading suspect is a race between the async
-  publish call and an early Save-progress press, or an overly-optimistic save
-  confirmation. The initial auto-publish-on-play step itself is confirmed working.
+  authored/library puzzle (`source: 'authored'`, a bare Firestore id) with real history,
+  Undo, stats, and Incomplete-filter visibility.
+- **Real bug found and fixed: `loadLibraryPuzzle` (`src/puzzleLibrary.js`) returned a
+  played library puzzle's `id` as `lib-<firestoreId>`, but the browse list's `entry.id`
+  (used to look up in-progress/solved state) was always the bare id — so a save/solved
+  write for any COMMUNITY puzzle always succeeded, just under a key the UI could never
+  find again ("claims success, nothing shows up").** Predates this round; only surfaced
+  now because every prior tested save/resume round trip happened to use a built-in
+  puzzle, where both ids happen to already match. Neither of the two suspected leads
+  (a publish/save race, an optimistic confirmation) was the actual cause — both traced
+  and cleared directly. Fixed by dropping the unnecessary `lib-` prefix everywhere;
+  verified end-to-end on a community puzzle (not a built-in) in browser preview.
 - **When a project owner describes a visual bug in plain language, take it literally
   before assuming a more complex/technical cause.** The toolbar-alignment bug took two
   misdiagnosed rounds (chasing a size difference) before the project owner's direct
@@ -76,31 +81,21 @@ saved/incomplete-puzzle-progress feature, the live drag-fill cell counter, the
 toolbar alignment fix, a real geometry bug behind a row-OCR failure (a filled first
 row defeating the border-detection heuristic), a focused-input-vs-scroll fix, a
 scan-correction numeric-keyboard fix, a repeatable Undo button, a row/column
-interaction highlight, and making every played scan auto-publish to the library are
-all done, deployed, and **confirmed working on the real device** (not just preview —
-see `TODO.md`'s Completed Tasks; the Undo/highlight/auto-publish trio is
-preview-verified but not yet fully real-device-confirmed — see the Save-progress
-regression below). Fully public library visibility is confirmed as the right model.
-General OCR digit-level noise (as opposed to the geometry bug above) has been
-explicitly accepted as "good enough for now." See `TODO.md`'s Completed Tasks for
-the full history.
+interaction highlight, making every played scan auto-publish to the library, and the
+`lib-<id>` key-mismatch bug that broke save/solved tracking for community puzzles
+(see above) are all done, deployed, and **confirmed working on the real device** (not
+just preview — see `TODO.md`'s Completed Tasks; the Undo/highlight/auto-publish/
+key-mismatch-fix set is preview-verified — including a full save→Incomplete-filter→
+Resume round trip on a community, non-built-in puzzle — but not yet real-device-
+confirmed). Fully public library visibility is confirmed as the right model. General
+OCR digit-level noise (as opposed to the geometry bug above) has been explicitly
+accepted as "good enough for now." See `TODO.md`'s Completed Tasks for the full
+history.
 
-**Current objective has two items**:
-
-1. **Waiting on the project owner: real-device verification of the round-4
-   scroll-bug fix** (`healStuckViewportHeight`) — see above. Not this round's
-   active build work; the ball is in the project owner's court to test on real
-   hardware and report back with `?debug=scroll` data.
-2. **New real-device regression: "Save progress" on a scanned (now
-   auto-published) puzzle claims success but produces no findable save.** This
-   is on the exact path this round's auto-publish fix was meant to close, and it
-   passed preview testing — the project owner's initial auto-publish-on-play
-   step works fine, but the mid-solve Save-progress action afterward doesn't.
-   Leading suspects: a race between the async publish call and an early
-   Save-progress press (verify the `id`/`source` swap to `lib-<id>`/`authored`
-   has genuinely completed before Save progress is usable), or a save
-   confirmation that fires optimistically rather than after a confirmed write.
-   See `TODO.md` for full detail.
+**Current objective**: waiting on the project owner for real-device verification of
+the round-4 scroll-bug fix (`healStuckViewportHeight`) — not this round's active build
+work; the ball is in the project owner's court to test on real hardware and report
+back with `?debug=scroll` data.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,

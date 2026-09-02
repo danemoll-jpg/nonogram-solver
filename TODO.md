@@ -384,6 +384,39 @@ Completed Tasks
     background on the underlying WebKit bug class —
     https://dev.to/deanliu/the-ios-safari-keyboard-scroll-bug-fixed-with-one-line-of-css-1353 ,
     https://blog.ni18.in/fixing-ios-safari-viewport-shift-issues/
+* **Save-progress-after-auto-publish regression — root-caused and fixed (a genuine
+  bug, neither of the two suspected leads).** Real cause: `loadLibraryPuzzle`
+  (`src/puzzleLibrary.js`) has ALWAYS returned a played library puzzle's `id` as
+  `lib-<firestoreId>` (a leftover disambiguation prefix — unnecessary, since built-in
+  ids like `heart-5` can't collide with Firestore's own 20-char random ids), but the
+  library browse list's `entry.id` (used by `renderLibraryList`/`fetchInProgressPuzzles`
+  to look up in-progress/solved state, and by the "Play"/rename handlers to address
+  `puzzles/{id}` directly) has always been the bare, unprefixed id. `saveInProgressPuzzle`/
+  `recordPuzzleSolved` key their writes off `puzzle.id` — so for any *community* library
+  puzzle (not just this round's auto-published scans), a save/solved write always
+  actually succeeded, but under the WRONG key: `entry.id` (bare) never matched the doc
+  actually written (`lib-`+bare), so the Incomplete/Solved badges could never find it.
+  "Claims success, nothing shows up" describes this exactly — a genuinely successful
+  write, silently unfindable, not a race and not an optimistic confirmation UI (traced
+  both leads directly: the "Play it" publish call in `scanUI.js` was already correctly
+  `await`ed before `onPuzzleReady`/`startPuzzle` ever run, and `btnSaveProgress`'s "Progress
+  saved" message already only fires after `saveProgressIfApplicable()` resolves without
+  throwing — both cleared). This bug predates this round entirely — it just never
+  surfaced before because every previously-tested save/resume round trip in this
+  project's history happened to use a BUILT-IN puzzle, where `entry.id` and `puzzle.id`
+  are the same string with no `lib-` involved at all, so this exact mismatch was
+  invisible until a community-sourced (or, after this round, auto-published-scan)
+  puzzle's save was actually checked end-to-end. Fix: `loadLibraryPuzzle` now returns
+  the bare Firestore id directly as `puzzle.id` (no prefix), and the auto-publish
+  handler (`src/scanUI.js`) does the same; the now-redundant, never-actually-read
+  `libraryId` field is removed from both. Verified end-to-end in browser preview: played
+  a COMMUNITY puzzle (not built-in), marked one cell, saved, confirmed it now appears
+  under the library's Incomplete filter, and confirmed "Resume" correctly restores the
+  saved mark — the exact round trip that was silently broken before. All 812 tests
+  still pass. **This also means solved-badge/times-solved tracking for community
+  puzzles was equally affected by the same key mismatch and is fixed by the same
+  change** (both `solvedLibraryPuzzles` and `inProgressPuzzles` key off the same
+  `puzzle.id`) — not separately reported, but worth knowing if it comes up.
 
 Current Objective (Focus Area)
 
@@ -396,37 +429,6 @@ Current Objective (Focus Area)
   straight prior rounds on this bug class needed real hardware to confirm or refute, so
   this one should be treated the same way — not assumed fixed just because the
   technique is real/documented and passed local testing.
-
-* **New real-device finding: "Save progress" on a scanned (now auto-published)
-  puzzle still doesn't produce a findable save — claims success, but nothing shows
-  up.** This is on the exact code path this round's "scanned puzzles auto-publish
-  to the library" fix was supposed to close, and Code's own preview testing of
-  this specific path (Save progress write + library Incomplete-filter round trip
-  on a played library puzzle, "sharing the exact code path a published scan now
-  uses") passed. The project owner is now reporting it doesn't work on the real
-  device — worth confirming: **the initial auto-publish step (playing the
-  scanned puzzle → publishing it to the library) does work correctly** ("the
-  imported puzzles automatically save as promised"); the gap is specifically in
-  the *mid-solve* "Save progress" action afterward.
-  - **Leading suspect: a race condition between the async auto-publish write and
-    an early "Save progress" press.** `scanUI.js`'s "Play it" button now calls
-    `savePuzzleToLibrary` (async) before handing the puzzle to `app.js` and
-    overwriting its `id`/`source` to the real `lib-<id>`/`authored` values — if
-    the player presses "Save progress" before that publish call has actually
-    resolved, the save could target a stale/wrong id, or fire against a puzzle
-    object that hasn't yet been updated with its real library id. Verify the
-    publish is fully awaited (the `id`/`source` swap has genuinely completed)
-    before "Save progress" is enabled/usable, not just before the puzzle
-    visually starts.
-  - **Also verify the "claims to save" confirmation isn't purely optimistic UI**
-    — if there's a success indicator (toast or otherwise) that fires the moment
-    the save is *invoked* rather than once the Firestore write is actually
-    confirmed to have succeeded, that would explain "claims to save" without a
-    real save happening, independent of the race-condition theory above. Check
-    both; either (or both) could be the cause.
-  - Per the project owner: "I think everything else is good" — Undo and the
-    row/column highlight aren't being reported as broken, just this specific
-    save-progress-after-auto-publish path.
 
 Next Steps (Do Not Start Yet)
 

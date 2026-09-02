@@ -81,6 +81,17 @@ export async function fetchLibraryPuzzles() {
 // a puzzle played from the library is a real, permanent puzzle (full move history,
 // counts toward stats; see app.js's startPuzzle and src/stats.js's recordCompletion),
 // not an ephemeral scan snapshot, even though it's built via the same solver call.
+//
+// Bug fix (real-device regression — see TODO.md): the returned puzzle's `id` MUST be the
+// bare Firestore doc id, unprefixed — it was previously `lib-${id}` (a leftover disambiguation
+// prefix that nothing actually needed: built-in ids like 'heart-5' and Firestore's own
+// 20-char random ids can't collide). `puzzle.id` is what saveInProgressPuzzle/
+// recordPuzzleSolved key their writes under, but the library browse list's `entry.id` (used to
+// look those same maps back up — see app.js's renderLibraryList/fetchInProgressPuzzles) is
+// always the bare id. The mismatch meant every save/solved-tracking write for a community (or,
+// after this round's auto-publish change, a played scan) puzzle silently succeeded against the
+// WRONG key — "claims success, nothing findable" — while a built-in puzzle's `entry.id` and
+// `puzzle.id` happened to already match, which is why this never showed up testing those.
 export async function loadLibraryPuzzle(id) {
   const { db, mod } = await getFirestoreClient();
   const snap = await mod.getDoc(mod.doc(db, COLLECTION, id));
@@ -89,7 +100,7 @@ export async function loadLibraryPuzzle(id) {
   const rowClues = deserializeClues(d.rowClues);
   const colClues = deserializeClues(d.colClues);
   const result = buildScannedPuzzle({
-    id: `lib-${id}`,
+    id,
     name: d.title,
     rows: d.rows,
     cols: d.cols,
@@ -97,7 +108,7 @@ export async function loadLibraryPuzzle(id) {
     colClues,
   });
   if (!result.solved) throw new Error("This puzzle's clues no longer solve — it may be corrupted.");
-  return { ...result.puzzle, source: 'authored', libraryId: id, creatorUid: d.creatorUid };
+  return { ...result.puzzle, source: 'authored', creatorUid: d.creatorUid };
 }
 
 // Renames a library puzzle's title. Firestore rules restrict this update to the
