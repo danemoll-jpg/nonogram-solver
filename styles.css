@@ -13,6 +13,10 @@
   --grid-line-strong: rgba(242, 236, 221, 0.45);
   --highlight-reasoning: rgba(110, 168, 255, 0.55);
   --highlight-result: rgba(230, 183, 63, 0.75);
+  /* Row/column interaction highlight (Current Objective — see TODO.md) — deliberately a
+     neutral off-white tint, not blue/gold, so it never reads as a hint/mistake signal like
+     .reasoning/.result above. */
+  --crosshair-highlight: rgba(242, 236, 221, 0.13);
   --danger: #e0654f;
   --warn: #d99a3c;
 }
@@ -506,6 +510,21 @@ body {
 
 .nono-cell.result {
   box-shadow: inset 0 0 0 3px var(--highlight-result);
+}
+
+/* Row/column interaction highlight (Current Objective — see TODO.md): a full-cell overlay
+   (not an inset box-shadow like .reasoning/.result above) so it composites cleanly over
+   .filled/.empty's own background and the ✕ mark rather than competing with them, and can
+   layer underneath a genuine hint highlight without looking like one itself. ::before rather
+   than a class toggle on `background` directly, since .filled/.empty already own that
+   property. pointer-events:none so it can never intercept the drag's own elementFromPoint
+   hit-testing (app.js's cellAt). */
+.nono-cell--crosshair::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--crosshair-highlight);
+  pointer-events: none;
 }
 
 /* Live drag-fill cell counter (Current Objective — see TODO.md and app.js's
@@ -1168,38 +1187,9 @@ body {
   margin-top: 1rem;
 }
 
-/* ---- Save to library (item 9's save-to-library slice — scan wizard's "done" step) ---- */
-
-.scan-save-library {
-  margin-top: 1.5rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid rgba(230, 183, 63, 0.25);
-}
-
-.scan-save-library__hint {
-  color: var(--text-dim);
-  font-size: 0.85rem;
-  line-height: 1.5;
-  margin: 0 0 0.75rem;
-}
-
-.scan-save-library__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.85rem;
-  color: var(--text-dim);
-  margin-bottom: 0.75rem;
-}
-
-.scan-save-library__field input {
-  background: var(--panel-bg);
-  color: var(--text);
-  border: 1px solid rgba(230, 183, 63, 0.3);
-  border-radius: 0.4rem;
-  padding: 0.5rem 0.7rem;
-  font-size: 0.95rem;
-}
+/* Current Objective (see TODO.md): the old separate "Save to library" step (manual title +
+   button) is gone — every played scan now auto-publishes before onPuzzleReady fires (see
+   src/scanUI.js's scanBtnPlay handler), so its dedicated styling below was removed too. */
 
 /* ---- Puzzle library browse modal (library-consolidation round — see TODO.md; started
    as item 9's save-to-library slice) ---- */

@@ -124,13 +124,19 @@ export class Board {
   // Set several cells as one atomic move (see class comment). No-op cells (already at the
   // target state) are skipped; if nothing actually changed, no history entry is pushed.
   // Returns the list of cells that did change, as { row, col, prev, next }.
+  //
+  // `auto` (optional, per-cell) is opaque bookkeeping the caller can attach and read back
+  // later — app.js uses it to tag which cells in a batch were the direct move vs. an
+  // auto-X side effect, so autoXCells can be correctly rebuilt from board.history after an
+  // undo (see deriveAutoXCells) instead of drifting out of sync via incremental add/delete.
+  // Not used by model.js itself; just threaded through into `history` and the return value.
   setBatch(changes, { recordHistory = true, source = 'player' } = {}) {
     const applied = [];
-    for (const { row, col, state } of changes) {
+    for (const { row, col, state, auto } of changes) {
       const prev = this.grid[row][col];
       if (prev === state) continue;
       this.grid[row][col] = state;
-      applied.push({ row, col, prev, next: state });
+      applied.push({ row, col, prev, next: state, auto });
     }
     if (applied.length > 0 && recordHistory && this.hasHistory) {
       this.history.push({ cells: applied, source });

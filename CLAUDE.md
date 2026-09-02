@@ -66,53 +66,26 @@ passes, the iPad-verification follow-up pass, the clue-number spacing fix, item 
 feature, the library-consolidation round, the UI/branding polish round, the
 saved/incomplete-puzzle-progress feature, the live drag-fill cell counter, the
 toolbar alignment fix, a real geometry bug behind a row-OCR failure (a filled first
-row defeating the border-detection heuristic), a focused-input-vs-scroll fix, and a
-scan-correction numeric-keyboard fix are all done, deployed, and **confirmed working
-on the real device** (not just preview — see `TODO.md`'s Completed Tasks). Fully
-public library visibility is confirmed as the right model. General OCR digit-level
-noise (as opposed to the geometry bug above) has been explicitly accepted as "good
-enough for now." See `TODO.md`'s Completed Tasks for the full history.
+row defeating the border-detection heuristic), a focused-input-vs-scroll fix, a
+scan-correction numeric-keyboard fix, a repeatable Undo button, a row/column
+interaction highlight, and making every played scan auto-publish to the library (so
+it saves/undoes/tracks stats like any other puzzle, closing the save-progress gap for
+scanned puzzles) are all done, deployed, and **confirmed working on the real device**
+(not just preview — see `TODO.md`'s Completed Tasks; the Undo/highlight/save-gate trio
+is preview-verified but not yet real-device-confirmed, being UI/Firestore logic rather
+than an iOS-Safari-specific bug). Fully public library visibility is confirmed as the
+right model. General OCR digit-level noise (as opposed to the geometry bug above) has
+been explicitly accepted as "good enough for now." See `TODO.md`'s Completed Tasks for
+the full history.
 
-**Current objective has four items**:
-
-1. **New: an on-screen Undo button, repeatable (walks back through history one
-   move at a time, indefinitely), distinct from the existing mistake-driven
-   undo-to-point flow.** A "move" matches this app's existing history-batching
-   unit — a drag-paint or hint/auto-X batch undoes as one unit, same as
-   undo-to-point already treats these. Confirmed: undoing a hint-sourced move
-   reverts the cells normally but does NOT decrement the hints-used count
-   (permanent once used). **Corrected**: scan-origin puzzles should NOT have
-   Undo disabled entirely — the imported cells are a fixed baseline that can't
-   be undone past, but moves the player makes after importing should undo
-   normally, same shape as the resumed-progress feature (baseline +
-   `resumeElapsedMs`/`resumeHintsUsed`). Real prerequisite to verify: does
-   `Board.hasHistory = puzzle.source !== 'scan'` currently suppress ALL
-   post-import history tracking, not just the baseline? If so, that's a gap
-   to close first.
-2. **New: highlight the current cell's full row and column while interacting
-   with it**, so misaligned taps/drags on large puzzles are easy to catch
-   before committing. Trigger timing and styling left to Code's judgment.
-3. **Escalated, with a sharp new lead: "Save progress" may not be saving
-   anything at all — and the puzzle involved was scan-origin, which the
-   existing `saveProgressIfApplicable` gate was deliberately built to skip
-   entirely.** If that gate is still in place, it fully explains the missing
-   save, not the recent button relocation. This is high-priority: mid-solve
-   scanning is the app's core use case, so being unable to save progress on a
-   scanned puzzle specifically undercuts it. Fix: allow scan-origin puzzles
-   through the save gate too — no schema/format change needed, since the
-   existing `inProgressPuzzles` save already stores the actual grid cell
-   state (not move history), which the project owner independently confirmed
-   is the right approach ("I would rather have the filled cells saved than
-   the button history"). Still separately verify the click-handler wiring
-   too, in case both issues are present.
-4. **The main scroll bug's diagnosis just broke open — now HIGH PRIORITY, not
-   "not this round's focus" as previously stated.** A real capture with the
-   pan confirmed already at 0 (not stuck) still showed a persistent 79px gap
-   between `visualViewport.height` and `window.innerHeight` — the actual bug
-   is a stuck-shrunk viewport height, not a stuck pan. Every prior round's
-   `window.scrollTo`-based fix was never capable of addressing this. See
-   `TODO.md` for the full data and corrected direction — don't attempt
-   another pan/scroll-based fix.
+**Current objective**: the main scroll bug's diagnosis broke open this round (the real
+bug is a stuck-shrunk `visualViewport.height`, not a stuck pan — every prior round's
+`window.scrollTo`-based fix was never capable of touching that variable) and now has a
+shipped, researched fix (`healStuckViewportHeight` in `app.js`, a documented WebKit
+viewport-recompute workaround). **Waiting on the project owner for real-device
+verification** — this project's own preview tooling can't reproduce the real iOS bug,
+and five straight prior rounds on this bug class needed real hardware to confirm or
+refute. See `TODO.md` for the full capture data and the fix's details.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,

@@ -35,6 +35,12 @@
             <button id="btn-open-library" class="btn btn--primary" type="button">📚 Puzzle library</button>
             <button id="btn-open-stats" class="btn" type="button">📊 Stats</button>
             <button id="btn-save-progress" class="btn btn--icon" type="button" aria-label="Save progress" title="Save progress">💾</button>
+            <!-- Current Objective (see TODO.md): repeatable undo, distinct from the existing
+                 mistake-driven "back up to move #N" flow — steps back one move (a single click,
+                 or a whole drag/hint/auto-X batch) at a time, indefinitely. Disabled via app.js
+                 whenever board.history is empty (nothing left to undo, or a scan-baseline import
+                 that predates all real history). -->
+            <button id="btn-undo" class="btn btn--icon" type="button" aria-label="Undo last move" title="Undo last move" disabled>↩️</button>
           </div>
           <div class="mode-toggle" role="group" aria-label="Marking mode">
             <button id="mode-fill" class="mode-btn" type="button" aria-pressed="true">Fill</button>
@@ -279,22 +285,13 @@
       </div>
 
       <div class="scan-step hidden" data-step="done" id="scan-step-done">
-        <p>Puzzle ready — grid detected, clues read, and a solution found. This puzzle plays
-          normally, but (being a scan rather than a saved puzzle) it won't count toward your
-          stats and there's no move-by-move undo, only "Check my work".</p>
+        <p>Puzzle ready — grid detected, clues read, and a solution found. Playing it adds it
+          to the public shared puzzle library (like any other puzzle you'd pick from there) so
+          it plays normally: full undo, save progress, and stats. Its name stays hidden — same
+          as every library puzzle — until you solve it, and you can rename it from the library
+          afterward.</p>
         <button id="scan-btn-play" class="btn btn--primary" type="button">Play it</button>
-
-        <div class="scan-save-library">
-          <p class="scan-save-library__hint">Add this puzzle to the public shared library so
-            anyone can browse and play it? This always saves the blank grid and clues only —
-            never whatever's currently filled in — and is separate from playing it yourself
-            above; you can do both.</p>
-          <label class="scan-save-library__field">Title
-            <input id="scan-library-title-input" type="text" maxlength="80" placeholder="Give this puzzle a name" autocomplete="off" />
-          </label>
-          <button id="scan-btn-save-library" class="btn" type="button">Save to library</button>
-          <p id="scan-library-save-status" class="stats-status" aria-live="polite"></p>
-        </div>
+        <p id="scan-play-status" class="stats-status" aria-live="polite"></p>
       </div>
       </div>
 

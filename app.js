@@ -33,6 +33,13 @@ let activeMode = 'fill'; // 'fill' | 'x' — which mark a click/drag applies (it
 let highlightedCells = []; // { row, col, kind: 'reasoning' | 'result' }
 let puzzleStartTime = 0;
 let puzzleCompleteShown = false;
+// Undo button (Current Objective — see TODO.md): computeCompletionStats derives hints-used
+// by walking board.history, but undoLast() actually removes the undone move from history —
+// so undoing a hint-sourced move would silently decrement that count, contradicting the
+// confirmed rule that a used hint is permanent. This floor never decreases; hints-used is
+// always max(what history currently shows, this) — see runUndo/applyHintDeduction's call
+// sites and computeCompletionStats below.
+let hintsUsedFloor = 0;
 
 // Cells currently EMPTY *because* auto-X put them there when their line completed — as
 // opposed to a cell the player deliberately marked empty themselves. Line-locking needs
@@ -53,6 +60,7 @@ const els = {
   btnOpenLibrary: document.getElementById('btn-open-library'),
   btnOpenStats: document.getElementById('btn-open-stats'),
   btnSaveProgress: document.getElementById('btn-save-progress'),
+  btnUndo: document.getElementById('btn-undo'),
   boardRoot: document.getElementById('board-root'),
   statusLine: document.getElementById('status-line'),
   modeFill: document.getElementById('mode-fill'),
@@ -123,10 +131,8 @@ const els = {
   scanFillstateGrid: document.getElementById('scan-fillstate-grid'),
   scanBtnConfirmState: document.getElementById('scan-btn-confirm-state'),
   scanBtnPlay: document.getElementById('scan-btn-play'),
+  scanPlayStatus: document.getElementById('scan-play-status'),
   scanBtnCancel: document.getElementById('scan-btn-cancel'),
-  scanLibraryTitleInput: document.getElementById('scan-library-title-input'),
-  scanBtnSaveLibrary: document.getElementById('scan-btn-save-library'),
-  scanLibrarySaveStatus: document.getElementById('scan-library-save-status'),
   libraryModal: document.getElementById('library-modal'),
   libraryStatus: document.getElementById('library-status'),
   libraryList: document.getElementById('library-list'),
@@ -186,11 +192,18 @@ function setExplain(content) {
 
 // Shared init for any puzzle, however it was loaded — a library-modal selection (built-in
 // or community-saved, see the "puzzle library browse" section below) or a freshly scanned
-// one (passed straight through as initScanWizard's onPuzzleReady). A scan-origin puzzle
-// gets no move history (see
-// model.js's Board class comment and mistakes.js's snapshot-origin mistake-checking) — the
-// "no move history" and "never counts toward stats" behavior both fall out of that one
-// puzzle.source check (recordCompletion skips it separately — see src/stats.js).
+// one (passed straight through as initScanWizard's onPuzzleReady, which now auto-publishes
+// every played scan to the library first — see src/scanUI.js's scanBtnPlay handler — so a
+// scanned puzzle arrives here as a normal source:'authored' puzzle with a real library id in
+// the overwhelming common case). `board.hasHistory` is unconditionally true: even the rare
+// fallback case (scan played offline, before publishing could succeed — see scanUI.js) gets
+// real post-import history/Undo per the corrected Current Objective guidance in TODO.md; only
+// the imported baseline itself (seeded straight into the grid below, never into history) is
+// permanently un-undoable, same shape as the resumed-progress case described next. The
+// remaining `puzzle.source === 'scan'` checks elsewhere (saveProgressIfApplicable,
+// recordCompletion, recordPuzzleSolved, mistakes.js's snapshot-vs-history branch) still matter
+// for that same rare fallback case — no stable id to save/track stats against — but no longer
+// affect Undo.
 //
 // `puzzle.initialMarks`, when present (a scanned puzzle whose fill/X state was detected and
 // confirmed — see src/scanUI.js's fill-state review step and TODO.md's Current Objective),
@@ -210,9 +223,10 @@ function setExplain(content) {
 function startPuzzle(p) {
   puzzle = p;
   board = puzzle.initialMarks ? Board.fromGrid(puzzle.initialMarks) : new Board(puzzle.rows, puzzle.cols);
-  board.hasHistory = puzzle.source !== 'scan';
+  board.hasHistory = true;
   highlightedCells = [];
   autoXCells = new Set();
+  hintsUsedFloor = 0;
   puzzleStartTime = Date.now() - (puzzle.resumeElapsedMs || 0);
   puzzleCompleteShown = false;
   setExplain(null);
@@ -517,6 +531,7 @@ function syncAllCellVisuals() {
     applyAnchoredClasses(colClueEls[c], col, puzzle.colClues[c], consistent);
   }
   applyHighlightClasses();
+  els.btnUndo.disabled = board.history.length === 0;
 
   if (board.isComplete()) {
     if (boardMatchesSolution()) {
@@ -587,6 +602,13 @@ function computeCompletionStats() {
       if (cell.next !== correct) mistakes++;
     }
   }
+  // Undo button (Current Objective — see TODO.md): a used hint is permanent even if the move
+  // it produced is later undone (confirmed with the project owner) — but undoLast() actually
+  // removes that move from board.history, so the plain history-derived count above would
+  // silently shrink. hintsUsedFloor (bumped alongside every source:'hint' move, never
+  // decremented — see runUndo/applyHintDeduction/menuRemoveBad's call sites) is the floor this
+  // count can never drop below.
+  hintsUsed = Math.max(hintsUsed, hintsUsedFloor);
   // Resumed-puzzle baseline (see startPuzzle's own comment) — hints given BEFORE this
   // session aren't in board.history at all, so they'd otherwise silently vanish from both
   // the completion modal and the next progress save.
@@ -659,8 +681,12 @@ async function saveProgressIfApplicable() {
 // under Help that the same "not really a help action" reasoning already applied to those two
 // applies here too, and the UI-polish round's toolbar trimming left room for it.
 els.btnSaveProgress.addEventListener('click', async () => {
+  // Current Objective (see TODO.md): a played scan now auto-publishes to the library before
+  // it ever reaches startPuzzle (see src/scanUI.js's scanBtnPlay handler), so source:'scan'
+  // here means that publish attempt specifically failed (offline, not deployed yet) — the
+  // rare fallback case, not the normal state for a scanned puzzle any more.
   if (puzzle.source === 'scan') {
-    setExplain("A scanned puzzle can't be saved — it has no stable identity to save progress against.");
+    setExplain("Couldn't save — this puzzle wasn't added to the library (offline, or not deployed yet), so it has no stable identity to save progress against.");
     return;
   }
   if (!puzzle.solution) {
@@ -792,22 +818,42 @@ function computeAutoXExtras(changes) {
   return extra;
 }
 
+// Rebuilds autoXCells from scratch by replaying board.history — which cell in the row's
+// batch was the auto-X "extra" vs. the direct move is tagged per-cell via setBatch's `auto`
+// option (see model.js) and threaded straight through into the history entry, so this is a
+// pure function of history rather than something that has to be kept incrementally in sync.
+// Deliberately re-derived (not incrementally patched) after EVERY mutation, including undo:
+// undoLast()/undoToMove() truncate board.history directly without knowing anything about
+// autoXCells, so any purely-incremental add/delete bookkeeping would silently go stale the
+// first time a move got undone (a real gap found while building the repeatable Undo button —
+// see TODO.md's Current Objective) — replaying history from scratch is correct by
+// construction regardless of how history got to its current length.
+function deriveAutoXCells(history) {
+  const cells = new Set();
+  for (const move of history) {
+    for (const cell of move.cells) {
+      const key = `${cell.row},${cell.col}`;
+      if (cell.auto) cells.add(key);
+      else cells.delete(key);
+    }
+  }
+  return cells;
+}
+
 // Applies `changes` plus whatever auto-X they trigger (see computeAutoXExtras) as one
 // batched move — batching is what makes undo-to-point remove a move's auto-X marks along
-// with it (see model.js's Board.setBatch doc). Also keeps autoXCells in sync: a cell added
-// by auto-X is recorded as such; a cell this batch sets to FILLED or back to UNKNOWN can no
-// longer be "auto-X empty" (whether or not it was previously tracked), so it's dropped.
+// with it (see model.js's Board.setBatch doc). `extra`'s cells are tagged auto:true so
+// deriveAutoXCells (called right after) can tell them apart from the direct `changes` cells.
 // Used by both paintCell and applyHintDeduction — fixes the old bug where a hint that
 // completed a line didn't auto-X, because the hint path used to skip this check entirely.
 function applyWithAutoX(changes, opts) {
   const extra = computeAutoXExtras(changes);
-  const autoXKeys = new Set(extra.map((e) => `${e.row},${e.col}`));
-  const applied = board.setBatch([...changes, ...extra], opts);
-  for (const cell of applied) {
-    const key = `${cell.row},${cell.col}`;
-    if (autoXKeys.has(key)) autoXCells.add(key);
-    else if (cell.next !== EMPTY) autoXCells.delete(key);
-  }
+  const tagged = [
+    ...changes.map((c) => ({ ...c, auto: false })),
+    ...extra.map((c) => ({ ...c, auto: true })),
+  ];
+  const applied = board.setBatch(tagged, opts);
+  autoXCells = deriveAutoXCells(board.history);
   return applied;
 }
 
@@ -853,7 +899,7 @@ function computeUnfillChanges(r, c) {
 
 function applyUnfill(r, c, opts) {
   const applied = board.setBatch(computeUnfillChanges(r, c), opts);
-  for (const cell of applied) autoXCells.delete(`${cell.row},${cell.col}`);
+  autoXCells = deriveAutoXCells(board.history);
   return applied;
 }
 
@@ -908,6 +954,9 @@ function applyMoveWithSound(changes, opts, { dragStep = false } = {}) {
   const contradictionBefore = allContradictionSnapshot();
   const applied = applyWithAutoX(changes, opts);
   if (applied.length === 0) return applied;
+  // Undo button (Current Objective — see TODO.md): bump the permanent hint-count floor here,
+  // once per hint-sourced move actually applied — see computeCompletionStats' own comment.
+  if (opts?.source === 'hint') hintsUsedFloor++;
 
   if (anyNewlyTrue(lockedBefore, allLockedSnapshot())) {
     playSound('lock');
@@ -934,6 +983,28 @@ function applyUnfillWithSound(r, c, opts, { dragStep = false } = {}) {
 
   return applied;
 }
+
+// ---- repeatable Undo button (Current Objective — see TODO.md) ----
+//
+// Distinct from the mistake-driven "back up to move #N" flow above (runOnDemandCheck): this
+// steps back exactly one move at a time, on demand, with no need to run a mistake check
+// first. "One move" already matches this app's history-batching unit (Board.setBatch) — a
+// drag-paint or a hint/auto-X batch undoes as one unit — so Board.undoLast() (model.js),
+// which just calls undoToMove(history.length - 1), is exactly the right primitive; no new
+// undo logic needed in model.js. Repeatable simply by not disabling itself after one use —
+// syncAllCellVisuals disables the button only once board.history is genuinely empty (either
+// nothing done yet, or a scan-baseline import that predates all real history — the baseline
+// itself is seeded straight into the grid, never into history, so undo naturally can't cross
+// it, matching the resumed-progress feature's same baseline-plus-new-moves shape).
+function runUndo() {
+  if (!board || board.history.length === 0) return;
+  board.undoLast();
+  autoXCells = deriveAutoXCells(board.history);
+  clearHighlights();
+  setExplain(null);
+  syncAllCellVisuals();
+}
+els.btnUndo.addEventListener('click', runUndo);
 
 // ---- live drag-fill cell counter (Current Objective — see TODO.md) ----
 //
@@ -1020,6 +1091,33 @@ function attachPointerHandlers(grid) {
     return el && el.classList && el.classList.contains('nono-cell') ? el : null;
   }
 
+  // ---- row/column crosshair highlight (Current Objective — see TODO.md) ----
+  //
+  // Highlights the full row and column of whichever cell is currently being pressed or
+  // dragged across, so a misaligned tap/drag is easy to catch before committing — especially
+  // useful on large puzzles. Deliberately separate from the reasoning/result highlight system
+  // above (applyHighlightClasses/highlightedCells) — that one is deduction-driven and already
+  // cleared on every pointerdown; this one tracks raw pointer position instead, live during
+  // the interaction. Local to attachPointerHandlers (like `dragging`) so it naturally resets
+  // on every renderBoard rather than needing separate cleanup when cellEls is rebuilt.
+  let crosshair = null; // { row, col } | null
+
+  function clearCrosshairHighlight() {
+    if (!crosshair) return;
+    const { row, col } = crosshair;
+    for (let c = 0; c < puzzle.cols; c++) cellEls.get(`${row},${c}`)?.classList.remove('nono-cell--crosshair');
+    for (let r = 0; r < puzzle.rows; r++) cellEls.get(`${r},${col}`)?.classList.remove('nono-cell--crosshair');
+    crosshair = null;
+  }
+
+  function setCrosshairHighlight(row, col) {
+    if (crosshair && crosshair.row === row && crosshair.col === col) return;
+    clearCrosshairHighlight();
+    crosshair = { row, col };
+    for (let c = 0; c < puzzle.cols; c++) cellEls.get(`${row},${c}`)?.classList.add('nono-cell--crosshair');
+    for (let r = 0; r < puzzle.rows; r++) cellEls.get(`${r},${col}`)?.classList.add('nono-cell--crosshair');
+  }
+
   grid.addEventListener('pointerdown', (e) => {
     const el = e.target.closest('.nono-cell');
     if (!el) return;
@@ -1030,6 +1128,7 @@ function attachPointerHandlers(grid) {
 
     const r = Number(el.dataset.row);
     const c = Number(el.dataset.col);
+    setCrosshairHighlight(r, c);
     const newState = targetStateFor(board.get(r, c));
     dragging = { paintState: newState, touched: new Set([`${r},${c}`]), count: 0 };
     startDragSweep(); // no-op unless the 'stretch' drag-sweep prototype mode is active
@@ -1053,6 +1152,7 @@ function attachPointerHandlers(grid) {
     }
     const el = cellAt(e.clientX, e.clientY);
     if (!el) return;
+    setCrosshairHighlight(Number(el.dataset.row), Number(el.dataset.col));
     const key = `${el.dataset.row},${el.dataset.col}`;
     if (dragging.touched.has(key)) return;
     dragging.touched.add(key);
@@ -1068,6 +1168,7 @@ function attachPointerHandlers(grid) {
     dragging = null;
     stopDragSweep();
     hideDragCountBadge(); // transient in-stroke feedback only — see this section's header comment
+    clearCrosshairHighlight();
   }
   grid.addEventListener('pointerup', endDrag);
   grid.addEventListener('pointercancel', endDrag);
@@ -1161,6 +1262,7 @@ function runOnDemandCheck({ fromPopup = false } = {}) {
     undoBtn.textContent = `Back up to before move #${result.moveIndex + 1}`;
     undoBtn.addEventListener('click', () => {
       board.undoToMove(result.moveIndex);
+      autoXCells = deriveAutoXCells(board.history);
       clearHighlights();
       setExplain(null);
       syncAllCellVisuals();
@@ -1189,7 +1291,11 @@ els.menuCheck.addEventListener('click', () => {
 els.menuRemoveBad.addEventListener('click', () => {
   closeHelpMenu();
   if (!puzzle.solution) return;
-  removeBadMarks(board, puzzle.solution);
+  const applied = removeBadMarks(board, puzzle.solution);
+  // Undo button (Current Objective — see TODO.md): removeBadMarks batches every wrong cell
+  // into one source:'hint' move (mistakes.js) — same "one floor bump per hint move" rule
+  // applyMoveWithSound uses, kept in sync here since this path doesn't go through it.
+  if (applied.length > 0) hintsUsedFloor++;
   clearHighlights();
   setExplain(null);
   syncAllCellVisuals();
@@ -1787,13 +1893,61 @@ function correctResidualViewportPan() {
   active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
+// ---- Current Objective, round 4 — the OTHER stuck variable (see TODO.md) ----
+//
+// Two real on-device `?debug=scroll` captures, taken at different points in the same bug's
+// timeline, overturned the diagnosis every round above was built on: `correctResidualViewportPan`
+// targets a stuck PAN (`visualViewport.offsetTop`/`pageTop`/`window.scrollTo`) — and a real
+// capture confirmed that mechanism genuinely works (offsetTop back at 0, the poll having fired
+// 5000+ times) — but a SEPARATE, later capture in the same stuck session still showed a 79px
+// gap specifically between `visualViewport.height` (969) and `window.innerHeight` (1048), with
+// the pan already at 0. An earlier-in-time capture shows both heights shrinking TOGETHER at
+// onset, alongside the genuinely-stuck pan — but only `window.innerHeight` ever rejoins its true
+// value; `visualViewport.height` stays permanently stuck at the shrunk figure even after
+// everything else (pan, `window.innerHeight`) has recovered. `window.scrollTo`/CSS can only ever
+// move scroll *position* — it was never capable of touching this variable, which is exactly why
+// five straight rounds of pan/trigger refinement made no visible difference on real hardware.
+//
+// Fix (real research, not guessed — see TODO.md for sources): once `window.innerHeight` has
+// recovered to its true value but `visualViewport.height` hasn't followed, WebKit needs to be
+// forced to recompute it. Toggling `display:none` -> a synchronous reflow -> `display:''` on the
+// whole page's root element is a documented workaround for exactly this WebKit bug class (a
+// PWA/Safari viewport-recompute nudge, not a nonogram-specific trick) — scrollTop is saved and
+// restored across the toggle since #page-root owns its own internal scroll region (see this
+// file's "background-scroll lock" comment), and fitBoardToViewport is re-run afterward since
+// board sizing itself reads visualViewport.height.
+//
+// Trigger condition deliberately mirrors correctResidualViewportPan's own "nothing focused"
+// branch (never toggle display on the container of a field the player is actively using — that
+// would force-blur it) rather than tracking a separate "max height ever seen" baseline:
+// window.innerHeight is directly confirmed, by the real captures above, to be the reliable
+// "what the true full height actually is" reference once the bug has settled.
+const STUCK_HEIGHT_THRESHOLD_PX = 40; // comfortably below the confirmed real 79px gap, above ordinary desktop scrollbar/zoom noise
+function healStuckViewportHeight() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const active = document.activeElement;
+  if (active && /^(input|textarea)$/i.test(active.tagName || '')) return; // don't blur a field the player is using
+  const gap = window.innerHeight - vv.height;
+  if (gap < STUCK_HEIGHT_THRESHOLD_PX) return;
+  const savedScrollTop = els.pageRoot.scrollTop;
+  els.pageRoot.style.display = 'none';
+  void els.pageRoot.offsetHeight; // force a synchronous reflow before restoring
+  els.pageRoot.style.display = '';
+  els.pageRoot.scrollTop = savedScrollTop;
+  fitBoardToViewport();
+}
+
 // focusout is the authoritative "an input just lost focus" signal. The real timeline above
 // shows the keyboard-close resize/pan and the resulting stuck offsetTop both land BEFORE
 // focusout fires, and stay stuck at least a second after — so a short delay here (letting iOS
 // finish its close animation) is enough; there's no reason to wait longer.
 document.addEventListener('focusout', (e) => {
   if (!/^(input|textarea)$/i.test(e.target?.tagName || '')) return;
-  setTimeout(correctResidualViewportPan, 100);
+  setTimeout(() => {
+    correctResidualViewportPan();
+    healStuckViewportHeight();
+  }, 100);
 });
 // Current Objective follow-up #1: also re-check shortly after a field GAINS focus, not only
 // after one loses it — the second capture's repro (switching directly between two fields while
@@ -1801,13 +1955,22 @@ document.addEventListener('focusout', (e) => {
 // moment at all, so a focusout-only listener can't ever catch it.
 document.addEventListener('focusin', (e) => {
   if (!/^(input|textarea)$/i.test(e.target?.tagName || '')) return;
-  setTimeout(correctResidualViewportPan, 100);
+  setTimeout(() => {
+    correctResidualViewportPan();
+    healStuckViewportHeight();
+  }, 100);
 });
 // Belt-and-suspenders: also re-check on every visualViewport resize (which includes the one
 // accompanying keyboard close, height growing back toward window.innerHeight) in case focusout
 // doesn't fire for some reason — e.g. focus cleared programmatically rather than by the player
 // dismissing the keyboard by hand.
-window.visualViewport?.addEventListener('resize', debounce(correctResidualViewportPan, 150));
+window.visualViewport?.addEventListener(
+  'resize',
+  debounce(() => {
+    correctResidualViewportPan();
+    healStuckViewportHeight();
+  }, 150)
+);
 
 // Round 3 (see TODO.md): a REAL on-device `?debug=scroll` capture showed the pan getting stuck
 // at offsetTop=79 and then staying stuck through 54+ seconds, a full scan-wizard close, and a
@@ -1836,6 +1999,7 @@ setInterval(() => {
   scrollPollCount++;
   scrollLastPollAt = new Date();
   correctResidualViewportPan();
+  healStuckViewportHeight(); // round 4 (see TODO.md) — same idle-poll backstop, other variable
 }, 400);
 
 // ---- Current Objective #2: a focused text input should never fight the player's own scroll
@@ -2002,6 +2166,16 @@ function initScrollDiagnostics() {
     // itself works.
     lines.push(`Periodic poll (every 400ms): fired ${scrollPollCount} time(s) since page load; last fired ${scrollLastPollAt ? scrollLastPollAt.toLocaleTimeString() : '(never)'}`);
     lines.push(`EXCESS (scrollable beyond visible viewport): ${excess}px`);
+    // Round 4 (see TODO.md): the OTHER stuck variable — a real capture showed this gap
+    // persisting at 79px with the pan already confirmed back at 0, which is what pointed at
+    // visualViewport.height (not the pan) as the actual bug. Surfaced as its own explicit
+    // number here (the raw values above already show it, but not the derived gap itself) so a
+    // real-device round can confirm at a glance whether healStuckViewportHeight is keeping it
+    // near 0 or whether it's still climbing.
+    lines.push(
+      `window.innerHeight − visualViewport.height (round 4's stuck-height gap): ` +
+      `${window.innerHeight - (window.visualViewport?.height ?? window.innerHeight)}px`
+    );
     lines.push('');
     lines.push('Per-element (only currently-rendered ones shown; sorted worst offender first):');
 
@@ -2170,6 +2344,14 @@ function initScrollDiagnostics() {
   forceBtn.type = 'button';
   forceBtn.className = 'btn';
   forceBtn.textContent = 'Force correct now';
+  // Round 4 (see TODO.md): same isolation idea as forceBtn above, for the OTHER stuck
+  // variable — calls healStuckViewportHeight on demand so the project owner can reproduce the
+  // stuck-shrunk height, tap it, and read directly whether visualViewport.height actually
+  // recovers, independent of whether the pan fix (forceBtn) looks like it worked.
+  const forceHealBtn = document.createElement('button');
+  forceHealBtn.type = 'button';
+  forceHealBtn.className = 'btn';
+  forceHealBtn.textContent = 'Force heal viewport height now';
   const copyBtn = document.createElement('button');
   copyBtn.type = 'button';
   copyBtn.className = 'btn';
@@ -2182,7 +2364,7 @@ function initScrollDiagnostics() {
   closeBtn.type = 'button';
   closeBtn.className = 'btn btn--primary';
   closeBtn.textContent = 'Close';
-  actions.append(forceBtn, copyBtn, copyHistoryBtn, closeBtn);
+  actions.append(forceBtn, forceHealBtn, copyBtn, copyHistoryBtn, closeBtn);
   panel.append(snapshotHeading, pre, historyHeading, historyPre, actions);
   document.body.appendChild(panel);
   pinToVisualViewport(panel);
@@ -2212,6 +2394,25 @@ function initScrollDiagnostics() {
       forceBtn.textContent = `Forced: ${before} → ${afterImmediate} (150ms: ${afterDelay})`;
       pre.textContent = buildReport();
       setTimeout(() => { forceBtn.textContent = 'Force correct now'; }, 2500);
+    }, 150);
+  });
+  // Same before/immediately-after/150ms-later logging pattern as forceBtn, reading
+  // visualViewport.height instead of offsetTop — this is the number the display-toggle
+  // reflow trick (healStuckViewportHeight) targets, not the pan.
+  forceHealBtn.addEventListener('click', () => {
+    const vv = window.visualViewport;
+    const before = vv?.height ?? '(unavailable)';
+    healStuckViewportHeight();
+    const afterImmediate = vv?.height ?? '(unavailable)';
+    logHistory(`MANUAL HEAL — visualViewport.height before=${before} immediately-after=${afterImmediate}`);
+    forceHealBtn.textContent = `Healed: ${before} → ${afterImmediate}`;
+    pre.textContent = buildReport();
+    setTimeout(() => {
+      const afterDelay = vv?.height ?? '(unavailable)';
+      logHistory(`MANUAL HEAL follow-up (150ms later) — visualViewport.height=${afterDelay}`);
+      forceHealBtn.textContent = `Healed: ${before} → ${afterImmediate} (150ms: ${afterDelay})`;
+      pre.textContent = buildReport();
+      setTimeout(() => { forceHealBtn.textContent = 'Force heal viewport height now'; }, 2500);
     }, 150);
   });
   copyBtn.addEventListener('click', () => copyText(pre.textContent, copyBtn, 'Copy snapshot'));

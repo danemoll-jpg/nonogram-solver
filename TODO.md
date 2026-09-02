@@ -280,201 +280,125 @@ Completed Tasks
   needed. The correction step's on-screen instructions were updated to
   mention "." as an option.
 
-Current Objective (Focus Area)
-
-* **New feature: an on-screen Undo button, distinct from the existing mistake-
-  driven "undo-to-point" flow.** Should undo the single most recent move —
-  where "move" already matches this app's existing history-batching unit
-  (`Board.setBatch`): if the last action was a single click, undo just that
-  cell; if the last action was a drag-paint or a hint/auto-X batch, undo the
-  whole batch as one unit, consistent with how undo-to-point already treats
-  these. **Repeatable, not one-shot**: pressing it again should step back one
-  more move, and again, walking backward through history indefinitely (an undo
-  stack, not a single-level undo) — the stated use case is deliberately testing
-  a move, seeing it's wrong, and backing out to exactly where things were
-  before, without needing to ask for a hint or use "Check my work" to get
-  there.
-  - **Confirmed with the project owner: undoing a hint-sourced move reverts the
-    cells normally (same as any other undo), but the hints-used count for that
-    attempt does NOT decrease — it's permanent once a hint has been used, even
-    if the resulting move is later undone.** No longer an open question.
-  - **Corrected by the project owner — the earlier assumption here was wrong,
-    and needs real investigation, not just a UI toggle.** For a scanned
-    (import-origin) puzzle, the detected/imported cells form a fixed BASELINE
-    that can never be undone past — but any moves the PLAYER makes on top of
-    that baseline, after the import, are real moves and should be undoable
-    normally, exactly like any other puzzle. It is NOT correct to disable
-    Undo entirely for scan-origin puzzles; only undoing back past the
-    original imported baseline should be blocked. **This is the same
-    baseline-plus-new-moves shape the resumed-saved-progress feature already
-    uses** (`initialMarks` seeds a starting state; `resumeElapsedMs`/
-    `resumeHintsUsed` track what happened before vs. after resuming) — worth
-    modeling scan-origin the same way rather than as a special "no history"
-    case.
-  - **Real prerequisite to check before Undo can work correctly here**: the
-    existing `Board.hasHistory = puzzle.source !== 'scan'` flag (set up for
-    the older mistake-checking undo-to-point flow) may currently suppress
-    history tracking for scan-origin puzzles ENTIRELY, not just for the
-    imported baseline — if so, moves made by the player *after* importing a
-    scan aren't actually being recorded in `board.history` at all right now,
-    which would need fixing before the new Undo button can work for these
-    puzzles at all. Verify directly rather than assuming either way. If
-    genuinely nothing is being tracked post-import today, that's a real gap
-    to close, not just a matter of un-hiding a button.
-  - Where this button lives on-screen is Code's call — no specific placement
-    requested, just that it needs to be an always-visible on-screen control,
-    not buried in a menu (consistent with this project's general pattern of
-    moving frequently-used actions out of the Help dropdown).
-
-* **New feature: highlight the current cell's full row and column while
-  interacting with it**, so the player can visually confirm they're on the
-  intended row/column before committing a mark — especially useful on large
-  puzzles where a misaligned tap/drag is easy to make and hard to notice
-  immediately. Should highlight the entire row and column (not just the single
-  cell) for whichever cell is currently being pressed/dragged across. Exact
-  trigger timing (only while actively pressing/dragging vs. also including a
-  brief highlight on tap) and visual styling are left to Code's judgment — no
-  specific behavior requested beyond "highlight both the row and column of the
-  cell I'm currently on."
-
-* **Escalated: "Save progress" may not actually be saving anything at all —
-  the project owner checked and could not find a saved puzzle afterward. A
-  much sharper lead has now emerged: the puzzle the project owner was trying
-  to save was a SCAN-ORIGIN (imported) puzzle — and the existing
-  `saveProgressIfApplicable` gate was deliberately built to skip scan-origin
-  puzzles entirely, per this project's own earlier documentation ("skips
-  scan-origin/solutionless/complete/untouched boards").** If that gate is
-  still in place as originally built, this fully explains the missing save —
-  not a wiring bug from the recent button relocation, but the save silently
-  no-op'ing by design for exactly this puzzle type. **This is a real, high-
-  priority gap, not an edge case**: mid-solve scanning is the core use case
-  this whole app was built around (per the project owner's original
-  motivation for item 10), so being unable to save progress on a scanned
-  puzzle specifically undercuts the app's central purpose.
-  - **Fix, now that scan-origin history tracking is being revisited anyway
-    (see the Undo-button item above)**: allow saving progress for scan-origin
-    puzzles too, using the same grid-cell-state save mechanism already built
-    — **confirmed correct and needing no change**: the existing
-    `inProgressPuzzles` schema already saves the actual current grid state
-    (filled/X cells as a compact string per row) plus elapsed time and hints
-    used, NOT a move-by-move history. This already matches the project
-    owner's own stated preference — "I would rather have the filled cells
-    saved than the button history," consistent with how loading a save file
-    normally works in most apps (you get the state, you don't get to undo
-    past the point you loaded it from). No schema or save-format change
-    needed; the puzzle-type gate is the actual thing to fix.
-  - If there turns out to be a genuine technical reason scan-origin puzzles
-    specifically can't be saved this way (e.g. no stable Firestore
-    `puzzleId` to key the save against, since scanned puzzles aren't library
-    documents), that constraint needs to be worked around — a scanned
-    puzzle's own detected clues/grid could plausibly serve as a stable-enough
-    key, or a locally-generated session ID could be used — rather than simply
-    leaving this use case unsupported, given how central it is.
-  - **Still verify the click-handler/wiring possibility too, not either/or**:
-    even once the scan-origin gate is addressed, separately confirm the
-    button's click handler itself still works correctly after its recent
-    relocation to the icon-only toolbar control — both issues could
-    plausibly be present at once.
-  1. **Verify end-to-end, starting from the click itself**: does clicking the
-     💾 button actually fire its handler (check via console logging or the
-     debugger, not just assumption)? Does `saveInProgressPuzzle` get called
-     with the correct arguments? Does the Firestore write actually succeed
-     (check the browser console/network tab for errors — a
-     `permission-denied` or any other Firestore error would explain a save
-     that silently does nothing)?
-  2. **Then verify the read/display side**: once a write is confirmed actually
-     succeeding, does the library's Incomplete filter correctly find and
-     display it? (This part was already suspected as a possible staleness
-     issue before this escalation — still worth checking, but only after the
-     write side itself is confirmed working, since a write that never
-     happened would also explain nothing showing up regardless of the read
-     side.)
-  3. **Once the underlying save is confirmed genuinely working**, then add the
-     confirmation UX originally requested: a small toast/message immediately
-     on save, and confidence that the library reliably reflects a just-saved
-     state without any staleness. Don't add confirmation UI before the
-     underlying save is actually confirmed functional — that would risk
-     confirming a save that isn't real.
-
-* **Main scroll bug — BREAKTHROUGH: the project owner has now run a real
-  `?debug=scroll` capture that overturns the diagnosis every prior round was
-  built on. This is now active, high-priority work — not "still not this
-  round's focus" as previously stated.** Full capture:
+* **Repeatable Undo button — done, verified end-to-end in browser preview (real
+  clicks/drags, real Firestore save/resume round trip).** New toolbar icon button
+  (`btn-undo`, `.library-entry-group`, next to Save progress) calls `Board.undoLast()`
+  (`src/model.js`) — already exactly the right primitive (pops the most recent history
+  entry, a full batched move), no new model.js undo logic needed. Repeatable simply by
+  not disabling itself after one use; disabled only once `board.history` is genuinely
+  empty. Confirmed a used hint stays counted even if its move is later undone (project
+  owner's "permanent once used" rule): `hintsUsedFloor` (`app.js`) is bumped once per
+  hint-sourced move actually applied, never decremented, and `computeCompletionStats`
+  takes `Math.max(historyDerivedHints, hintsUsedFloor)` — verified live (undid a hint,
+  then solved the rest via more hints; completion modal correctly showed all hints
+  including the undone one). Real prerequisite gap confirmed and fixed:
+  `board.hasHistory = puzzle.source !== 'scan'` was suppressing ALL post-import history
+  for scan-origin puzzles, not just the baseline — see the scan-puzzle item below, which
+  fixes this the same round by removing the scan-origin special case almost entirely.
+  Also fixed a related latent bug found while building this: `autoXCells` (which empty
+  cells are auto-X vs. deliberate) was updated incrementally and could go stale after an
+  undo (already affected the older "back up to move #N" mistake-flow undo too, just
+  rarely exercised). Fixed by tagging batch cells with `auto: true/false` through
+  `Board.setBatch` (threaded into `history`) and replacing all incremental
+  add/delete bookkeeping with a pure `deriveAutoXCells(history)` replay, called after
+  every mutation including undo — correct by construction regardless of how history got
+  to its current length. All 812 tests still pass.
+* **Row/column interaction highlight — done, verified in browser preview (dispatched
+  real pointerdown/pointermove/pointerup events, confirmed the correct 9 cells
+  highlighted for a drag through row 1 col 2 on a 5-wide board, cleared on release).**
+  Full row + column of whichever cell is currently pressed/dragged gets a translucent
+  `::before` overlay (`.nono-cell--crosshair`, new `--crosshair-highlight` CSS token) —
+  deliberately not the existing reasoning/result inset-box-shadow system (that one's
+  deduction-driven), and a neutral off-white tint so it never reads as a hint/mistake
+  signal. Local `crosshair` state inside `attachPointerHandlers` (same lifecycle as
+  `dragging`), so it resets naturally on every `renderBoard`.
+* **Scanned puzzles now auto-publish to the public library — done, verified end-to-end
+  in browser preview against real Firestore (Save progress write + library's
+  "Incomplete" filter round trip confirmed working on a played library puzzle, sharing
+  the exact code path a published scan now uses).** Root cause of "Save progress does
+  nothing for a scanned puzzle" confirmed exactly as suspected:
+  `saveProgressIfApplicable` (and `board.hasHistory`) deliberately gated out
+  `source: 'scan'` puzzles, which is what every scanned puzzle was, always. Fix,
+  confirmed with the project owner as the right direction rather than a narrower
+  session-only patch: `src/scanUI.js`'s "Play it" button now calls the existing
+  `savePuzzleToLibrary` (unchanged, no schema change) *before* handing the puzzle to
+  `app.js`, with a generic placeholder title (every library puzzle's real name stays
+  hidden until solved anyway), then overwrites the puzzle's `id`/`source` to match
+  exactly how `loadLibraryPuzzle` already tags a normal library puzzle (`lib-<id>`,
+  `source: 'authored'`) — so a scanned puzzle becomes a completely normal
+  authored/library puzzle the moment it's played: real history, the new Undo button,
+  Save progress, stats, and it shows up in browse/Incomplete, with no scan-specific
+  gating left anywhere in `app.js`. The old separate, optional "Save to library"
+  step/UI (manual title entry) is gone — publishing is no longer decoupled from
+  playing. `board.hasHistory` is now unconditionally `true` (was
+  `puzzle.source !== 'scan'`) — the one remaining true scan case (publish failed,
+  e.g. offline) still falls back to the original ephemeral `scan-<timestamp>` id
+  behavior and gets working post-import Undo too, just no save-progress/stats (no
+  stable id) — same as every prior round's behavior for that one edge case, now
+  correctly scoped to only that case instead of every scan.
+* **Scroll bug, round 4 diagnosis (kept for reference — the fix itself is the entry
+  right below).** Two real `?debug=scroll` captures overturned every prior round's
+  diagnosis. Later-in-time capture (pan already confirmed self-corrected, 5199 poll
+  firings):
   ```
   visualViewport.height: 969        window.innerHeight: 1048
   visualViewport.offsetTop: 0       visualViewport.pageTop: 0
-  window.scrollY: 0                 document.activeElement: (none)
-  Periodic poll: fired 5199 times since page load, last fired just now
   EXCESS (scrollable beyond visible viewport): 79px
   ```
-  **What this proves, definitively**: `offsetTop`/`pageTop`/`scrollY` are all
-  correctly at 0 — the pan is NOT stuck, and the periodic poll IS confirmed
-  actually running (5,199 firings). Every prior round's fix (`window.scrollTo`,
-  the event listeners, the periodic poll) was specifically designed to correct
-  a nonzero `offsetTop`, and by every measure available, **that correction is
-  working exactly as designed.** And yet `EXCESS` is still 79px — because
-  `visualViewport.height` (969) and `window.innerHeight` (1048) are two
-  genuinely different numbers, an exact 79px gap between the viewport's own
-  reported HEIGHT and the window's. **Every previous real-device capture
-  happened to show these two values as numerically identical**, so this
-  distinction was invisible until now — nobody could tell "pan stuck" apart
-  from "height stuck shrunk" because both looked the same in every earlier
-  reading.
-  - **Corrected diagnosis**: the real, persistent bug is that
-    `visualViewport.height` stays reduced — as if a keyboard-sized region is
-    still being reserved — even after the keyboard is fully gone, nothing is
-    focused, and the pan has already self-corrected to 0. `window.scrollTo`
-    (the corrective action every round so far has relied on) can only affect
-    scroll *position*, not viewport *height* — it was never capable of fixing
-    this, which is exactly why five straight rounds of trigger/polling
-    refinement made no visible difference despite each one being verifiably
-    executed correctly.
-  - **This is a known, if under-documented, class of WebKit/Safari bug**:
-    `visualViewport.height` failing to recover to the full available height
-    after a keyboard dismiss, independent of pan/scroll state. Worth
-    researching documented workarounds for this specific symptom (distinct
-    from the pan-reset workarounds already tried) — common approaches for
-    this class of issue include briefly focusing and immediately blurring a
-    dummy off-screen input to force Safari to recompute its viewport
-    metrics, or triggering a layout recalculation via a CSS/DOM nudge:
-    Code should research and choose the right approach rather than this
-    being prescribed here.
-  - **Also worth confirming before building a fix**: is this a permanent
-    stuck state for the rest of the session once it happens (matching "it's
-    doing the exact same thing" persisting across cancel and navigation from
-    earlier rounds), or does `visualViewport.height` ever self-recover on its
-    own eventually? A few more `?debug=scroll` readings spaced out over time
-    in the same stuck session (no code changes needed, just more data) would
-    help confirm this is a permanent-until-fixed state, not something that
-    would resolve itself given enough time.
-  - **Do not attempt another `window.scrollTo`/pan-based fix for this** — that
-    entire approach has now been conclusively shown to be treating the wrong
-    variable. Any fix needs to specifically target `visualViewport.height`
-    recovery, not scroll position.
-  - **A second real capture, taken right at the moment the bug first begins
-    (71 poll firings in, scan wizard still open), fills in the missing part
-    of the timeline**:
-    ```
-    visualViewport.height: 969        window.innerHeight: 969  (same!)
-    visualViewport.offsetTop: 79      window.scrollY: 79
-    Periodic poll: fired 71 times so far
-    ```
-    **Combined with the earlier (later-in-time) capture, this reveals the full
-    sequence**: at onset, the keyboard/scan-modal interaction shrinks BOTH
-    `window.innerHeight` and `visualViewport.height` together to the same
-    reduced value, alongside a genuine stuck pan (`offsetTop: 79`). Over
-    time/navigation, `window.innerHeight` recovers back to its true full value
-    (`1048`, seen in the later capture) — likely tied to leaving the scan
-    wizard — and the periodic poll successfully corrects the pan back to
-    `offsetTop: 0` (**confirming that part of the mechanism genuinely works as
-    designed**). But `visualViewport.height` alone never rejoins the recovery
-    — it's the one value that stays permanently stuck at the shrunk figure
-    even after everything else (height, pan) has returned to normal. This is
-    a sharper, complete before/after picture, not just a single stuck reading
-    — useful for reproducing the bug deliberately during a fix attempt (open
-    the scan wizard, focus a text field to trigger the keyboard, then close
-    the wizard and watch `visualViewport.height` specifically to see whether
-    it ever rejoins `window.innerHeight` on its own).
+  Earlier-in-time capture (right as the bug begins, 71 poll firings in):
+  ```
+  visualViewport.height: 969        window.innerHeight: 969  (same!)
+  visualViewport.offsetTop: 79      window.scrollY: 79
+  ```
+  Combined: at onset, the keyboard/scan-modal interaction shrinks BOTH heights together
+  alongside a genuinely stuck pan; over time `window.innerHeight` recovers and the
+  existing poll correctly zeroes the pan (confirming that mechanism works as designed)
+  — but `visualViewport.height` alone never rejoins the recovery, staying permanently
+  stuck at the shrunk figure. `window.scrollTo` (every prior round's fix) can only
+  affect scroll position, never height — never capable of fixing this.
+* **Scroll bug — round 4 fix: the diagnosis flip above now has a shipped, researched
+  fix, NOT yet real-device-verified.** `healStuckViewportHeight()` (`app.js`) toggles
+  `display: none` → forced synchronous reflow → `display: ''` on `#page-root`
+  (preserving its scroll position across the toggle) whenever nothing is focused (same
+  "don't fight a field the player is using" guard `correctResidualViewportPan` already
+  uses) and `window.innerHeight − visualViewport.height` exceeds 40px — the real
+  captures from round 3 directly confirmed `window.innerHeight` is the reliable "what
+  the true full height actually is" reference once the bug has settled, so no separate
+  max-height-tracking baseline was needed. This is a real, documented WebKit
+  viewport-recompute workaround for exactly this bug class (not guessed — see sources
+  below), grounding the "research needed" note from the last round. Wired into the same
+  four trigger sites `correctResidualViewportPan` already uses (focusout/focusin
+  timeouts, debounced `visualViewport` resize, the 400ms poll) — first fix this project
+  has tried that targets the height variable directly instead of scroll position, which
+  every prior round's `window.scrollTo`-based approach was structurally incapable of
+  touching. `?debug=scroll` updated: an explicit `window.innerHeight −
+  visualViewport.height` gap line in the snapshot report, and a "Force heal viewport
+  height now" button (mirrors the existing "Force correct now" pan button's
+  before/immediately-after/150ms-later logging) so a real-device round can isolate this
+  fix the same way the existing tool already isolates the pan fix. **Still needs
+  real-device verification** — this project's own preview tooling can't reproduce the
+  real iOS bug, and five straight prior rounds on this bug class needed real hardware
+  to confirm or refute.
+  - Sources (real research, not guessed): the `display:none`→reflow→`''` viewport-
+    recompute technique — https://dev.to/cederhook/fixing-the-ios-standalone-pwa-keyboard-bug-that-shrinks-your-viewport-for-good-63d ;
+    background on the underlying WebKit bug class —
+    https://dev.to/deanliu/the-ios-safari-keyboard-scroll-bug-fixed-with-one-line-of-css-1353 ,
+    https://blog.ni18.in/fixing-ios-safari-viewport-shift-issues/
+
+Current Objective (Focus Area)
+
+* **Waiting on the project owner: real-device verification of the round-4 scroll-bug
+  fix (`healStuckViewportHeight`, see Completed Tasks above).** This project's own
+  preview tooling can't reproduce the real iOS bug, so this can't be confirmed further
+  without real hardware — reproduce the stuck-shrunk-height state (open the scan
+  wizard, focus a text field to trigger the keyboard, close the wizard) and check
+  `?debug=scroll`'s new gap line and "Force heal viewport height now" button. Five
+  straight prior rounds on this bug class needed real hardware to confirm or refute, so
+  this one should be treated the same way — not assumed fixed just because the
+  technique is real/documented and passed local testing.
+* Undo, the row/column highlight, and the scan-progress save gate (all three shipped
+  this round — see Completed Tasks above) are otherwise done; no known follow-up work
+  on them right now beyond normal play-testing.
 
 Next Steps (Do Not Start Yet)
 

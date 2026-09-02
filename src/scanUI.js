@@ -121,10 +121,8 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     state.pendingPuzzle = null;
     state.fillMarks = null;
     els.scanFileInput.value = '';
-    els.scanLibraryTitleInput.value = '';
-    els.scanLibraryTitleInput.disabled = false;
-    els.scanBtnSaveLibrary.disabled = false;
-    els.scanLibrarySaveStatus.textContent = '';
+    els.scanBtnPlay.disabled = false;
+    els.scanPlayStatus.textContent = '';
     els.scanGridHint.textContent = '';
     els.scanKnownRowsInput.value = '';
     els.scanKnownColsInput.value = '';
@@ -1107,42 +1105,48 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     showStep('done');
   });
 
-  els.scanBtnPlay.addEventListener('click', () => {
+  // Current Objective (see TODO.md): every scanned puzzle that's actually played now
+  // auto-publishes to the public shared library first — the same write the old, separate
+  // "Save to library" step used to make optional (savePuzzleToLibrary, unchanged) — then
+  // plays as a completely normal authored/library puzzle from that point on: real move
+  // history, the repeatable Undo button, Save progress, and stats all "just work" with no
+  // scan-specific gating left anywhere in app.js. The blank grid + clues are what's published
+  // (never state.fillMarks — same "always a blank-puzzle snapshot of the definition" rule the
+  // old manual save used), with a generic placeholder title — every library puzzle's real
+  // name stays hidden until solved anyway (see app.js's renderLibraryList), and the creator
+  // can rename it afterward via the library's existing rename affordance.
+  //
+  // If the publish fails (offline, not deployed yet), the player can still play — falls back
+  // to the original ephemeral scan-<timestamp> id / source:'scan' behavior, which still gets
+  // working post-import Undo (board.hasHistory is unconditionally true now — see app.js's
+  // startPuzzle) but no stable id to save progress or stats against, same as before this
+  // round for that one edge case.
+  els.scanBtnPlay.addEventListener('click', async () => {
     const p = state.pendingPuzzle;
+    if (!p) return;
+    els.scanBtnPlay.disabled = true;
+    els.scanPlayStatus.textContent = 'Adding to the puzzle library…';
+    try {
+      const libraryId = await savePuzzleToLibrary({
+        rows: p.rows,
+        cols: p.cols,
+        rowClues: p.rowClues,
+        colClues: p.colClues,
+        title: 'Scanned puzzle',
+      });
+      p.id = `lib-${libraryId}`;
+      p.source = 'authored';
+      p.libraryId = libraryId;
+    } catch (err) {
+      console.warn('savePuzzleToLibrary failed — playing locally without save/stats support', err);
+    }
+    els.scanBtnPlay.disabled = false;
+    els.scanPlayStatus.textContent = '';
     closeWizard();
-    if (p) onPuzzleReady(p);
+    onPuzzleReady(p);
   });
 
   els.scanBtnCancel.addEventListener('click', () => closeWizard());
-
-  // ---- save to library (item 9's save-to-library slice — see TODO.md, src/puzzleLibrary.js) ----
-  //
-  // Deliberately independent of scanBtnPlay above: this writes a new public library doc from
-  // the confirmed grid + clues only (never state.fillMarks — a save is always a blank-puzzle
-  // snapshot of the definition, per the design), and does nothing to the wizard's own
-  // pendingPuzzle or the player's ability to also play their own detected-fill-state copy via
-  // "Play it". Either button, both, or neither can be used from this same step.
-  els.scanBtnSaveLibrary.addEventListener('click', async () => {
-    const p = state.pendingPuzzle;
-    if (!p) return;
-    const title = els.scanLibraryTitleInput.value.trim();
-    if (!title) {
-      els.scanLibrarySaveStatus.textContent = 'Enter a title first.';
-      return;
-    }
-    els.scanBtnSaveLibrary.disabled = true;
-    els.scanLibrarySaveStatus.textContent = 'Saving…';
-    try {
-      await savePuzzleToLibrary({ rows: p.rows, cols: p.cols, rowClues: p.rowClues, colClues: p.colClues, title });
-      els.scanLibrarySaveStatus.textContent = 'Saved to the library!';
-      els.scanLibraryTitleInput.disabled = true;
-    } catch (err) {
-      console.warn('savePuzzleToLibrary failed:', err);
-      els.scanLibrarySaveStatus.textContent =
-        "Couldn't save — this needs Firestore rules/network access (see functions/README.md).";
-      els.scanBtnSaveLibrary.disabled = false;
-    }
-  });
 
   return { open: openWizard };
 }
