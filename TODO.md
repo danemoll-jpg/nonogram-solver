@@ -445,6 +445,19 @@ Completed Tasks
   directly in-browser; the normal (non-blocked) happy path re-verified unaffected
   (library still loads all 7 entries, no console errors). All 812 tests still pass
   (this module is inert during `npm test` either way — see its own header comment).
+* **Real-device report: repeatedly tapping the new Undo button on iPad zoomed the
+  screen in and out — fixed.** iOS Safari's native double-tap-to-zoom gesture firing
+  on two taps landing close together in time/position, exactly what stepping Undo back
+  several moves in a row does. `styles.css`'s shared `.btn`/`.mode-btn` classes had no
+  `touch-action` set at all, so the browser's default zoom-gesture handling was still
+  live on every toolbar/menu button. Fix: `touch-action: manipulation` on both —
+  disables double-tap-zoom (and the ~300ms tap delay, as a free side effect) without
+  touching the page's viewport meta tag, so pinch-zoom stays available everywhere else
+  as an accessibility aid on large puzzles. Applied to the whole shared button classes,
+  not just Undo, since any rapidly-tapped control is exposed to the same gesture — Undo
+  is just the one control in this app actually designed to be tapped repeatedly.
+  Verified: the property applies correctly to every affected button in browser preview,
+  and a normal click/undo round trip still works unaffected. All 812 tests still pass.
 
 Current Objective (Focus Area)
 

@@ -175,6 +175,7 @@ body {
   align-items: center;
   padding: 0 0.8rem;
   cursor: pointer;
+  touch-action: manipulation; /* same double-tap-zoom fix as .btn — see its own comment */
 }
 
 .mode-btn + .mode-btn {
@@ -305,6 +306,18 @@ body {
   border-radius: 0.6rem;
   cursor: pointer;
   transition: transform 0.1s ease, border-color 0.1s ease;
+  /* Real-device report: repeatedly tapping the Undo button on iPad zoomed the whole page in
+     and out — iOS Safari's native "double-tap to zoom" gesture firing on two taps that land
+     close together in time and position, exactly what stepping Undo back several moves in a
+     row does. `manipulation` tells the browser this element only cares about tap/pan
+     gestures, not zoom ones, which kills double-tap-zoom (and the ~300ms tap delay, as a
+     free side effect) without touching the page's viewport meta tag — that would disable
+     pinch-zoom everywhere, including as an accessibility aid on a large puzzle, which isn't
+     what this bug is asking for. Applied to the whole shared .btn class, not just Undo:
+     every toolbar/menu button is exposed to the same gesture under rapid repeat-tapping,
+     even if Undo is the one actually reported (it's the one control in this app designed to
+     be tapped several times in a row on purpose). */
+  touch-action: manipulation;
 }
 
 .btn:hover {
