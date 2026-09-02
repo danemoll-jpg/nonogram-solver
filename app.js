@@ -1838,8 +1838,40 @@ setInterval(() => {
   correctResidualViewportPan();
 }, 400);
 
-// ---- Current Objective #2: keep the player-facing explain panel visible through the same
-// stuck-pan state (see TODO.md) ----
+// ---- Current Objective #2: a focused text input should never fight the player's own scroll
+// gesture (see TODO.md) ----
+//
+// Direct complaint, e.g. in the scan wizard's correction step: "if I try to scroll the row
+// edit with the cursor in it it would force it back on the screen." The mechanism is the
+// pan-correction machinery just above (`correctResidualViewportPan`, re-run on focus events,
+// visualViewport resize, and the 400ms poll): while a text input is focused and iOS's
+// keyboard-avoidance pan is still active, ordinary page scroll moves that field outside what
+// the current pan considers "visible," and the very next re-check snaps it back with
+// `scrollIntoView` — fighting the scroll the player just made on purpose.
+//
+// Deliberately scoped narrowly, per the project owner's framing: this isn't an attempt to
+// solve the main scroll-pan mystery (see TODO.md's Current Objective #3, not this round's
+// focus) — it just stops a focused field from being defended against a deliberate scroll.
+// Blurring the field as soon as a genuine scroll gesture starts removes the "keep this field
+// visible" goal entirely, so there's nothing left for the poll/resize/focus re-checks above to
+// fight the gesture over; `correctResidualViewportPan`'s own nothing-focused branch may still
+// run afterward, but that branch only re-zeroes the pan, it doesn't aim at any particular
+// field, so it can't yank the scroll back toward one.
+//
+// `e.target` is checked against the focused element so that touch-dragging *inside* the field
+// itself (placing the cursor, extending a text selection) isn't mistaken for a scroll-away
+// gesture and doesn't blur the field out from under the player mid-edit.
+function blurFocusedTextInputOnScrollGesture(e) {
+  const active = document.activeElement;
+  if (!active || !/^(input|textarea)$/i.test(active.tagName || '')) return;
+  if (active.contains(e.target)) return;
+  active.blur();
+}
+document.addEventListener('touchmove', blurFocusedTextInputOnScrollGesture, { passive: true });
+document.addEventListener('wheel', blurFocusedTextInputOnScrollGesture, { passive: true });
+
+// ---- Current Objective #2 (bug-fix history, see TODO.md): keep the player-facing explain
+// panel visible through the same stuck-pan state ----
 //
 // `.explain-panel` is `position: fixed; bottom: 0`, which iOS Safari pins to the LAYOUT
 // viewport, not the visual one. During/after a keyboard interaction — including the stuck-pan

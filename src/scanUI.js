@@ -881,6 +881,17 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     img.alt = `Scanned clue strip: ${labelText}`;
     const input = document.createElement('input');
     input.type = 'text';
+    // A plain `type="text"` field with no hint always opens on the default alphabetic
+    // keyboard on iOS/Android, with no memory of "the last field was numeric" carried over
+    // between different input elements — so correcting a run of clue fields meant re-tapping
+    // "123" on every single one (a real complaint, not a guess). `inputmode="decimal"` keeps
+    // the numeric keypad up on every focus instead. A plain numeric pad (inputmode="numeric")
+    // would do that too but has no way to type the space/comma this field's own instructions
+    // ask for between numbers ("4 13"); the decimal pad's "." key fills that role instead —
+    // parseClueText (see scanPuzzle.js) already extracts digit runs via `\d+`, ignoring
+    // whatever separator sits between them, so "4.13" parses identically to "4 13" or "4,13"
+    // with no parsing change needed here.
+    input.inputMode = 'decimal';
     input.className = 'scan-clue-row__input';
     input.value = prefillText;
     input.setAttribute('aria-label', `${labelText} clue numbers`);

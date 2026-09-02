@@ -205,39 +205,71 @@ Completed Tasks
   unaffected.
 * **Toolbar alignment — CONFIRMED FIXED on the real device.** Round 4's fix holds
   up on real iOS, not just in preview — this bug is closed.
+* **Row-OCR investigation — real, fixable geometry bug found, root-caused, and
+  fixed; verified end-to-end against the real test image, not a guess.** The
+  project owner saved the test image as `scratch-images/sample-row-issue.jpg`
+  (gitignored like the other scratch images, so it stays local-only). Ran the
+  actual scan wizard against it in a real browser (Chrome via the browser
+  automation tools, not synthetic pixel data): with the known 25×25 size
+  entered, the OCR read every row shifted down by roughly one row, worsening
+  into outright garbling by the middle rows, and the recheck banner fired for
+  both axes at once — exactly the reported symptom.
+  - **Root cause, confirmed by directly instrumenting the real detection
+    functions against the real image** (not inferred from OCR text alone):
+    this puzzle's row 1 is entirely filled (all 25 cells, clue "25") — a case
+    the existing ground-truth puzzle never has. `centerRectOnBorders`'s inward
+    border-search (`gridDetect.js`) estimates "is this pixel still border ink"
+    from an 85th-percentile split of a window assumed to be mostly plain
+    background; against a solid-filled first row, that window is dominated by
+    the fill's own mid-tone color instead, so the split silently misjudged the
+    *entire filled row* as "still border ink" and walked its inward search the
+    full `maxBorderWidth` (20px) deep into row 1 before stopping — confirmed by
+    calling the real function against the real image's pixel data and watching
+    `top` land 20px past the true row-1/border boundary (287.5 instead of the
+    correct ~267). That shifted-and-shortened rect then got divided into 25
+    equal row bands as usual, so every row read pulled in a bit of its
+    neighbor below, compounding row by row — the same *kind* of bug as the
+    earlier column-band drift fix (an inward-search heuristic tuned for plain
+    background breaking against real content next to the border), just
+    triggered by a filled row instead of a thick border stroke.
+  - **Fix** (`src/gridDetect.js`'s `centerRectOnBorders`): the inward
+    "still-border-ink" threshold is now anchored to the border's own measured
+    darkness at the rough edge position (already close to genuine border ink —
+    that's what `snapRectToBorder` found) and the brightest sample the walk
+    could actually reach, windowed to exactly `maxBorderWidth` instead of the
+    old `maxBorderWidth * 3` — so the calibration can no longer be fooled by
+    content past the current row/column's own extent, and no longer assumes
+    the interior is background-colored. All 812 existing tests still pass
+    unchanged (including the column-band drift regression test), and a fresh
+    real-browser scan of the actual test image afterward read 24 of 25 rows
+    exactly right, with the recheck banner no longer firing for either axis —
+    the one remaining miss (a dropped leading digit on one row) is a single
+    lone-digit dropout, squarely the already-accepted residual OCR noise class,
+    not a repeat of the geometry bug.
+* **Focused-input-vs-scroll complaint — fixed, narrowly scoped as requested,
+  not tied to the main scroll-pan investigation.** `app.js`: a genuine scroll
+  gesture (`touchmove`/`wheel`) starting anywhere outside the currently-focused
+  text input now blurs that input immediately, so the pan-correction machinery
+  (`correctResidualViewportPan` and its poll/resize/focus re-checks) has
+  nothing focused left to defend with `scrollIntoView`, and can't fight the
+  player's own scroll. Touch-dragging *inside* the focused field itself (cursor
+  placement, text selection) is excluded via an `e.target` containment check,
+  so normal in-field editing isn't affected. Verified with the full test suite
+  (812 passed) and a clean console load in preview; real-device verification
+  wasn't attempted (this bug class needs a real iOS device per this project's
+  own established practice, see below), so — like the other iOS-only fixes
+  here — treat this as implemented and locally verified, not yet confirmed on
+  a real device.
 
 Current Objective (Focus Area)
 
-* **Scroll bug — mechanism-vs-trigger isolation tooling implemented, awaiting
-  real-device verification.** Added to `?debug=scroll` (`app.js`,
-  `initScrollDiagnostics`), per round 3's required next step:
-  1. A **"Force correct now" button** in the panel's action row that calls the
-     exact same `correctResidualViewportPan()` used by every automatic trigger,
-     on demand. It records `visualViewport.offsetTop` immediately before, then
-     an "immediately-after" reading, then a "150ms later" follow-up (in case
-     `scrollTo`'s effect isn't synchronous on iOS) — all three land as
-     `MANUAL FORCE` lines in the auto-captured history log, and the before→after
-     numbers also show directly on the button label for a few seconds. Verified
-     locally: clicking it does invoke the real correction function and logs real
-     before/after `offsetTop` values (both 0 in desktop preview, as expected with
-     no pan present).
-  2. A **periodic-poll liveness counter** (`scrollPollCount`/`scrollLastPollAt`,
-     module-scope next to the round-3 `setInterval`), surfaced as a new line in
-     the snapshot report: `Periodic poll (every 400ms): fired N time(s) since page
-     load; last fired <time>`. This directly confirms the round-3 poll is actually
-     executing on a given device, independent of whether it's fixing anything —
-     verified locally (count increments over time in preview).
-  - **Still required**: real on-device testing. Reproduce the stuck-pan state,
-    open `?debug=scroll`, confirm the poll counter is incrementing, then tap
-    "Force correct now" and read the logged before/after `offsetTop` values. If
-    they stay stuck even when manually forced, the correction itself doesn't work
-    on this device (a `window.scrollTo` limitation, not a trigger-coverage gap) —
-    a different fix is needed, not more trigger/polling tuning. If manual forcing
-    DOES reset `offsetTop`, the automatic poll/listeners aren't actually
-    firing/executing despite the source looking right, and the wiring side needs
-    another look.
-* Toolbar alignment is a separate, already-closed item — round 4's fix is confirmed
-  on the real device (see Completed Tasks). No further action needed there.
+* **Main scroll-pan bug: still NOT this round's focus — the project owner
+  hasn't yet run the manual "force correct" test from the previous round and
+  doesn't want this waiting on that.** The manual isolation step (does
+  `offsetTop` actually change when the correction is deliberately forced) is
+  still the right next diagnostic move and remains the standing plan. Leave the
+  existing `?debug=scroll` tooling as it is; the project owner will run that
+  test separately and report back when they have.
 
 Next Steps (Do Not Start Yet)
 
@@ -278,9 +310,12 @@ Technical Notes / Blockers
   real-device testing despite passing every local/preview check — round 3's
   periodic poll made literally no observable difference, which is new and
   significant: it points at the corrective action itself possibly not working on
-  this device, not just a trigger-coverage gap). Use `?debug=scroll` for any
-  further verification, and see Current Objective for the required
-  mechanism-vs-trigger isolation step before any further trigger/polling changes.
+  this device, not just a trigger-coverage gap). **Standing next diagnostic step,
+  waiting on the project owner (not this round's active work — see Current
+  Objective)**: a manual "force correct now" button already exists in
+  `?debug=scroll` from the previous round — the project owner still needs to run
+  it (reproduce the stuck-pan state, tap it, observe whether `offsetTop` actually
+  changes) before Code writes any more trigger/polling logic for the main bug.
 * **The toolbar-alignment bug took two misdiagnosed rounds (2-3, chasing size)
   before the project owner's direct correction led to the real cause
   (misalignment via a leaked `margin-top`) in round 4** — a reminder that a

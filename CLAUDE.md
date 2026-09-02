@@ -67,22 +67,30 @@ preview) are all done and deployed. Fully public library visibility is confirmed
 the right model. OCR accuracy has been explicitly accepted as "good enough for now."
 See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective is the one remaining item — the scroll bug**:
+**Current objective has two active items — this round's actual focus, per the
+project owner's explicit reprioritization — plus one item deliberately NOT this
+round's focus**:
 
-**Scroll bug, round 3 — tested on the real device and made no observable
-difference at all ("nothing has changed, it is doing the exact same thing").**
-This is a significant new finding: round 3's periodic poll (every 400ms,
-unconditional) specifically eliminated the trigger-coverage gap round 2's
-diagnosis identified — so a continued total failure now points at the
-corrective action itself (`window.scrollTo`) possibly not working on this real
-device/iOS version, not at when it runs. **Required next step before any more
-trigger/polling changes**: isolate mechanism from trigger by adding a manual
-"force correct now" button to `?debug=scroll` so the project owner can
-reproduce the stuck state and directly observe whether `offsetTop` changes at
-all when the correction is deliberately invoked. If it doesn't change even
-then, the correction itself is the problem; if manually forcing it does work,
-the automatic poll/listeners aren't actually executing and that's the real
-bug to chase instead.
+1. **Active: a different real puzzle image surfaced OCR errors on ROWS this
+   time, not just columns, flagged widely (both axes at once by the wizard's own
+   recheck banner).** The project owner has asked for this to be actually
+   investigated, superseding the earlier general "OCR accuracy is accepted, not
+   pursued further" framing for this specific case — a failure this widespread is
+   more consistent with a real, fixable geometry/detection bug (like the earlier
+   column-band drift bug) than ordinary OCR noise. **The project owner needs to
+   save the actual test image into the repo first** (same pattern as
+   `scratch-images/sample-mid-solve.jpg`) — Code can't test against a real file
+   it doesn't have, and chat screenshots aren't a substitute.
+2. **Active: scrolling should never be fought by a currently-focused text
+   input.** In the scan wizard's correction step, a focused field currently gets
+   auto-scrolled back into view when the player tries to scroll away from it —
+   the project owner wants this to just stop, as its own narrowly-scoped fix
+   (e.g. blur the input once a scroll gesture starts), not necessarily tied to
+   solving the main scroll-pan mystery first.
+3. **NOT this round's focus: the main scroll-pan bug.** A manual "force correct
+   now" button already exists in `?debug=scroll` from the previous round: the
+   project owner hasn't run it yet and doesn't want this round waiting on that —
+   it remains the standing next diagnostic step, just not active work right now.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,

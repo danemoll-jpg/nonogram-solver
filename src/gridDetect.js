@@ -321,16 +321,37 @@ export function centerRectOnBorders(gray, width, height, rect, { searchPx = 15, 
   const cp = colProfile(gray, width, height, { yStart, yEnd });
 
   // Threshold from a window that only ever extends INWARD from the rough edge position (see
-  // innerEdgeOfBorder's own comment for why outward is unsafe on the left/top side) — mostly
-  // white/background interior plus the border's own tail, a clean bimodal split for
-  // inkThreshold's background-percentile method regardless of which edge this is.
+  // innerEdgeOfBorder's own comment for why outward is unsafe on the left/top side).
+  //
+  // Deliberately NOT inkThreshold's usual background-percentile split, and deliberately
+  // windowed to exactly `maxBorderWidth` (not the wider `* 3` span an earlier version used)
+  // — both confirmed necessary against a real puzzle image whose first row/column is
+  // entirely FILLED (a solid color, not blank), which broke the old approach two ways at
+  // once: a percentile split assumes most of the window is light background, but a filled
+  // row's own fill tone is neither the border's near-black nor plain background, so the
+  // 85th-percentile pick grabbed a bright sample from *past* this row entirely (only
+  // reachable because the old `* 3` span reached that far) and the resulting threshold was
+  // loose enough to still call the fill "ink" — walking innerEdgeOfBorder's inward search
+  // the full `maxBorderWidth` deep into the filled row instead of stopping at its true edge
+  // (confirmed directly: this walked exactly `maxBorderWidth` px into a real filled top row,
+  // see TODO.md's row-OCR investigation). Anchoring to the border's own measured darkness at
+  // `edgePos` (already close to genuine border ink — that's what snapRectToBorder found) and
+  // the brightest sample the walk could actually reach (capped at `maxBorderWidth`, so it
+  // can't run past this row/column's own extent into whatever comes after it) fixes both:
+  // the split no longer needs the window to be background-dominated, and it can't be fooled
+  // by content outside the walk's own reach. Confirmed to leave the already-passing
+  // white-interior case unchanged (border-vs-white is a huge gap either way).
   function inwardThreshold(profile, edgePos, direction) {
-    const span = maxBorderWidth * 3;
+    const span = maxBorderWidth;
     const a = direction > 0 ? edgePos : edgePos - span;
     const b = direction > 0 ? edgePos + span : edgePos;
     const lo = Math.max(0, Math.round(a));
     const hi = Math.min(profile.length, Math.round(b));
-    return inkThreshold(profile.slice(lo, hi));
+    const window = profile.slice(lo, hi);
+    const p = Math.max(0, Math.min(profile.length - 1, Math.round(edgePos)));
+    const borderDarkness = profile[p];
+    const brightest = window.length ? Math.max(...window) : borderDarkness;
+    return (borderDarkness + brightest) / 2;
   }
 
   return {
