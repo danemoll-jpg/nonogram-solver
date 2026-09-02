@@ -32,20 +32,19 @@
   file over synthetic/guessed pixel data.** See `TODO.md`'s Completed Tasks for the full
   history, including a confirmed real ground-truth reference puzzle
   (`scratch-images/sample-mid-solve.jpg`) reusable for future OCR-accuracy verification.
-- **iOS scroll/touch bugs in this app failed real-device verification across FIVE
-  straight rounds** (the original scan-wizard-specific bug took four rounds itself;
-  this app-wide regression's rounds 1-3 all failed real-device testing despite
-  passing every local/preview check). A SIXTH, narrower fix — stop a focused text
-  input from fighting a deliberate scroll gesture (blur it once a scroll starts) —
-  finally passed real-device verification on its first attempt. That fix is scoped
-  narrowly on purpose and does NOT resolve the separate main scroll-pan mystery
-  (the stuck `visualViewport.offsetTop` after keyboard close), which remains open —
-  see `TODO.md`'s Current Objective. **Before writing any more trigger/polling logic
-  for THAT bug, isolate whether the correction mechanism itself actually works when
-  manually forced** (the `?debug=scroll` force-correct button). Always get real
-  `?debug=scroll` data from the actual device before treating any fix in this area
-  as done — this project has repeatedly shipped fixes that looked right in preview
-  and failed on-device.
+- **The main scroll bug's diagnosis was overturned by two real captures spanning the
+  bug's full timeline: it is NOT a stuck `visualViewport.offsetTop`/pan (what five
+  rounds of fixes targeted) — it's a stuck-shrunk `visualViewport.height` that never
+  recovers to match `window.innerHeight`, independent of pan/scroll state.** At onset,
+  both height values AND the pan shrink/stick together; over time, `window.innerHeight`
+  recovers and the pan gets correctly reset to 0 by the existing poll mechanism (which
+  is thus confirmed genuinely working as designed) — but `visualViewport.height` alone
+  never rejoins the recovery. `window.scrollTo` (every prior round's corrective action)
+  can only affect scroll position, never viewport height — it was never capable of
+  fixing this. **Do not attempt another pan/scroll-based fix** — see `TODO.md`'s
+  Current Objective for the full timeline data and next steps (likely a focus/blur
+  nudge or forced layout recalculation to make Safari recompute its viewport metrics —
+  research needed, not prescribed).
 - **When a project owner describes a visual bug in plain language, take it literally
   before assuming a more complex/technical cause.** The toolbar-alignment bug took two
   misdiagnosed rounds (chasing a size difference) before the project owner's direct
@@ -74,15 +73,46 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective: only one item remains, and it is deliberately NOT active work
-this round.**
+**Current objective has four items**:
 
-* **The main scroll-pan bug (the stuck `visualViewport.offsetTop` after keyboard
-  close) is still unresolved and still not this round's focus.** A manual "force
-  correct now" button already exists in `?debug=scroll` from a previous round: the
-  project owner hasn't run it yet and doesn't want this waiting on that — it remains
-  the standing next diagnostic step. Note this is a DIFFERENT bug from the
-  focused-input-vs-scroll complaint above, which is fixed; don't conflate the two.
+1. **New: an on-screen Undo button, repeatable (walks back through history one
+   move at a time, indefinitely), distinct from the existing mistake-driven
+   undo-to-point flow.** A "move" matches this app's existing history-batching
+   unit — a drag-paint or hint/auto-X batch undoes as one unit, same as
+   undo-to-point already treats these. Confirmed: undoing a hint-sourced move
+   reverts the cells normally but does NOT decrement the hints-used count
+   (permanent once used). **Corrected**: scan-origin puzzles should NOT have
+   Undo disabled entirely — the imported cells are a fixed baseline that can't
+   be undone past, but moves the player makes after importing should undo
+   normally, same shape as the resumed-progress feature (baseline +
+   `resumeElapsedMs`/`resumeHintsUsed`). Real prerequisite to verify: does
+   `Board.hasHistory = puzzle.source !== 'scan'` currently suppress ALL
+   post-import history tracking, not just the baseline? If so, that's a gap
+   to close first.
+2. **New: highlight the current cell's full row and column while interacting
+   with it**, so misaligned taps/drags on large puzzles are easy to catch
+   before committing. Trigger timing and styling left to Code's judgment.
+3. **Escalated, with a sharp new lead: "Save progress" may not be saving
+   anything at all — and the puzzle involved was scan-origin, which the
+   existing `saveProgressIfApplicable` gate was deliberately built to skip
+   entirely.** If that gate is still in place, it fully explains the missing
+   save, not the recent button relocation. This is high-priority: mid-solve
+   scanning is the app's core use case, so being unable to save progress on a
+   scanned puzzle specifically undercuts it. Fix: allow scan-origin puzzles
+   through the save gate too — no schema/format change needed, since the
+   existing `inProgressPuzzles` save already stores the actual grid cell
+   state (not move history), which the project owner independently confirmed
+   is the right approach ("I would rather have the filled cells saved than
+   the button history"). Still separately verify the click-handler wiring
+   too, in case both issues are present.
+4. **The main scroll bug's diagnosis just broke open — now HIGH PRIORITY, not
+   "not this round's focus" as previously stated.** A real capture with the
+   pan confirmed already at 0 (not stuck) still showed a persistent 79px gap
+   between `visualViewport.height` and `window.innerHeight` — the actual bug
+   is a stuck-shrunk viewport height, not a stuck pan. Every prior round's
+   `window.scrollTo`-based fix was never capable of addressing this. See
+   `TODO.md` for the full data and corrected direction — don't attempt
+   another pan/scroll-based fix.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,
