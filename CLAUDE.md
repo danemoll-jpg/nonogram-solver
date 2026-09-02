@@ -32,19 +32,27 @@
   file over synthetic/guessed pixel data.** See `TODO.md`'s Completed Tasks for the full
   history, including a confirmed real ground-truth reference puzzle
   (`scratch-images/sample-mid-solve.jpg`) reusable for future OCR-accuracy verification.
-- **The main scroll bug's diagnosis was overturned by two real captures spanning the
-  bug's full timeline: it is NOT a stuck `visualViewport.offsetTop`/pan (what five
-  rounds of fixes targeted) — it's a stuck-shrunk `visualViewport.height` that never
-  recovers to match `window.innerHeight`, independent of pan/scroll state.** At onset,
-  both height values AND the pan shrink/stick together; over time, `window.innerHeight`
-  recovers and the pan gets correctly reset to 0 by the existing poll mechanism (which
-  is thus confirmed genuinely working as designed) — but `visualViewport.height` alone
-  never rejoins the recovery. `window.scrollTo` (every prior round's corrective action)
-  can only affect scroll position, never viewport height — it was never capable of
-  fixing this. **Do not attempt another pan/scroll-based fix** — see `TODO.md`'s
-  Current Objective for the full timeline data and next steps (likely a focus/blur
-  nudge or forced layout recalculation to make Safari recompute its viewport metrics —
-  research needed, not prescribed).
+- **The main scroll bug's diagnosis was overturned by real captures spanning the bug's
+  full timeline: it is NOT a stuck `visualViewport.offsetTop`/pan (what rounds 1-3
+  targeted) — it's a stuck-shrunk `visualViewport.height` that never recovers to match
+  `window.innerHeight`, independent of pan/scroll state.** `window.scrollTo` (every
+  earlier round's corrective action) can only affect scroll position, never viewport
+  height — it was never capable of fixing this. Round 4 shipped a real, documented
+  WebKit viewport-recompute workaround (`healStuckViewportHeight` in `app.js`) targeting
+  the height variable directly — **still awaiting real-device verification**, since this
+  project's own preview tooling can't reproduce the real iOS bug and five straight prior
+  rounds needed real hardware to confirm or refute. Don't assume it's fixed just because
+  it's a real technique and passed local testing.
+- **Scanned puzzles now auto-publish to the library the moment they're played** (no more
+  separate optional "Save to library" step) — this closed the original "Save progress
+  does nothing for a scanned puzzle" gap by making a played scan a completely normal
+  authored/library puzzle (`lib-<id>`, `source: 'authored'`) with real history, Undo,
+  stats, and Incomplete-filter visibility. **However, the project owner has since
+  reported the mid-solve "Save progress" step on one of these still doesn't produce a
+  findable save on the real device**, despite passing preview testing of this exact
+  path — see `TODO.md`'s Current Objective; leading suspect is a race between the async
+  publish call and an early Save-progress press, or an overly-optimistic save
+  confirmation. The initial auto-publish-on-play step itself is confirmed working.
 - **When a project owner describes a visual bug in plain language, take it literally
   before assuming a more complex/technical cause.** The toolbar-alignment bug took two
   misdiagnosed rounds (chasing a size difference) before the project owner's direct
@@ -68,24 +76,31 @@ saved/incomplete-puzzle-progress feature, the live drag-fill cell counter, the
 toolbar alignment fix, a real geometry bug behind a row-OCR failure (a filled first
 row defeating the border-detection heuristic), a focused-input-vs-scroll fix, a
 scan-correction numeric-keyboard fix, a repeatable Undo button, a row/column
-interaction highlight, and making every played scan auto-publish to the library (so
-it saves/undoes/tracks stats like any other puzzle, closing the save-progress gap for
-scanned puzzles) are all done, deployed, and **confirmed working on the real device**
-(not just preview — see `TODO.md`'s Completed Tasks; the Undo/highlight/save-gate trio
-is preview-verified but not yet real-device-confirmed, being UI/Firestore logic rather
-than an iOS-Safari-specific bug). Fully public library visibility is confirmed as the
-right model. General OCR digit-level noise (as opposed to the geometry bug above) has
-been explicitly accepted as "good enough for now." See `TODO.md`'s Completed Tasks for
+interaction highlight, and making every played scan auto-publish to the library are
+all done, deployed, and **confirmed working on the real device** (not just preview —
+see `TODO.md`'s Completed Tasks; the Undo/highlight/auto-publish trio is
+preview-verified but not yet fully real-device-confirmed — see the Save-progress
+regression below). Fully public library visibility is confirmed as the right model.
+General OCR digit-level noise (as opposed to the geometry bug above) has been
+explicitly accepted as "good enough for now." See `TODO.md`'s Completed Tasks for
 the full history.
 
-**Current objective**: the main scroll bug's diagnosis broke open this round (the real
-bug is a stuck-shrunk `visualViewport.height`, not a stuck pan — every prior round's
-`window.scrollTo`-based fix was never capable of touching that variable) and now has a
-shipped, researched fix (`healStuckViewportHeight` in `app.js`, a documented WebKit
-viewport-recompute workaround). **Waiting on the project owner for real-device
-verification** — this project's own preview tooling can't reproduce the real iOS bug,
-and five straight prior rounds on this bug class needed real hardware to confirm or
-refute. See `TODO.md` for the full capture data and the fix's details.
+**Current objective has two items**:
+
+1. **Waiting on the project owner: real-device verification of the round-4
+   scroll-bug fix** (`healStuckViewportHeight`) — see above. Not this round's
+   active build work; the ball is in the project owner's court to test on real
+   hardware and report back with `?debug=scroll` data.
+2. **New real-device regression: "Save progress" on a scanned (now
+   auto-published) puzzle claims success but produces no findable save.** This
+   is on the exact path this round's auto-publish fix was meant to close, and it
+   passed preview testing — the project owner's initial auto-publish-on-play
+   step works fine, but the mid-solve Save-progress action afterward doesn't.
+   Leading suspects: a race between the async publish call and an early
+   Save-progress press (verify the `id`/`source` swap to `lib-<id>`/`authored`
+   has genuinely completed before Save progress is usable), or a save
+   confirmation that fires optimistically rather than after a confirmed write.
+   See `TODO.md` for full detail.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,
