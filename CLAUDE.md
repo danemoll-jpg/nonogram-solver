@@ -32,16 +32,20 @@
   file over synthetic/guessed pixel data.** See `TODO.md`'s Completed Tasks for the full
   history, including a confirmed real ground-truth reference puzzle
   (`scratch-images/sample-mid-solve.jpg`) reusable for future OCR-accuracy verification.
-- **iOS scroll/touch bugs in this app have now failed real-device verification across
-  FIVE rounds** (the original scan-wizard-specific bug took four rounds itself; this
-  app-wide regression's rounds 1, 2, and 3 have all since failed real-device testing
-  despite passing every local/preview check — round 3's periodic poll made literally
-  no observable difference, pointing at the corrective action itself possibly being
-  ineffective on this device, not just a trigger-coverage gap). **Before writing any
-  more trigger/polling logic, isolate whether the correction mechanism itself
-  actually works when manually forced** — see `TODO.md`'s Current Objective. Always
-  get real `?debug=scroll` data from the actual device before treating any fix in
-  this area as done.
+- **iOS scroll/touch bugs in this app failed real-device verification across FIVE
+  straight rounds** (the original scan-wizard-specific bug took four rounds itself;
+  this app-wide regression's rounds 1-3 all failed real-device testing despite
+  passing every local/preview check). A SIXTH, narrower fix — stop a focused text
+  input from fighting a deliberate scroll gesture (blur it once a scroll starts) —
+  finally passed real-device verification on its first attempt. That fix is scoped
+  narrowly on purpose and does NOT resolve the separate main scroll-pan mystery
+  (the stuck `visualViewport.offsetTop` after keyboard close), which remains open —
+  see `TODO.md`'s Current Objective. **Before writing any more trigger/polling logic
+  for THAT bug, isolate whether the correction mechanism itself actually works when
+  manually forced** (the `?debug=scroll` force-correct button). Always get real
+  `?debug=scroll` data from the actual device before treating any fix in this area
+  as done — this project has repeatedly shipped fixes that looked right in preview
+  and failed on-device.
 - **When a project owner describes a visual bug in plain language, take it literally
   before assuming a more complex/technical cause.** The toolbar-alignment bug took two
   misdiagnosed rounds (chasing a size difference) before the project owner's direct
@@ -61,36 +65,24 @@ Short version: the full solver/UI stack, the UI consolidation and post-ship bug-
 passes, the iPad-verification follow-up pass, the clue-number spacing fix, item 10
 (scan-existing-puzzle), the per-number clue gray-out fix, the save-to-library
 feature, the library-consolidation round, the UI/branding polish round, the
-saved/incomplete-puzzle-progress feature, the live drag-fill cell counter, and the
-toolbar alignment fix (round 4 — confirmed working on the real device, not just
-preview) are all done and deployed. Fully public library visibility is confirmed as
-the right model. OCR accuracy has been explicitly accepted as "good enough for now."
-See `TODO.md`'s Completed Tasks for the full history.
+saved/incomplete-puzzle-progress feature, the live drag-fill cell counter, the
+toolbar alignment fix, a real geometry bug behind a row-OCR failure (a filled first
+row defeating the border-detection heuristic), a focused-input-vs-scroll fix, and a
+scan-correction numeric-keyboard fix are all done, deployed, and **confirmed working
+on the real device** (not just preview — see `TODO.md`'s Completed Tasks). Fully
+public library visibility is confirmed as the right model. General OCR digit-level
+noise (as opposed to the geometry bug above) has been explicitly accepted as "good
+enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective has two active items — this round's actual focus, per the
-project owner's explicit reprioritization — plus one item deliberately NOT this
-round's focus**:
+**Current objective: only one item remains, and it is deliberately NOT active work
+this round.**
 
-1. **Active: a different real puzzle image surfaced OCR errors on ROWS this
-   time, not just columns, flagged widely (both axes at once by the wizard's own
-   recheck banner).** The project owner has asked for this to be actually
-   investigated, superseding the earlier general "OCR accuracy is accepted, not
-   pursued further" framing for this specific case — a failure this widespread is
-   more consistent with a real, fixable geometry/detection bug (like the earlier
-   column-band drift bug) than ordinary OCR noise. **The project owner needs to
-   save the actual test image into the repo first** (same pattern as
-   `scratch-images/sample-mid-solve.jpg`) — Code can't test against a real file
-   it doesn't have, and chat screenshots aren't a substitute.
-2. **Active: scrolling should never be fought by a currently-focused text
-   input.** In the scan wizard's correction step, a focused field currently gets
-   auto-scrolled back into view when the player tries to scroll away from it —
-   the project owner wants this to just stop, as its own narrowly-scoped fix
-   (e.g. blur the input once a scroll gesture starts), not necessarily tied to
-   solving the main scroll-pan mystery first.
-3. **NOT this round's focus: the main scroll-pan bug.** A manual "force correct
-   now" button already exists in `?debug=scroll` from the previous round: the
-   project owner hasn't run it yet and doesn't want this round waiting on that —
-   it remains the standing next diagnostic step, just not active work right now.
+* **The main scroll-pan bug (the stuck `visualViewport.offsetTop` after keyboard
+  close) is still unresolved and still not this round's focus.** A manual "force
+  correct now" button already exists in `?debug=scroll` from a previous round: the
+  project owner hasn't run it yet and doesn't want this waiting on that — it remains
+  the standing next diagnostic step. Note this is a DIFFERENT bug from the
+  focused-input-vs-scroll complaint above, which is fixed; don't conflate the two.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,

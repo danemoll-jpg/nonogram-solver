@@ -205,8 +205,10 @@ Completed Tasks
   unaffected.
 * **Toolbar alignment — CONFIRMED FIXED on the real device.** Round 4's fix holds
   up on real iOS, not just in preview — this bug is closed.
-* **Row-OCR investigation — real, fixable geometry bug found, root-caused, and
-  fixed; verified end-to-end against the real test image, not a guess.** The
+* **Row-OCR investigation — CONFIRMED FIXED, both locally and on the real
+  device (the project owner redeployed and retested on iPad).** Real,
+  fixable geometry bug found, root-caused, and fixed; verified end-to-end
+  against the real test image, not a guess. The
   project owner saved the test image as `scratch-images/sample-row-issue.jpg`
   (gitignored like the other scratch images, so it stays local-only). Ran the
   actual scan wizard against it in a real browser (Chrome via the browser
@@ -246,20 +248,37 @@ Completed Tasks
     the one remaining miss (a dropped leading digit on one row) is a single
     lone-digit dropout, squarely the already-accepted residual OCR noise class,
     not a repeat of the geometry bug.
-* **Focused-input-vs-scroll complaint — fixed, narrowly scoped as requested,
-  not tied to the main scroll-pan investigation.** `app.js`: a genuine scroll
-  gesture (`touchmove`/`wheel`) starting anywhere outside the currently-focused
-  text input now blurs that input immediately, so the pan-correction machinery
-  (`correctResidualViewportPan` and its poll/resize/focus re-checks) has
-  nothing focused left to defend with `scrollIntoView`, and can't fight the
-  player's own scroll. Touch-dragging *inside* the focused field itself (cursor
-  placement, text selection) is excluded via an `e.target` containment check,
-  so normal in-field editing isn't affected. Verified with the full test suite
-  (812 passed) and a clean console load in preview; real-device verification
-  wasn't attempted (this bug class needs a real iOS device per this project's
-  own established practice, see below), so — like the other iOS-only fixes
-  here — treat this as implemented and locally verified, not yet confirmed on
-  a real device.
+* **Focused-input-vs-scroll complaint — CONFIRMED FIXED on the real device
+  (project owner retested on iPad after redeploying).** Narrowly scoped as
+  requested, NOT tied to the main scroll-pan investigation, which remains
+  unresolved (see below) — this fix only stops a focused field from fighting
+  a deliberate scroll gesture, it doesn't address the separate stuck-pan
+  mystery. `app.js`: a genuine scroll gesture (`touchmove`/`wheel`) starting
+  anywhere outside the currently-focused text input now blurs that input
+  immediately, so the pan-correction machinery (`correctResidualViewportPan`
+  and its poll/resize/focus re-checks) has nothing focused left to defend
+  with `scrollIntoView`, and can't fight the player's own scroll.
+  Touch-dragging *inside* the focused field itself (cursor placement, text
+  selection) is excluded via an `e.target` containment check, so normal
+  in-field editing isn't affected. Verified with the full test suite (812
+  passed) locally, then confirmed for real: this is the first iOS scroll/touch
+  fix in this app to pass real-device verification on its first attempt,
+  after five straight rounds (across two different bugs) that didn't.
+* **Scan-correction keyboard mode — fixed, real-device-confirmed alongside
+  the above.** The clue-correction text inputs (`src/scanUI.js`) reset to the
+  default alphabetic keyboard on every new field focus (no `type="text"`
+  input remembers "the last field was numeric" across different elements),
+  so correcting a run of misread clues meant re-tapping "123" on every single
+  field — a real, separate complaint surfaced while retesting the two fixes
+  above. Set `inputMode = 'decimal'` on these inputs so the numeric keypad
+  stays up across every focus change. Deliberately not the more restrictive
+  `inputmode="numeric"`, whose keypad has no space or comma key — this field's
+  own instructions ask for a space/comma between numbers ("4 13"), and
+  `parseClueText` (`scanPuzzle.js`) already extracts digit runs via a bare
+  `\d+` regex, ignoring whatever separator sits between them, so the decimal
+  pad's "." key works today as a typable substitute with zero parsing changes
+  needed. The correction step's on-screen instructions were updated to
+  mention "." as an option.
 
 Current Objective (Focus Area)
 
