@@ -33,15 +33,20 @@
   history, including a confirmed real ground-truth reference puzzle
   (`scratch-images/sample-mid-solve.jpg`) reusable for future OCR-accuracy verification.
 - **iOS scroll/touch bugs in this app have now failed real-device verification across
-  FOUR rounds** (the original scan-wizard-specific bug took four rounds itself; this
-  app-wide regression's round 1 AND round 2 have both since failed real-device testing
-  despite passing every local/preview check). **The current leading theory is a
-  coverage gap in which events trigger a re-check** — each round has added one more
-  specific event listener (focusout, resize, focusin) but a stuck pan can persist
-  through transitions none of those cover (closing a modal, navigating screens).
-  Consider a periodic/idle re-check instead of chasing individual trigger events one
-  at a time. Always get real `?debug=scroll` data from the actual device — this bug
-  class has never been reliably reproduced by this project's own tooling.
+  FIVE rounds** (the original scan-wizard-specific bug took four rounds itself; this
+  app-wide regression's rounds 1, 2, and 3 have all since failed real-device testing
+  despite passing every local/preview check — round 3's periodic poll made literally
+  no observable difference, pointing at the corrective action itself possibly being
+  ineffective on this device, not just a trigger-coverage gap). **Before writing any
+  more trigger/polling logic, isolate whether the correction mechanism itself
+  actually works when manually forced** — see `TODO.md`'s Current Objective. Always
+  get real `?debug=scroll` data from the actual device before treating any fix in
+  this area as done.
+- **When a project owner describes a visual bug in plain language, take it literally
+  before assuming a more complex/technical cause.** The toolbar-alignment bug took two
+  misdiagnosed rounds (chasing a size difference) before the project owner's direct
+  correction — "It isn't size, the buttons aren't lined up" — led straight to the real
+  cause (a leaked CSS margin) in round 4.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -56,38 +61,28 @@ Short version: the full solver/UI stack, the UI consolidation and post-ship bug-
 passes, the iPad-verification follow-up pass, the clue-number spacing fix, item 10
 (scan-existing-puzzle), the per-number clue gray-out fix, the save-to-library
 feature, the library-consolidation round, the UI/branding polish round, the
-saved/incomplete-puzzle-progress feature, and the live drag-fill cell counter are all
-done and deployed. Fully public library visibility is confirmed as the right model.
-OCR accuracy has been explicitly accepted as "good enough for now." See `TODO.md`'s
-Completed Tasks for the full history.
+saved/incomplete-puzzle-progress feature, the live drag-fill cell counter, and the
+toolbar alignment fix (round 4 — confirmed working on the real device, not just
+preview) are all done and deployed. Fully public library visibility is confirmed as
+the right model. OCR accuracy has been explicitly accepted as "good enough for now."
+See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective: the toolbar-alignment bug is now fixed and confirmed by direct
-measurement (round 4); the scroll bug is still round 3, implemented but awaiting
-real-device verification (round 2 of both failed real-device testing despite passing
-every local/preview check):**
+**Current objective is the one remaining item — the scroll bug**:
 
-* **Toolbar alignment — FIXED, round 4.** The project owner correctly called out that
-  rounds 2-3 were chasing the wrong thing ("It isn't size... the buttons aren't lined
-  up"). Real cause: `.btn + .btn { margin-top: 0.5rem }` (`styles.css`, meant for
-  vertical button stacks elsewhere) was leaking into `.library-entry-group`'s
-  horizontal row — every other `.btn`-group consumer in the codebase already resets
-  this back to 0, `.library-entry-group` was the one place that reset was missing.
-  Fixed the same way; also gave `.mode-toggle` an explicit height matching `.btn`'s.
-  Verified by remeasuring `rect.top` directly (not just height) — every first-row
-  toolbar button now reports identical coordinates. Round 3's `-webkit-appearance`
-  addition and the `?debug=scroll` toolbar-geometry report are both left in place but
-  weren't the actual fix. Still wants a real-device screenshot to fully close out.
-* **Scroll pan, round 3 — implemented, awaiting real-device verification.** Replaced
-  the event-only approach with a periodic idle re-check —
-  `setInterval(correctResidualViewportPan, 400)` (`app.js`) — since round 2's own
-  diagnosis showed the stuck-pan state can persist through modal closes and screen
-  navigations that never fire the `focusout`/`focusin`/`resize` events the fix
-  depended on. The correction function itself already handled the stuck case
-  correctly; it just wasn't being re-invoked. **Next step is entirely on-device**:
-  reproduce the stuck-pan repro and check `?debug=scroll`'s history log on the real
-  iPhone. See `TODO.md`'s Current Objective for full detail.
-* `.explain-panel`'s round 2 defensive fix is still believed to be a real, working
-  partial win (confirmed via geometry in round 2's capture) — untouched since.
+**Scroll bug, round 3 — tested on the real device and made no observable
+difference at all ("nothing has changed, it is doing the exact same thing").**
+This is a significant new finding: round 3's periodic poll (every 400ms,
+unconditional) specifically eliminated the trigger-coverage gap round 2's
+diagnosis identified — so a continued total failure now points at the
+corrective action itself (`window.scrollTo`) possibly not working on this real
+device/iOS version, not at when it runs. **Required next step before any more
+trigger/polling changes**: isolate mechanism from trigger by adding a manual
+"force correct now" button to `?debug=scroll` so the project owner can
+reproduce the stuck state and directly observe whether `offsetTop` changes at
+all when the correction is deliberately invoked. If it doesn't change even
+then, the correction itself is the problem; if manually forcing it does work,
+the automatic poll/listeners aren't actually executing and that's the real
+bug to chase instead.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,

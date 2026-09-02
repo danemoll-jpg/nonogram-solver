@@ -133,13 +133,12 @@ Completed Tasks
   fetchInProgressPuzzles/deleteInProgressPuzzle) backs
   `users/{uid}/inProgressPuzzles/{puzzleId}` — grid state as one compact string per
   row, elapsedMs, hintsUsed. Firestore rules deployed. Save cadence: an explicit
-  "Save progress" button (now on the main toolbar, see round-2 below), plus
-  auto-save on opening the library, picking a different library puzzle, or
-  finishing the scan wizard, all through one `saveProgressIfApplicable()` gate.
-  Resuming merges the saved grid as `initialMarks` + `resumeElapsedMs`/
-  `resumeHintsUsed`. Restart clears any stale save regardless of resumed status.
-  Incomplete filter explicitly excludes already-solved puzzles (a real edge case
-  caught live in testing).
+  "Save progress" button (main toolbar), plus auto-save on opening the library,
+  picking a different library puzzle, or finishing the scan wizard, all through one
+  `saveProgressIfApplicable()` gate. Resuming merges the saved grid as
+  `initialMarks` + `resumeElapsedMs`/`resumeHintsUsed`. Restart clears any stale
+  save regardless of resumed status. Incomplete filter explicitly excludes
+  already-solved puzzles (a real edge case caught live in testing).
 * **Live running count of cells painted while drag-filling — done, verified**
   (floating gold badge, follows the pointer, increments per genuine paint, hides
   on pointerup). Fill- and X-mode both supported.
@@ -150,159 +149,96 @@ Completed Tasks
   (`app.js`) — on `focusout` of a text input and on `visualViewport` `resize`, if
   `offsetTop` is nonzero and no text input is focused, issue a corrective
   `window.scrollTo`.
-* **Scroll bug, round 2 — three follow-ups implemented and deployed, PLUS a
-  real-device verification round that shows the fix still does NOT resolve the
-  bug. See Current Objective below for the new diagnosis.**
-  1. Broadened trigger: `correctResidualViewportPan` now checks the focused
-     input's real `getBoundingClientRect()` against the current pan/height when a
-     field IS focused, correcting via `scrollIntoView` rather than bailing out
-     unconditionally; added a `focusin` listener alongside `focusout` to catch a
-     direct field-to-field switch.
+* **Scroll bug, round 2 — three follow-ups implemented and deployed, but a
+  real-device verification round showed the fix still did NOT resolve the bug.**
+  1. Broadened trigger: checks the focused input's real `getBoundingClientRect()`
+     against the current pan/height when a field IS focused, correcting via
+     `scrollIntoView`; added a `focusin` listener alongside `focusout`.
   2. `.explain-panel` given the same defensive counter-translate-against-
-     `offsetTop` treatment the diagnostic button already had
-     (`pinExplainPanelToVisualViewport`), applied unconditionally.
-  3. "Save progress" moved to its own toolbar button (`#btn-save-progress`,
-     icon-only 💾), removed from the Help dropdown.
-  4. Unrelated bonus fix found while placing the new button: a real toolbar
-     button height mismatch, root-caused to a Chromium quirk where a color-emoji
-     glyph's own font metrics can inflate a text button's rendered height past
-     its `line-height` — fixed via an explicit `.btn { height: 2.2rem }` with flex
-     centering. **The project owner's real-device screenshot shows the visual
-     misalignment is still present** — see round 4 below (turned out to be a
-     misdiagnosis: not a size issue at all).
-* **Scroll bug, round 3 — implemented, awaiting real-device verification.** See
-  Current Objective above for full detail: a periodic
-  `setInterval(correctResidualViewportPan, 400)` idle re-check, replacing reliance
-  on the event-only approach alone (events are kept too, as a fast path).
-* **Toolbar alignment, round 3 — superseded by round 4 (below); its own fix
-  (`-webkit-appearance: none` on `.btn`) turned out not to be the actual cause,
-  though it's harmless and left in place.** Also added the `?debug=scroll`
-  toolbar-geometry report, which remains useful diagnostic infrastructure.
-* **Toolbar alignment, round 4 — the REAL bug, found and fixed via direct
-  measurement, confirmed in preview (see Current Objective above for full
-  detail).** The project owner correctly identified that rounds 2-3 were solving
-  the wrong problem ("It isn't size... the buttons aren't lined up"). Root cause:
-  `.btn + .btn { margin-top: 0.5rem }` — a rule meant for vertical button stacks
-  elsewhere — was leaking into `.library-entry-group`'s horizontal row, the one
-  consumer that never got the same `{ margin-top: 0 }` reset every other
-  `.btn`-group in the codebase already had. Fixed, plus gave `.mode-toggle` an
-  explicit height matching `.btn`'s so the Fill/Mark-empty pill lines up too.
-  Verified by remeasuring `rect.top`/`rect.bottom` directly (not just height) —
-  every first-row toolbar button now reports identical coordinates. Still wants a
-  real-device screenshot to fully close out, per this bug family's track record.
+     `offsetTop` treatment the diagnostic button already had — **confirmed
+     working** via the round-2 real-device capture (its rect stayed within
+     viewport bounds).
+  3. "Save progress" moved to its own toolbar button, removed from Help.
+  4. A toolbar button height mismatch was found and "fixed" — **this later turned
+     out to be a misdiagnosis, see round 4 below.**
+* **Scroll bug, round 2 real-device capture — confirmed the fix did NOT resolve
+  the bug**, with a specific diagnosis: the fix only re-checks on `focusout`/
+  `resize` events, and the stuck pan (`offsetTop: 79`) persisted through closing
+  the scan wizard and navigating back to the main screen — 54+ seconds, neither
+  transition firing either covered event. Recommended direction: a periodic/idle
+  re-check instead of chasing more individual trigger events.
+* **Scroll bug, round 3 — implemented, awaiting real-device verification.** Added
+  a periodic idle re-check — `setInterval(correctResidualViewportPan, 400)`
+  (`app.js`), kept alongside the existing event listeners as a fast path. Directly
+  implements round 2's diagnosis: the existing unconditional-correction branch
+  (nothing focused, `offsetTop` nonzero) already worked correctly, it just never
+  got re-invoked during the 54+ second stuck window since no covered event fired.
+  Cheap early-return when `offsetTop === 0` (the common case), so polling doesn't
+  reintroduce the "chase individual triggers" problem — it self-corrects
+  regardless of what caused the stuck state.
+* **Toolbar alignment, rounds 2-3 — both turned out to be solving the wrong
+  problem, per the project owner's direct correction.** Round 2's height-based fix
+  and round 3's `-webkit-appearance: none` addition were both chasing a *size*
+  difference; **the project owner correctly identified the actual issue was
+  vertical misalignment, not different sizes** ("It isn't size. The buttons
+  aren't lined up") — confirmed again after seeing round 4's fix description.
+  Round 3 also added the `?debug=scroll` toolbar-geometry report, which remains
+  useful diagnostic infrastructure regardless.
+* **Toolbar alignment, round 4 — the real bug, found via direct
+  `rect.top` measurement (not another guess), fixed, confirmed in preview.**
+  Root cause: `.btn + .btn { margin-top: 0.5rem }` (a rule meant for vertical
+  button stacks elsewhere) was leaking into `.library-entry-group`'s horizontal
+  row — every other `.btn`-group consumer in the codebase already resets this to
+  0; `.library-entry-group` was the one place missing that reset, so "Stats" and
+  the save icon (each directly following another `.btn`) sat 8px lower than
+  "Puzzle library". Fixed the same way as every other consumer:
+  `.library-entry-group .btn { margin-top: 0 }`, placed after `.btn + .btn` in
+  source order so the equal-specificity cascade tie-break lands correctly (a
+  first attempt placed it earlier and silently lost the tie). Also gave
+  `.mode-toggle` (the Fill/Mark-empty pill) an explicit `height: 2.2rem` matching
+  `.btn`'s, since it had no fixed height of its own before and was left visibly
+  off once the margin leak was fixed and exposed it. **Verified by direct
+  remeasurement**: every first-row toolbar button now reports an identical
+  `rect.top`/`rect.bottom` (130/165.2 in that preview run) — actual matching
+  Y-position, not just matching height. All 812 tests still pass; other
+  `.btn + .btn` vertical stacks (restart confirm modal, checked directly) are
+  unaffected.
+* **Toolbar alignment — CONFIRMED FIXED on the real device.** Round 4's fix holds
+  up on real iOS, not just in preview — this bug is closed.
 
 Current Objective (Focus Area)
 
-* **Toolbar button alignment — round 4 found and fixed the REAL bug, confirmed by direct
-  measurement (not by guessing and checking a screenshot).** The project owner correctly
-  called out that rounds 2 and 3 were solving the wrong problem: "It isn't size. The buttons
-  aren't lined up" — Puzzle library sat visibly higher than Stats/the save icon, and the
-  Fill/Mark-empty toggle sat higher than the save icon too. Checking `getBoundingClientRect().top`
-  for every toolbar button (not just height, which rounds 2-3 had already confirmed identical)
-  immediately showed it: `.btn + .btn { margin-top: 0.5rem }` (`styles.css`) — a rule that
-  exists for VERTICAL button stacks elsewhere (mistake popup, modal actions, library rows) —
-  was leaking into `.library-entry-group`'s horizontal row. Every other consumer of that base
-  rule already resets it (`.mistake-popup__actions .btn`, `.modal-card__actions .btn`,
-  `.library-row .btn`, all `{ margin-top: 0 }`); `.library-entry-group` was simply the one place
-  that reset was missing, so "Stats" and the save icon (each directly following another `.btn`)
-  sat 8px lower than "Puzzle library". Fixed the same way as every other consumer:
-  `.library-entry-group .btn { margin-top: 0 }`, placed after `.btn + .btn` in source order so
-  the equal-specificity cascade tie-break lands correctly (a first attempt placed it earlier in
-  the file and silently lost the tie — worth remembering if this pattern comes up again).
-  Also gave `.mode-toggle` (the Fill/Mark-empty pill) an explicit `height: 2.2rem` matching
-  `.btn`'s own fixed height, and made `.mode-btn` fill/center within it — it had no fixed height
-  of its own before, sizing off padding instead, which left it a few px off from every
-  `.btn`-based sibling once the margin leak was fixed and exposed it. **Verified by direct
-  remeasurement in preview**: every button on the toolbar's first row now reports an identical
-  `rect.top`/`rect.bottom` (130/165.2 in that preview run) — not just matching heights, actual
-  matching Y-position. All 812 tests still pass; Cancel/Confirm and other `.btn + .btn` vertical
-  stacks (restart confirm modal, checked directly) are unaffected. Round 3's
-  `-webkit-appearance: none` addition to `.btn` and the `?debug=scroll` toolbar-geometry report
-  are both left in place (harmless, and the geometry report is still generally useful
-  diagnostic infrastructure) but neither turned out to be the actual fix — see Completed Tasks
-  for the corrected record. **Still worth a real-device screenshot to confirm**, since every
-  round in this whole bug family has had at least one surprise the preview didn't catch, but
-  this is the first round backed by an actual matching-coordinates measurement rather than an
-  eyeballed comparison or an untested theory.
-
-* **Scroll bug — round 3 implemented, awaiting real-device verification** (round 2 passed every
-  local/preview check and still failed on-device, so this isn't being called resolved yet
-  either). Added a periodic idle re-check — `setInterval(correctResidualViewportPan, 400)`
-  (`app.js`, right after the existing `focusout`/`focusin`/`resize` listeners, which are kept
-  as-is). Directly implements round 2's own diagnosis: the stuck-pan repro's "nothing focused,
-  offsetTop stuck nonzero" state is exactly what `correctResidualViewportPan`'s existing
-  unconditional `scrollTo` branch already handles correctly — it just never got invoked again
-  because no covered event (`focusout`/`focusin`/`resize`) fired during the 54+ second stuck
-  window. The function is cheap (a couple of property reads, early-returns when `offsetTop === 0`,
-  the common case) so polling doesn't chase individual triggers anymore — it self-corrects
-  regardless of what transition caused the stuck state.
-  - **Next step is entirely on-device**: load `?debug=scroll` on the real iPhone, reproduce the
-    stuck-pan repro (open keyboard, close it, wait), and reopen the panel/tap the diagnostic
-    button afterward — the history log should show the periodic poll catching and correcting the
-    pan within ~400ms of it going stale. Do not report this fix as resolved without that capture.
-
-* **Historical: round 2's fix, tested on the real device with `?debug=scroll`,
-  did NOT resolve the scroll bug** — the negative evidence and diagnosis that
-  round 3 above was built from. Kept for the full history/reasoning trail.
-  Full sequence captured by the project owner:
-  ```
-  5:15:23 PM — baseline — offsetTop=0, EXCESS=0px
-  5:17:30 PM — keyboard open — offsetTop=408 (expected, normal pan)
-  5:18:55 PM — "again" — offsetTop=79, active=(none) — STUCK
-  5:19:49 PM — after cancelling the scan wizard, 54s later — offsetTop STILL 79
-  5:20:32 PM — back on the main play screen — offsetTop STILL ~79 (74 reported)
-  ```
-  **New diagnosis, directly explaining why round 2's fix didn't catch this**: the
-  fix only re-checks and corrects on two specific events — `focusout` of a text
-  input, and `visualViewport` `resize`. Once the pan gets stuck and **neither of
-  those events fires again**, nothing in the current implementation ever
-  re-corrects it — not closing the scan wizard modal, not navigating back to the
-  main play screen. Both of those transitions happened in this repro with the pan
-  still stuck 79px off, and neither is a trigger the fix listens for, so the stuck
-  state simply carries through untouched. This is a coverage gap in *which events
-  trigger a check*, not necessarily a flaw in the correction logic itself once it
-  does run.
-  - **Also worth investigating**: whether round 2's more careful "is the focused
-    input actually visible" logic somehow interferes with round 1's simpler
-    "nothing focused → just correct" path — round 1's original mechanism was
-    already designed to handle exactly this case (nonzero `offsetTop`, nothing
-    focused) via a blind `window.scrollTo` on `resize`/`focusout`, and it's not
-    obvious from this data alone why that simpler path also isn't firing here
-    (no `resize` or `focusout` occurred in this repro after the pan got stuck,
-    which may fully explain it — but worth Code confirming that's actually the
-    reason rather than assuming).
-  - **Recommended direction**: don't add more specific event listeners one at a
-    time (that's the pattern that's produced round 1 and round 2, each covering
-    one more specific trigger but still missing others). Given how persistent
-    this stuck state has proven (over a minute, across a modal close and a full
-    screen navigation), **a periodic/idle re-check is worth strong consideration
-    over continuing to chase individual trigger events** — e.g. a low-frequency
-    interval (a few times a second, or on `requestAnimationFrame` while idle)
-    that checks "is `offsetTop` nonzero and nothing focused" and self-corrects
-    whenever true, regardless of what caused that state or what event (if any)
-    just fired. This trades a small amount of constant background work for
-    actually closing the gap this event-driven approach keeps missing.
-  - **The `.explain-panel` defensive fix appears to be working** in this same
-    capture — its `rect.top`/`rect.bottom` stayed within the visible viewport
-    bounds (`897`–`969`, matching a 969px-tall viewport) in both the
-    "after cancelling" and "main screen" readings, rather than being pushed
-    off-screen the way it reportedly was before. Worth a direct visual
-    confirmation (not just geometric inference from the diagnostic data) next
-    time, but this looks like a real, working partial fix even while the main
-    pan-correction issue remains unresolved.
-
-* **Historical: round 2's toolbar button height/alignment fix did not resolve the
-  visual issue on the real device either** — the evidence round 3 above was built
-  from. Kept for the full history/reasoning trail. The project owner's screenshot (after round
-  2's `.btn { height: 2.2rem }` fix) still shows "Puzzle library" visibly
-  taller/rounder than its neighboring buttons (Stats, the save icon, the Fill/
-  Mark-empty toggle, mute). The desktop-preview measurement Code used to confirm
-  this fix (`35.2px` for all five buttons) may not hold on the real device/browser
-  — re-measure directly on the actual iPhone rather than trusting the earlier
-  preview numbers, and check whether "Puzzle library" specifically (which has
-  both an emoji AND multi-word text, unlike the icon-only buttons) has some
-  other size-affecting property (e.g. padding, min-width, or the pill/rounded
-  styling itself) that the emoji-font-metrics fix didn't address.
+* **Scroll bug — round 3's periodic poll has NOW ALSO been tested on the real device
+  and confirmed to make no difference at all: "nothing has changed, it is doing the
+  exact same thing."** This is a significant new finding, not just another failed
+  round the same way as before. Round 3 specifically eliminated the trigger-coverage
+  gap (round 2's diagnosis) by polling unconditionally every 400ms regardless of what
+  event, if any, just fired — and it still doesn't fix the real device. **That
+  strongly suggests the problem is no longer about WHEN the correction runs, but
+  whether the correction itself (`window.scrollTo`) actually does anything on this
+  real device/iOS version at all.** Nothing in this project's history has directly
+  confirmed that the `window.scrollTo` corrective action ever successfully resets
+  `visualViewport.offsetTop` back to 0 when it fires on real hardware — every round
+  so far has only confirmed the trigger logic runs (or doesn't), never isolated
+  whether the correction itself is effective once invoked.
+  - **Required next step before writing any more trigger/polling logic**: isolate
+    mechanism from trigger. Add a manual "force correct now" button to the
+    `?debug=scroll` panel that calls the exact same correction code
+    (`correctResidualViewportPan`, or just `window.scrollTo(window.scrollX,
+    window.scrollY)` directly) on demand, so the project owner can reproduce the
+    stuck-pan state, tap the button, and directly observe whether `offsetTop`
+    actually changes at all. If it does NOT change even when manually and
+    deliberately invoked, that confirms the corrective action itself doesn't work on
+    this device — a different problem than trigger coverage, and round 3's polling
+    (or any future polling/event tuning) would never have fixed it regardless of how
+    often or reliably it ran. If manually forcing it DOES work, that's a different,
+    more surprising finding (something is preventing the automatic poll/listeners
+    from actually firing/executing at all, e.g. the interval not starting, being
+    cleared, or running in a context where it silently no-ops) and points back at
+    the trigger/wiring side instead.
+  - Also worth directly confirming the poll is even running at all (e.g. a visible
+    counter or last-poll-timestamp in the debug panel) as a cheap complementary
+    check alongside the manual-force test above.
 
 Next Steps (Do Not Start Yet)
 
@@ -338,13 +274,20 @@ Technical Notes / Blockers
   repeatedly fixed against real screenshots, not synthetic mockups alone** — prefer
   testing against a real image file over guessing at plausible synthetic pixel values.
 * **iOS scroll/touch bugs in this app have now failed real-device verification
-  across FOUR rounds** (the original scan-wizard-specific bug took four rounds
-  itself; this app-wide regression's round 1 and now round 2 have both failed
-  real-device testing despite passing every local/preview check). The current
-  leading theory is a coverage gap in which *events* trigger a re-check, not a
-  flaw in the correction logic itself — see Current Objective's recommendation to
-  consider a periodic/idle check instead of chasing individual trigger events one
-  at a time.
+  across FIVE rounds** (the original scan-wizard-specific bug took four rounds
+  itself; this app-wide regression's rounds 1, 2, and now 3 have all failed
+  real-device testing despite passing every local/preview check — round 3's
+  periodic poll made literally no observable difference, which is new and
+  significant: it points at the corrective action itself possibly not working on
+  this device, not just a trigger-coverage gap). Use `?debug=scroll` for any
+  further verification, and see Current Objective for the required
+  mechanism-vs-trigger isolation step before any further trigger/polling changes.
+* **The toolbar-alignment bug took two misdiagnosed rounds (2-3, chasing size)
+  before the project owner's direct correction led to the real cause
+  (misalignment via a leaked `margin-top`) in round 4** — a reminder that a
+  project owner's plain-language description of a visual bug ("not lined up," not
+  "different sizes") is worth taking literally rather than assuming a more
+  complex/technical cause.
 * `countGridLines` miscounting is understood and mitigated via the known-count
   override (see Completed Tasks) rather than by retuning the underlying heuristic.
 * Clue-number legibility on large puzzles — fixed, font floors at `MIN_CLUE_FONT_PX`.
