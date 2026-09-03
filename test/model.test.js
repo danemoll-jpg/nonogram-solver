@@ -108,3 +108,52 @@ describe('Board.setBatch (atomic multi-cell moves)', () => {
     assertEqual(board.history[2].source, 'hint');
   });
 });
+
+describe('Board.fromGrid baseline survives undo (real bug, found via a drag-placed run ' +
+  'of X marks on a resumed puzzle — see TODO.md)', () => {
+  // undoToMove used to rebuild the grid from scratch and replay only `history` onto it —
+  // fine for a fresh board (nothing predates history), but a resumed/scan-imported board
+  // seeds real marks straight into the grid via Board.fromGrid without ever recording them
+  // in history. The very first undo after resuming wiped every one of those marks back to
+  // UNKNOWN, since they were never in history to replay. Board now tracks that seed as
+  // `baseline` and undoToMove rebuilds from a copy of it instead of a blank grid.
+  test('undoLast leaves a fromGrid baseline (both FILLED and EMPTY cells) untouched', () => {
+    const board = Board.fromGrid([
+      [FILLED, EMPTY, UNKNOWN],
+    ]);
+    board.set(0, 2, EMPTY); // one new move on top of the resumed baseline
+    assertEqual(board.history.length, 1);
+
+    board.undoLast();
+    assertEqual(board.history.length, 0);
+    assertEqual(board.get(0, 0), FILLED); // baseline fill — must survive
+    assertEqual(board.get(0, 1), EMPTY); // baseline X — must survive (the reported symptom)
+    assertEqual(board.get(0, 2), UNKNOWN); // the actual undone move
+  });
+
+  test('undoToMove(0) — undoing every new move — still leaves the baseline intact', () => {
+    const board = Board.fromGrid([[EMPTY, EMPTY]]);
+    board.set(0, 0, UNKNOWN); // clears a baseline X, one move
+    board.set(0, 0, FILLED); // then fills it, a second move
+    assertEqual(board.history.length, 2);
+
+    board.undoToMove(0);
+    assertEqual(board.get(0, 0), EMPTY); // back to the original baseline mark, not UNKNOWN
+    assertEqual(board.get(0, 1), EMPTY);
+  });
+
+  test('clone() carries the baseline through, not just the current grid', () => {
+    const board = Board.fromGrid([[FILLED]]);
+    board.set(0, 0, UNKNOWN);
+    const copy = board.clone();
+    copy.undoLast();
+    assertEqual(copy.get(0, 0), FILLED);
+  });
+
+  test('a board with no seeded baseline (new Board) still undoes down to blank as before', () => {
+    const board = new Board(1, 1);
+    board.set(0, 0, EMPTY);
+    board.undoLast();
+    assertEqual(board.get(0, 0), UNKNOWN);
+  });
+});

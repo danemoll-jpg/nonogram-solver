@@ -100,6 +100,29 @@
   misdiagnosed rounds (chasing a size difference) before the project owner's direct
   correction — "It isn't size, the buttons aren't lined up" — led straight to the real
   cause (a leaked CSS margin) in round 4.
+- **Removed the routine per-cell sound effects** (`fillClick`, `xClick`, drag-sweep) per
+  direct feedback that the constant dinging was annoying — only `lock`/`unlock`/`error`/
+  `batchCompleteChime`/`completeFanfare` still play. Both Fill and Mark-empty are silent
+  for routine marks now (the same code path handles both — the project owner's partial
+  confirmation was X-only, but there's no separate Fill-specific check to have missed).
+  Removed the now-dead `dragStep` sound branches and the whole 'retrigger'/'stretch'
+  drag-sweep prototype in `src/sounds.js` rather than leaving them unreachable.
+- **Real bug found and fixed: Undo silently wiped a resumed puzzle's pre-existing marks
+  (both FILLED and EMPTY) on the very first undo — not the FILLED-vs-EMPTY asymmetry
+  originally suspected from the "Undo doesn't undo X marks" report.** `Board.undoToMove`
+  (`model.js`) rebuilt the grid from a blank `createGrid` and replayed only `history` onto
+  it — correct for a fresh board, but `startPuzzle` (`app.js`) seeds a resumed/scan
+  puzzle's marks straight into the grid via `Board.fromGrid` with `history` starting
+  empty, so those marks were never in history to replay and vanished on the first undo
+  after resuming. A comment had assumed this was already safe on the mistaken premise
+  that undo steps back incrementally rather than rebuilding from scratch each time. Fixed
+  by giving `Board` a `baseline` grid (blank for a fresh board, the seeded grid for
+  `fromGrid`, threaded through `clone()`) that `undoToMove` now rebuilds from instead of
+  blank. A direct repro of the reported scenario (drag-place a run of X's on a *fresh*
+  board, then Undo) already worked correctly before this fix, confirming the bug was
+  baseline-specific, not an X-mode-specific or drag-specific defect. Verified with 4 new
+  unit tests (`test/model.test.js`); not yet re-verified against a real Firebase
+  save→resume→undo round trip.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -133,23 +156,12 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective has three items** (a fourth, the dedicated Eraser mode, is now
-built and preview-verified — see above):
+**Current objective is now down to the scroll bug** — the Eraser mode, sound removal,
+and the Undo baseline-wipe bug (all above) are done. For history:
 
-1. **New: remove the routine per-cell sound effects** (`fillClick`, `xClick`, the
-   drag-sweep sound) — the constant dinging on every mark/drag is annoying per the
-   project owner directly. Keep the meaningful sounds (`lock`/`unlock`, `error`,
-   `batchCompleteChime`, `completeFanfare`) since those signal something notable,
-   not routine noise. Partial confirmation: X marks are confirmed silent; double-
-   check Fill marks were equally silenced, since only X was explicitly confirmed.
-2. **New real bug: Undo does not correctly undo X marks**, found via a drag-placed
-   run of X's. Check `Board.undoLast`/`undoToMove` (`model.js`) for a FILLED-vs-
-   EMPTY asymmetry — the revert logic should be state-agnostic. Not yet scoped
-   whether this is drag-specific or affects all X undos, or whether Fill undo is
-   unaffected — verify both before concluding a fix is complete.
-3. **The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
+1. **The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
    real device** — both verified by the project owner directly.
-4. **Round 4's scroll fix FAILED real-device verification — the sixth straight
+2. **Round 4's scroll fix FAILED real-device verification — the sixth straight
    round to fail on this bug class.** A real before/after capture (manually
    forcing the "heal" button) proved the technique only recomputes
    `window.innerHeight`, never `visualViewport.height` — the visible symptom

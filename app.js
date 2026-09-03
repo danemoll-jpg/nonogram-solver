@@ -10,7 +10,7 @@ import { isLineConsistent, anchoredClueNumbers } from './src/lineSolver.js';
 import { phraseDeduction } from './src/hintPhrasing.js';
 import { autoCheckMark, checkForMistakes, removeBadMarks } from './src/mistakes.js';
 import { SAMPLE_PUZZLES } from './src/puzzles.js';
-import { playSound, isMuted, toggleMuted, onDragSweepCell, startDragSweep, stopDragSweep } from './src/sounds.js';
+import { playSound, isMuted, toggleMuted } from './src/sounds.js';
 import { recordCompletion, fetchAllStats, generatePairingCode, redeemPairingCode } from './src/stats.js';
 import { initScanWizard } from './src/scanUI.js';
 import {
@@ -953,11 +953,13 @@ function anyNewlyFalse(before, after) {
 //   2. more than one cell changed without locking anything (a multi-cell hint, or the
 //      auto-X-without-locking case kept as a literal fallback even though 1) subsumes it in
 //      practice) — 'batchCompleteChime'
-//   3. mid-drag (dragStep:true), a single swept cell — drag-sweep, not fill/x-click
-//   4. a single cell changed — 'fillClick' or 'xClick' depending on its new state
 // A newly-contradictory line plays 'error' independently of the above (it's feedback about
 // the board, not about what kind of move just happened, so it can layer with any of them).
-function applyMoveWithSound(changes, opts, { dragStep = false } = {}) {
+// Current Objective (see TODO.md): the routine per-cell dinging on every ordinary fill/X
+// mark or drag-sweep step was removed on the project owner's direct feedback — a single
+// mark or drag step that doesn't hit either case above is deliberately silent now. Only
+// line-level/notable events (lock, unlock, batch, error, complete) still make sound.
+function applyMoveWithSound(changes, opts) {
   const lockedBefore = allLockedSnapshot();
   const contradictionBefore = allContradictionSnapshot();
   const applied = applyWithAutoX(changes, opts);
@@ -970,24 +972,20 @@ function applyMoveWithSound(changes, opts, { dragStep = false } = {}) {
     playSound('lock');
   } else if (applied.length > 1) {
     playSound('batchCompleteChime');
-  } else if (dragStep) {
-    onDragSweepCell();
-  } else {
-    playSound(applied[0].next === FILLED ? 'fillClick' : 'xClick');
   }
 
   if (anyNewlyTrue(contradictionBefore, allContradictionSnapshot())) playSound('error');
   return applied;
 }
 
-// Same idea as applyMoveWithSound, for the one move type that can *un*lock a line.
-function applyUnfillWithSound(r, c, opts, { dragStep = false } = {}) {
+// Same idea as applyMoveWithSound, for the one move type that can *un*lock a line. A plain
+// unfill that doesn't unlock anything is silent, same reasoning as applyMoveWithSound above.
+function applyUnfillWithSound(r, c, opts) {
   const lockedBefore = allLockedSnapshot();
   const applied = applyUnfill(r, c, opts);
   if (applied.length === 0) return applied;
 
   if (anyNewlyFalse(lockedBefore, allLockedSnapshot())) playSound('unlock');
-  else if (dragStep) onDragSweepCell();
 
   return applied;
 }
@@ -1057,9 +1055,9 @@ function attachPointerHandlers(grid) {
   // with one exception — clearing an existing FILLED cell back to UNKNOWN. That's always
   // let through, since it's the only way a locked line becomes editable again (see
   // computeUnfillChanges).
-  // dragStep distinguishes the drag's first cell (a click — fill-click/x-click) from cells
-  // it sweeps across afterward (drag-sweep — see src/sounds.js) for sound purposes only;
-  // it doesn't change what mark gets applied.
+  // dragStep distinguishes the drag's first cell (a click) from cells it sweeps across
+  // afterward — used below to restrict what a sweep is allowed to touch (see the Bug fix
+  // comment); it doesn't change what mark gets applied.
   // Returns true iff this call actually changed the board (used by the drag-fill counter
   // above to count only genuine paints, not every cell the pointer merely passed over).
   function paintCell(el, state, { dragStep = false } = {}) {
@@ -1090,8 +1088,8 @@ function attachPointerHandlers(grid) {
     if (!isUnfill && (rowLockedNow(r) || colLockedNow(c))) return false;
 
     const applied = isUnfill
-      ? applyUnfillWithSound(r, c, undefined, { dragStep })
-      : applyMoveWithSound([{ row: r, col: c, state }], undefined, { dragStep });
+      ? applyUnfillWithSound(r, c, undefined)
+      : applyMoveWithSound([{ row: r, col: c, state }], undefined);
     if (applied.length === 0) return false;
     for (const cell of applied) {
       const cellEl = cellEls.get(`${cell.row},${cell.col}`);
@@ -1177,7 +1175,6 @@ function attachPointerHandlers(grid) {
     setCrosshairHighlight(r, c);
     const newState = targetStateFor(board.get(r, c));
     dragging = { paintState: newState, touched: new Set([`${r},${c}`]), count: 0, lastRow: r, lastCol: c };
-    startDragSweep(); // no-op unless the 'stretch' drag-sweep prototype mode is active
     const changed = paintCell(el, newState);
     // Only show/count for a genuine fill or X paint — not a plain click-to-clear (newState
     // UNKNOWN), which isn't "painting a run" and wouldn't make sense to badge (see this
@@ -1228,7 +1225,6 @@ function attachPointerHandlers(grid) {
 
   function endDrag() {
     dragging = null;
-    stopDragSweep();
     hideDragCountBadge(); // transient in-stroke feedback only — see this section's header comment
     clearCrosshairHighlight();
   }

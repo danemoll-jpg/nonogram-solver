@@ -503,41 +503,51 @@ Completed Tasks
   erase of an X mark, and a no-op click on an already-UNKNOWN cell. All 812 tests
   still pass. Not yet confirmed on the real device.
 
-Current Objective (Focus Area)
-
-* **New: remove the routine per-cell sound effects — the constant "dinging" on every
-  fill/mark click and drag-sweep is annoying, per the project owner directly.**
-  Scoped interpretation (Code's call to confirm/adjust if this reads too narrow or
-  too broad): cut `fillClick`, `xClick`, and the drag-sweep sound
-  (`onDragSweepCell`) specifically — these fire on every single routine mark, which
-  is exactly what's being described as excessive. Keep the other sounds as
-  distinct, meaningful signals rather than routine noise: `lock`/`unlock` (a line
+* **Removed the routine per-cell sound effects** (`fillClick`, `xClick`, the
+  drag-sweep sound) per the project owner's direct feedback that the constant
+  "dinging" on every mark/drag was annoying. `applyMoveWithSound`/
+  `applyUnfillWithSound` (`app.js`) no longer play anything for an ordinary
+  single fill/X mark or drag-sweep step — only `lock`/`unlock` (a line
   completing/reopening), `error` (a mistake caught), `batchCompleteChime` (a
-  multi-cell hint or auto-X batch), and `completeFanfare` (solving the puzzle) —
-  these mark something worth noticing, not just ordinary clicking/dragging. The
-  existing mute toggle stays as the blunt full-on/off option for anyone who wants
-  silence entirely; this is a separate, narrower change to what plays by default
-  during normal play specifically.
-  - **Partial confirmation from the project owner**: X marks are confirmed silent
-    now ("I can't hear x's"). They didn't separately comment on Fill marks —
-    worth Code double-checking that `fillClick` was equally silenced, not just
-    `xClick`, since only the X side was explicitly confirmed.
+  multi-cell hint or auto-X batch), and `completeFanfare` (solving the puzzle)
+  still play. The now-dead `dragStep` sound branches, the `startDragSweep`/
+  `stopDragSweep`/`onDragSweepCell` exports, and the whole 'retrigger'/'stretch'
+  drag-sweep prototype in `src/sounds.js` were removed along with them rather
+  than left as unreachable code; `fillClick`/`xClick`/`dragSweep` dropped from
+  `SOUND_FILES` too (the placeholder `.mp3` files themselves are left in place,
+  just unreferenced — see `assets/sounds/README.md`, updated to match). Both
+  Fill and Mark-empty are now silent for routine marks — the project owner's
+  partial confirmation was X-only ("I can't hear x's"); Fill is silenced by the
+  same code path, not a separate check. All 812 tests still pass. Not yet
+  confirmed on the real device.
 
-* **New real bug, found via real play: Undo does not correctly undo X marks.**
-  Direct report: after drag-placing a run of X marks across a puzzle, pressing
-  Undo doesn't revert them. Not yet confirmed whether this is specific to
-  drag-placed X's or X marks generally (single-click X's untested/unreported),
-  or whether Fill-mode undo works correctly by contrast (implied by the report
-  only flagging X's, but not directly confirmed either way) — Code should check
-  both to scope this precisely rather than assume. **Investigate `Board.undoLast`/
-  `undoToMove` (`model.js`) for any asymmetry in how a FILLED-vs-EMPTY revert is
-  handled** — the revert logic should be state-agnostic (just restore whatever
-  the cell's previous value was, regardless of what it was), so a bug specific to
-  EMPTY/X reverts suggests something in that logic (or in how a drag batch
-  specifically records its `prev`/`next` values for X-mode moves) is checking or
-  branching on state type where it shouldn't be. Reproduce via a drag-placed
-  X-mode batch specifically, matching the project owner's own repro, before
-  concluding a fix actually resolves it.
+* **Real bug found and fixed: Undo does not correctly undo X marks — root cause was not a
+  FILLED-vs-EMPTY asymmetry (the originally suspected cause).** `Board.undoLast`/
+  `undoToMove` (`model.js`) turned out to already be completely state-agnostic — verified
+  directly, and confirmed by reproducing the project owner's exact repro (drag-place a run
+  of X's on a fresh board, then Undo) in browser preview: it undid correctly, one cell per
+  press, symmetric with Fill. **The real bug only shows up on a RESUMED puzzle**: `startPuzzle`
+  (`app.js`) seeds a resumed/scan-imported board's marks straight into `grid` via
+  `Board.fromGrid`, with `history` starting empty — but `undoToMove` rebuilt `grid` from a
+  blank `createGrid` and replayed only `history` onto it, so *any* undo after resuming
+  wiped every pre-existing mark (both FILLED and EMPTY) back to UNKNOWN on the very first
+  press, not just the intended one move — a much bigger, more visible malfunction than "one
+  cell doesn't revert," which is a plausible match for what read as "Undo does not correctly
+  undo X marks." A comment in `app.js`'s Undo-button section had assumed this was already
+  safe ("undo naturally can't cross it") on the mistaken premise that undo steps back
+  incrementally from the current grid — `undoToMove` actually rebuilds from scratch every
+  time, so that assumption was wrong regardless of which state was involved.
+  - **Fix**: `Board` now tracks a `baseline` grid (blank for a fresh board; a copy of the
+    seeded grid for `fromGrid`), threaded through `clone()` too, and `undoToMove` rebuilds
+    from a copy of `baseline` instead of a blank grid before replaying history on top.
+  - **Verified**: 4 new unit tests in `test/model.test.js` (`Board.fromGrid baseline
+    survives undo`) cover `undoLast` and `undoToMove(0)` preserving both FILLED and EMPTY
+    baseline marks, `clone()` carrying the baseline through, and a plain non-baseline board
+    still undoing down to blank exactly as before. All 816 tests pass (812 + 4 new). Not
+    yet re-verified against a real Firebase save→resume→undo round trip or on the real
+    device.
+
+Current Objective (Focus Area)
 
 * **Round 4's scroll fix (`healStuckViewportHeight`) has now been tested on the real
   device, including the manual "Force heal viewport height now" button — and the

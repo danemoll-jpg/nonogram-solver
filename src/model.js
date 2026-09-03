@@ -87,11 +87,20 @@ export class Board {
     this.grid = createGrid(rows, cols);
     this.history = [];
     this.hasHistory = true;
+    // Real bug fix (Current Objective — see TODO.md): undoToMove rebuilds `grid` from
+    // scratch and replays only `history` onto it (see that method) — so any marks seeded
+    // straight into the grid outside of history (a resumed in-progress puzzle's saved
+    // marks, via fromGrid below) would silently vanish on the very first undo, since they
+    // were never in history to replay. `baseline` is what undoToMove now rebuilds from
+    // instead of a blank grid, so pre-existing marks survive undoing moves made on top of
+    // them. Defaults to blank, same as a puzzle with nothing to resume.
+    this.baseline = createGrid(rows, cols);
   }
 
   static fromGrid(grid, { hasHistory = true } = {}) {
     const board = new Board(grid.length, grid[0]?.length ?? 0);
     board.grid = cloneGrid(grid);
+    board.baseline = cloneGrid(grid);
     board.hasHistory = hasHistory;
     return board;
   }
@@ -99,6 +108,7 @@ export class Board {
   clone() {
     const b = new Board(this.rows, this.cols);
     b.grid = cloneGrid(this.grid);
+    b.baseline = cloneGrid(this.baseline);
     b.history = this.history.map((m) => ({ ...m, cells: m.cells.map((c) => ({ ...c })) }));
     b.hasHistory = this.hasHistory;
     return b;
@@ -151,11 +161,12 @@ export class Board {
     return this.grid.every((row) => row.every((cell) => cell !== UNKNOWN));
   }
 
-  // Rebuild the grid by replaying only history[0, n) — "undo to move #n". Used when an
-  // on-demand check finds the earliest wrong mark was move #n.
+  // Rebuild the grid by starting from `baseline` (see constructor) and replaying only
+  // history[0, n) on top of it — "undo to move #n". Used when an on-demand check finds the
+  // earliest wrong mark was move #n, and by undoLast() below.
   undoToMove(n) {
     const replay = this.history.slice(0, n);
-    this.grid = createGrid(this.rows, this.cols);
+    this.grid = cloneGrid(this.baseline);
     for (const move of replay) {
       for (const cell of move.cells) this.grid[cell.row][cell.col] = cell.next;
     }

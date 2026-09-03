@@ -10,13 +10,13 @@ changes are needed — `src/sounds.js` references them by these names.
 
 | File | Trigger |
 |---|---|
-| `fill-click.mp3` | manual fill mark |
-| `x-click.mp3` | manual "mark empty" |
-| `drag-sweep.mp3` | click-and-drag across cells (see `src/sounds.js` for the two prototyped playback modes) |
 | `batch-complete-chime.mp3` | auto-X or a hint completing multiple cells at once |
 | `error.mp3` | an auto-check-caught mistake, or a line turning red (contradiction) |
 | `complete-fanfare.mp3` | full puzzle solved |
 | `lock.mp3` | a row/column becomes fully marked and locks |
 | `unlock.mp3` | a fill is cleared and a locked line becomes editable again |
 
-See `TODO.md`'s Current Objective for the drag-sweep prototyping writeup and recommendation.
+`fill-click.mp3`, `x-click.mp3`, and `drag-sweep.mp3` are no longer referenced by
+`src/sounds.js` — the per-cell dinging on every routine fill/X mark or drag-sweep step was
+removed per the project owner's direct feedback (see `TODO.md`'s Completed Tasks). The
+files are left in place harmlessly rather than deleted; nothing loads them anymore.
