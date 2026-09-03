@@ -275,56 +275,38 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective: no new build task queued.** Both items from the last round are
-now done — the "draw a puzzle" feature and the toolbar cleanup — both
-preview-verified, neither yet real-device-confirmed. The project owner is running
-all pending real-device testing (round 5's scroll fix, the toolbar cleanup,
-draw-a-puzzle, and anything else awaiting on-device confirmation) in parallel —
-item 3 below is reference/context only, not active work, except the round 5
-tooling extension noted in it, which was this round's one explicit ask.
+**Current objective: no new build task queued.** Everything requested through the
+toolbar-cleanup arc is now done and preview-verified, none of it yet
+real-device-confirmed: "draw a puzzle", the toolbar reorder (Library → mode
+toggle → Undo → gap → Stats → Mute → Save → Help, all icon-only buttons tooltipped
+via `src/tooltip.js`), its direct follow-up (Help no longer pinned to the panel's
+far-right edge, tighter one-line-fit spacing, trimmed page/header padding, and a
+redesigned eraser icon — the first SVG attempt was confirmed unrecognizable, see
+its own bullet above), moving "Scan a puzzle"/"Draw a puzzle" into the library
+modal, and the small "Puzzle library" → "Library" rename plus a
+`.library-actions .btn` margin-leak fix (Scan/Draw buttons weren't lined up — same
+bug class as the original round-4 toolbar-alignment bug, just in a new spot). The
+scroll bug's round-5 tooling extension (auto-logging the height-diverged state
+into `?debug=scroll`'s history log) is also done, per its own explicit ask. See
+`TODO.md`'s Completed Tasks and Current Objective sections for the full writeup of
+each — this file's own bullets above cover the same ground in less detail.
 
-1. **"Draw a puzzle" — done, preview-verified.** See above and `TODO.md`'s
-   Completed Tasks for the full writeup (a real 5x5 plus-sign drawn, published,
-   played blank, and solved end-to-end against the live Firestore project). Not
-   yet real-device-confirmed.
-2. **Toolbar cleanup — done, preview-verified.** New order and relabeling
-   shipped exactly as specified: Library → mode toggle (Fill / **X** / Eraser —
-   the eraser now has a real inline-SVG pencil-eraser icon, both X and Eraser
-   dropped their words, icon-only) → Undo → a visual gap → Stats (icon-only,
-   word dropped) → Mute → Save → Help. Every newly-icon-only button (plus Undo
-   and Save, which already were) gets a custom hover/press tooltip via the new
-   `src/tooltip.js` module — deliberately not the native `title` attribute,
-   given this project's whole history of iOS-Safari-specific unreliability.
-   Verified in browser preview: correct button order/accessible names via
-   `read_page`, tooltip bubbles shown on hover for Eraser and Stats, and
-   mode-toggle `aria-pressed` still switching correctly across Fill/X/Eraser.
-   All 822 tests pass. Not yet real-device-confirmed — in particular the
-   touch-press (`touchstart`) tooltip path can't be exercised from preview
-   tooling, only hover/focus. See `TODO.md`'s Completed Tasks for the full
-   writeup, including the CSS margin-leak-reset rescoping this reorder required.
-3. **The scroll bug — reference only this round except one explicit ask, not
-   otherwise active work**:
-   - The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
-     real device.
-   - Round 4's scroll fix FAILED real-device verification — the sixth straight
-     round to fail on this bug class. A real before/after capture (manually
-     forcing the "heal" button) proved the technique only recomputes
-     `window.innerHeight`, never `visualViewport.height` — the visible symptom
-     (EXCESS) was completely unchanged, 79px both before and after.
-   - Round 5 (see above) is implemented but NOT real-device-verified — needs a
-     real on-device check via the "Force heal viewport height now" debug
-     button before it can be trusted, same as every prior round.
-   - **This round's explicit ask, done**: three manual real-device attempts in a
-     row all missed the height-diverged state round 5 is meant to fix, so
-     `app.js`'s `?debug=scroll` history log now auto-detects it instead —
-     `checkStuckHeightGapObservation` logs a `HEIGHT GAP CROSSED THRESHOLD` entry
-     the moment `window.innerHeight − visualViewport.height` first crosses 40px,
-     purely observational (never calls a corrective function itself), so the
-     project owner can reproduce normally and check the log afterward instead of
-     needing perfect manual timing. Does not touch the pan-correction mechanism
-     (`correctResidualViewportPan`/`window.scrollTo`) at all — see the next bullet.
-     Not real-device-testable from this environment. See `TODO.md`'s Completed
-     Tasks for the full writeup.
+The scroll bug itself otherwise remains reference/standing-state only, not active
+work, while the project owner runs real-device verification on everything above in
+parallel:
+- The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
+  real device.
+- Round 4's scroll fix FAILED real-device verification — the sixth straight
+  round to fail on this bug class. A real before/after capture (manually
+  forcing the "heal" button) proved the technique only recomputes
+  `window.innerHeight`, never `visualViewport.height` — the visible symptom
+  (EXCESS) was completely unchanged, 79px both before and after.
+- Round 5 (viewport-meta re-parse) is implemented but NOT real-device-verified —
+  needs a real on-device check via the "Force heal viewport height now" debug
+  button before it can be trusted, same as every prior round.
+- The pan-correction mechanism (`correctResidualViewportPan`/`window.scrollTo`)
+  is conclusively proven broken on the real device and should not be refined
+  further — a genuinely different technique is needed if that gets picked up.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,

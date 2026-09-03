@@ -767,9 +767,9 @@ Current Objective (Focus Area)
 
 * **All requested work is now done — see the Completed Tasks entries above.** "Draw a puzzle,"
   the toolbar cleanup, its direct follow-up (Help position, one-line tightening, page/header
-  padding, the redesigned eraser icon), moving Scan/Draw into the library modal, and the
-  scroll bug's round-5 tooling extension are all implemented and preview-verified; none is yet
-  real-device-confirmed.
+  padding, the redesigned eraser icon), moving Scan/Draw into the library modal, the small
+  "Library" rename + Scan/Draw button-alignment fix, and the scroll bug's round-5 tooling
+  extension are all implemented and preview-verified; none is yet real-device-confirmed.
 * **No new build task is queued right now.** The project owner is running real-device
   verification (toolbar cleanup, draw-a-puzzle, round 5's height fix via the new auto-logging,
   and anything else pending) in parallel — the scroll-bug section below remains reference-only
