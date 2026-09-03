@@ -49,6 +49,27 @@
   cannot be tested from this environment; needs the same on-device check (the existing
   "Force heal viewport height now" debug button) that caught round 4 failing. Treat as
   an unconfirmed candidate given six straight prior failures on this bug class.**
+- **MAJOR FINDING: the pan-correction mechanism (`correctResidualViewportPan`'s
+  `window.scrollTo` call) is now CONCLUSIVELY shown not to work on the real device —
+  confirmed via a deliberate manual invocation (the "Force correct now" debug button),
+  not just automatic polling.** `offsetTop` stayed completely unchanged (79, before and
+  after) even when the correction was manually forced. This settles the long-open
+  "trigger problem vs. mechanism problem" question: it's a mechanism problem.
+  **`window.scrollTo` does not reset a stuck pan on this device, period — do not refine
+  this further.** This is separate from round 5's height-specific fix (different
+  variable, different technique) — the pan needs its own genuinely different corrective
+  technique, possibly the same viewport-meta re-parse approach round 5 uses for height.
+  See `TODO.md`'s Current Objective for the full data.
+- **Round 5's height fix is STILL genuinely untested after three separate real-device
+  attempts — every one has caught the pan-stuck (gap: 0px) state, never the
+  height-diverged state the fix is actually meant to correct.** Manual timing keeps
+  missing the window. **Recommended next step: add tooling, not more manual attempts**
+  — extend the existing auto-captured history log to also auto-log a timestamped entry
+  the moment `window.innerHeight − visualViewport.height` first crosses the round-4/5
+  threshold (40px), purely observational, no correction attached. That would let the
+  project owner reproduce the bug normally and check the log afterward for whether/
+  when a height-divergence ever actually occurred, rather than needing to catch it
+  live with perfect manual timing every time. See `TODO.md` for full detail.
 - **Scanned puzzles now auto-publish to the library the moment they're played** (no more
   separate optional "Save to library" step) — this closed the original "Save progress
   does nothing for a scanned puzzle" gap by making a played scan a completely normal
@@ -183,15 +204,28 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective: this round's build work — the "draw a puzzle" feature — is
-done, preview-verified end-to-end against the real Firebase project (see the
-entry above and `TODO.md`'s Completed Tasks for the full writeup), not yet
-real-device-confirmed.** The project owner is running all pending real-device
+**Current objective has two items — the "draw a puzzle" feature (done, preview-
+verified end-to-end against real Firebase, not yet real-device-confirmed) and a
+toolbar cleanup that has NOT actually been sent to Code yet** (an earlier
+assumption that it was already in progress was incorrect — this is its first
+time being requested). The project owner is running all pending real-device
 testing (round 5's scroll fix, and anything else awaiting on-device confirmation)
-in parallel this same round — item 1 below is reference/context only, still not
+in parallel this same round — item 3 below is reference/context only, still not
 this round's task to act on.
 
-1. **The scroll bug — reference only this round, not active work**:
+1. **"Draw a puzzle" — done, preview-verified.** See above and `TODO.md`'s
+   Completed Tasks for the full writeup (a real 5x5 plus-sign drawn, published,
+   played blank, and solved end-to-end against the live Firestore project). Not
+   yet real-device-confirmed.
+2. **Toolbar cleanup — NOT yet sent to Code, first time.** Explicit new order
+   and relabeling from the project owner: Library → mode toggle
+   (Fill / **X** / Eraser — the eraser gets a real pencil-eraser icon, both X
+   and Eraser drop their words, icon-only) → Undo → [gap] → Stats (icon-only,
+   drop the word) → Mute → Save → Help. Every icon-only button needs a tooltip
+   that appears on hover/press and disappears, not a permanent label — native
+   `title` may not be reliable on iOS Safari given this project's history, so
+   a custom tooltip may be the safer choice. See `TODO.md` for the full spec.
+3. **The scroll bug — reference only this round, not active work**:
    - The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
      real device.
    - Round 4's scroll fix FAILED real-device verification — the sixth straight

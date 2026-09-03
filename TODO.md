@@ -623,10 +623,46 @@ Current Objective (Focus Area)
 
 * **The "draw a puzzle" feature (this round's build work) is now done and preview-verified
   end-to-end against the real Firebase project — see its own Completed Tasks entry above
-  for the full writeup.** Not yet real-device-confirmed. Everything below this point is the
-  scroll bug's own standing state, reference-only per the project owner's instruction that
-  they're running its real-device testing themselves in parallel — still not this round's
-  task to act on.
+  for the full writeup.** Not yet real-device-confirmed.
+
+* **Not yet sent to Code — this is the first time this is actually being
+  requested, correcting an earlier assumption that it was already in progress.**
+  Full spec, unchanged from when it was first designed here:
+  1. **Puzzle library** (no change) — confirmed by the project owner: "Puzzle
+     history" meant the existing 📚 library button, not a separate feature.
+  2. **The Fill/Mark-empty/Eraser mode toggle** — two label/icon changes within
+     it: the "Mark empty"/"✕ Mark empty" option shortens to just **"X"** (drop
+     "Mark"/"empty" entirely); the Eraser option's current icon gets replaced
+     with an actual pencil-eraser-style icon (not whatever placeholder emoji it
+     currently uses), and the word "Erase" is dropped entirely — icon-only,
+     matching the minimalism direction of the rest of this cleanup. Exact icon
+     choice is Code's call given no perfect single "pencil eraser" emoji exists
+     in most sets — an SVG/image icon may be worth considering over forcing an
+     imperfect emoji match.
+  3. **Undo** (no change to the button itself)
+  — **a small visual gap here**, separating this first cluster (Library, mode
+  toggle, Undo — the frequently-used play controls) from the second cluster
+  below (secondary/settings-ish controls) —
+  4. **Stats** — icon-only now, drop the word "Stats" entirely (keep the
+     existing 📊 icon)
+  5. **Mute button** (no change)
+  6. **Save icon** (no change)
+  7. **Help icon** (no change)
+  - **Tooltips, not permanent labels**: every button that's losing its visible
+    text (X, Eraser, Stats) should get a "pop-up caption" — a tooltip that
+    appears on hover/press and disappears afterward, not a persistent label
+    that takes up toolbar space. A native `title` attribute is the simplest way
+    to get this for free; a custom small fade-in/fade-out tooltip is the
+    fancier option if native tooltips don't feel responsive enough on
+    touch/mobile (native `title` tooltips are notoriously unreliable on iOS
+    Safari specifically, worth checking given this project's whole iOS-Safari
+    history — a custom tap-and-hold or tap-to-reveal tooltip may end up being
+    the more reliable choice here, Code's call based on what actually works on
+    a real device).
+
+Everything below this point is the scroll bug's own standing state, reference-only
+per the project owner's instruction that they're running its real-device testing
+themselves in parallel — still not this round's task to act on.
 
 * **Round 4's scroll fix (`healStuckViewportHeight`) has now been tested on the real
   device, including the manual "Force heal viewport height now" button — and the
@@ -711,6 +747,99 @@ Current Objective (Focus Area)
   - Given six straight failed rounds on this bug class, treat this as a candidate to
     verify, not a confirmed fix, until the project owner reports back real before/after
     numbers the same way round 4's failure was caught.
+  - **CORRECTION, and a major finding: the project owner confirmed this capture
+    (10:47:05 PM, poll fired 363 times) was taken AFTER pressing the pan-specific
+    "Force correct now" button — a deliberate, manual invocation of
+    `correctResidualViewportPan`, not just another automatic poll cycle.** This
+    is the mechanism-isolation test that's been called for across several
+    earlier rounds and never definitively completed. The result: `offsetTop: 79`,
+    `pageTop: 79`, `scrollY: 79` — **completely unchanged after manually forcing
+    the correction.** This settles the standing "trigger problem vs. mechanism
+    problem" question conclusively: **it's a mechanism problem.**
+    `window.scrollTo(window.scrollX, window.scrollY)` (the corrective action
+    every round since round 1 has relied on for the pan specifically) simply
+    does NOT reset a stuck `visualViewport.offsetTop` on this real device —
+    not automatically via the poll, not via focus/resize events, and now
+    confirmed not even when deliberately, manually invoked. Every round's
+    trigger-coverage refinement (rounds 1 through 3) was chasing WHEN to call a
+    corrective action that was never actually capable of correcting anything on
+    this device in the first place.
+  - **This is a SEPARATE finding from round 4/5's height-specific fix** —
+    `healStuckViewportHeight` targets a different variable
+    (`visualViewport.height`) via a different mechanism (viewport-meta re-parse
+    in round 5) and is unaffected by this conclusion; this capture had
+    `round 4's stuck-height gap: 0px` (no height divergence present), so it
+    doesn't test round 5 at all — see the still-open note below for how to
+    actually test that separately.
+  - **Do not attempt any further refinement of the `window.scrollTo`-based pan
+    correction** — that specific mechanism is now conclusively shown not to
+    work on this device, regardless of trigger timing. **The pan needs a
+    genuinely different corrective technique**, the same category of fix round
+    5 represents for the height variable — worth trying the SAME viewport-meta
+    re-parse technique round 5 uses for the pan too, since both symptoms belong
+    to the same broader class of WebKit `visualViewport` bug, or researching a
+    separate documented technique specifically for resetting a stuck pan if the
+    meta-reparse trick turns out to be height-specific.
+  - **To actually test round 5's height fix specifically, a capture still needs
+    to catch a moment where the stuck-height gap line is NONZERO** (heights
+    diverged, not just the pan) — that's the specific state
+    `healStuckViewportHeight` is meant to correct, and it remains untested by
+    every capture so far.
+  - **A fresh onset capture (10:55:26 PM, a new session, only 54 poll firings
+    in — "after the cell but before the force correct") caught the bug earlier
+    in its timeline than most prior captures**: `visualViewport.height` and
+    `window.innerHeight` both read 640 (genuine keyboard-open dimensions,
+    matching a real ~408px keyboard height reduction) with `offsetTop: 408`
+    consistent — but `activeElement: (none)`, nothing currently focused. This
+    is the moment right as/after the keyboard closes but before the layout has
+    caught up — a well-timed onset snapshot, distinct from the later
+    already-settled "stuck at 79" readings seen elsewhere. Waiting on the
+    project owner for the matching "after force correct" reading from this
+    same fresh session, to freshly re-confirm (or complicate) the pan-mechanism
+    finding directly above with a cleanly-paired before/after from a single
+    repro rather than readings pieced together across sessions.
+  - **Follow-up pair from the same evening (10:58:12 PM → 10:59:17 PM, "after
+    dismissing the keyboard", 34→62 poll firings) — does NOT test round 5,
+    only reconfirms the pan-stuck pattern's persistence.** Before pressing
+    "Force heal viewport height now": `offsetTop: 79`, `round 4's stuck-height
+    gap: 0px` (heights already matched — no divergence present). After
+    pressing it, ~65 seconds later: completely unchanged (`offsetTop: 79`,
+    gap still `0px`). **This is expected either way, not new evidence against
+    round 5** — `healStuckViewportHeight`'s own threshold gate means it
+    wouldn't attempt any correction when the gap is already 0, so nothing was
+    actually exercised by this test. What's still needed: a capture where the
+    height gap itself is nonzero BEFORE pressing force-heal, to actually test
+    whether it closes that gap. Every capture collected so far, across every
+    session, has caught the pan-stuck (gap: 0) pattern specifically, never the
+    height-diverged one round 5 targets — worth trying a longer wait after
+    dismissing the keyboard (the one time a height gap was ever observed, it
+    appeared roughly 84 seconds after keyboard-close, not immediately), or
+    pressing "Force correct now" (the pan-specific button) first and checking
+    again afterward, since the one real height-gap sighting came right after
+    the pan had already been corrected by something else.
+  - **A THIRD attempt (12:15:53 AM → 12:16:40 AM, 342→458 poll firings,
+    confirmed "Force heal viewport height now" pressed) landed in the exact
+    same non-informative state again** — `offsetTop: 79`, gap `0px` both
+    before and after, unchanged. This is now three separate real-device
+    attempts in a row that all happened to catch the pan-stuck (gap-already-0)
+    state rather than the height-diverged one, despite the project owner
+    making a genuine, careful effort each time (including deliberately waiting
+    and trying different repro variations). **Given how consistently manual
+    timing is missing the window, the more efficient fix at this point is
+    tooling, not more manual attempts**: extend the existing auto-captured
+    history log (already recording `focusin`/`focusout`/`resize`/`scroll`
+    events automatically, no manual tap required) to ALSO auto-log an entry
+    the moment `window.innerHeight − visualViewport.height` first crosses the
+    round-4/5 threshold (40px) — a purely observational log line, no
+    correction attached, just a timestamped record that the height-diverged
+    state genuinely occurred during this page load. That would let the
+    project owner reproduce the bug normally, wait however long, then check
+    the history log after the fact for whether/when a height-divergence entry
+    appears, rather than needing to catch it with a live, precisely-timed
+    manual snapshot every single time. This doesn't test round 5's fix by
+    itself, but it would finally make it possible to reliably CONFIRM the
+    height-diverged state is actually occurring and capture its exact timing,
+    which is the prerequisite every attempt so far has been missing.
 
 Next Steps (Do Not Start Yet)
 
@@ -726,6 +855,13 @@ Next Steps (Do Not Start Yet)
 * Item 9 — remaining scope: richer library browsing only now (search over titles,
   sort options like newest/most-solved, pagination once the library grows) — the
   friends-only/private sharing question is resolved.
+* **Possible icon change, low priority — flagged casually by the project owner,
+  not urgent ("might have to... at one point").** The current 🏁 checkered-flag
+  icon (chosen during the "Nonogram Pro" rebrand round) reads as a racing-game
+  icon, not a nonogram/picture-logic one — presumably meant to nod at a
+  checkered grid pattern, but doesn't land that way in practice. Worth
+  revisiting whenever branding comes up again; no rush, no specific replacement
+  requested yet.
 
 Technical Notes / Blockers
 
