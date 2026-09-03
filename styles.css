@@ -141,12 +141,13 @@ body {
   margin-bottom: 1.25rem;
 }
 
-/* Library-consolidation round (see TODO.md): where the old "Puzzle" dropdown lived —
-   now the entry point for the merged library modal, plus "Stats & pairing" grouped
-   alongside it (both moved out of the Help dropdown; neither is a help action). */
-.library-entry-group {
-  display: flex;
-  gap: 0.5rem;
+/* Toolbar cleanup (see TODO.md): a plain spacer, not a divider line — separates the first
+   cluster of frequently-used play controls (Library, mode toggle, Undo) from the second
+   cluster of secondary/settings-ish controls (Stats, Mute, Save, Help) that follows it. Adds
+   to (not replaces) `.toolbar`'s own `gap`, so the visual break reads as noticeably larger
+   than the ordinary spacing between any other two toolbar controls. */
+.toolbar__gap {
+  width: 0.9rem;
 }
 
 .mode-toggle {
@@ -185,6 +186,16 @@ body {
 .mode-btn[aria-pressed="true"] {
   background: var(--gold);
   color: #241a04;
+}
+
+/* Toolbar cleanup (see TODO.md): X and Eraser dropped their words and went icon-only —
+   narrower, roughly-square padding instead of .mode-btn's default text-shaped padding, so a
+   bare "✕" or the eraser SVG doesn't sit in an oversized text-width box next to "Fill". The
+   eraser's inline SVG uses `fill/stroke: currentColor`, so it already tracks
+   .mode-btn[aria-pressed="true"]'s color swap above for free — no separate active-state rule
+   needed here. */
+.mode-btn--icon {
+  padding: 0 0.6rem;
 }
 
 /* Persistent mute toggle (item 3) — its own control, separate from the Help dropdown, so
@@ -359,14 +370,38 @@ body {
    `.btn + .btn` rule above exists for vertical button stacks elsewhere, and every one of those
    consumers already resets it back to 0 for its own horizontal-flex `.btn` group
    (`.mistake-popup__actions .btn`, `.modal-card__actions .btn`, `.library-row .btn`, all below
-   this same rule for the cascade tie-break to land their way) — `.library-entry-group` was
-   simply the one place that reset got missed, so "Stats" and the save icon (each directly
-   following another `.btn`) sat 8px lower than "Puzzle library". Not a size or appearance issue
-   at all — rounds 2-3 measured height/border-radius/appearance and found them identical because
-   the bug was never there; it's vertical POSITION via an inherited margin, only visible by
-   checking each .btn's actual rect.top, not its own box dimensions. */
-.library-entry-group .btn {
+   this same rule for the cascade tie-break to land their way) — the toolbar was simply the one
+   place that reset got missed, so any `.btn` directly following another `.btn` sat 8px lower
+   than its neighbor. Not a size or appearance issue at all — rounds 2-3 measured height/
+   border-radius/appearance and found them identical because the bug was never there; it's
+   vertical POSITION via an inherited margin, only visible by checking each .btn's actual
+   rect.top, not its own box dimensions.
+   Toolbar cleanup round (see TODO.md): originally scoped to `.library-entry-group .btn`, that
+   wrapper is gone now that Library/Undo/Stats/Save are spread across the toolbar row instead of
+   clustered together — rescoped to every direct `.btn` child of `.toolbar` so the same reset
+   still applies regardless of which two buttons happen to sit adjacent to each other. */
+.toolbar > .btn {
   margin-top: 0;
+}
+
+/* Custom tooltip bubble (toolbar cleanup — see TODO.md and src/tooltip.js): a single shared
+   floating element, positioned per button by tooltip.js rather than one element per button.
+   Plain immediate show/hide via the existing `.hidden` class (no fade transition) — consistent
+   with how every other hide/show toggle in this codebase already works (modals, menus), rather
+   than introducing a one-off animated pattern here. */
+.tooltip-bubble {
+  position: fixed;
+  z-index: 50;
+  background: var(--panel-bg-raised);
+  color: var(--text);
+  border: 1px solid rgba(230, 183, 63, 0.35);
+  border-radius: 0.4rem;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.35);
 }
 
 .hidden {

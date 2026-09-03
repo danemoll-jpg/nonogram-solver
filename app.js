@@ -27,6 +27,7 @@ import {
 } from './src/puzzleLibrary.js';
 import { ensureSignedIn } from './src/firebase.js';
 import { cellsOnLine } from './src/geometry.js';
+import { initTooltips } from './src/tooltip.js';
 
 let puzzle = null;
 let board = null;
@@ -1388,6 +1389,12 @@ els.menuDraw.addEventListener('click', () => {
   drawWizard.open();
 });
 
+// Toolbar cleanup (see TODO.md): wires the custom hover/press tooltip (src/tooltip.js) onto
+// every icon-only toolbar button that lost its visible label this round (X, Eraser, Stats,
+// Undo, Save progress — see their own `data-tooltip` attributes in index.html). Called once,
+// after all the toolbar markup above is guaranteed to exist.
+initTooltips();
+
 // ---- puzzle library browse (library-consolidation round — see TODO.md; started as item
 // 9's save-to-library slice) ----
 //
@@ -2368,6 +2375,54 @@ function initScrollDiagnostics() {
   window.visualViewport?.addEventListener('scroll', onVisualViewportScroll);
   document.addEventListener('focusin', onFocusIn);
   document.addEventListener('focusout', onFocusOut);
+
+  // ---- round 5 tooling extension: auto-log the height-diverged state itself (see TODO.md) ----
+  //
+  // Three separate real-device attempts in a row all happened to sample the pan-stuck (height
+  // gap already 0) state, never the height-diverged one `healStuckViewportHeight` actually
+  // exists to correct — manual timing kept missing the window, no matter how carefully the
+  // project owner tried to catch it live. Rather than a fourth manual attempt, this makes a
+  // miss impossible: the exact number `healStuckViewportHeight`'s own threshold gate watches
+  // (`window.innerHeight − visualViewport.height`) is now auto-logged into this same history
+  // the MOMENT it first crosses `STUCK_HEIGHT_THRESHOLD_PX` — no manual tap required. The
+  // project owner can reproduce the bug normally, however long that takes, then check the
+  // history log afterward for whether/when a crossing entry ever actually appears.
+  //
+  // Deliberately purely observational: this only calls logHistory, never
+  // healStuckViewportHeight or anything else that would attempt a correction — it exists
+  // solely to answer "did/when did the height-diverged state occur," independent of whether
+  // any fix attempt is running, so it can't mask or be masked by one.
+  //
+  // Edge-triggered (armed/disarmed) rather than logged on every poll tick while the gap stays
+  // over threshold: a stuck gap can plausibly persist across many ticks, and repeating the same
+  // observation into a capped 60-line history on every tick would just push out genuinely
+  // distinct events. Re-arms once the gap drops back under threshold, so a second, later
+  // occurrence in the same page load still gets its own entry.
+  let heightGapArmed = true;
+  function checkStuckHeightGapObservation() {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const gap = window.innerHeight - vv.height;
+    if (gap >= STUCK_HEIGHT_THRESHOLD_PX) {
+      if (!heightGapArmed) return; // already logged this occurrence — wait for it to clear
+      heightGapArmed = false;
+      logHistory(
+        `HEIGHT GAP CROSSED THRESHOLD (auto-detected, observational only) — gap=${gap}px ` +
+        `vv.height=${vv.height} innerHeight=${window.innerHeight} threshold=${STUCK_HEIGHT_THRESHOLD_PX}px`
+      );
+    } else {
+      heightGapArmed = true; // gap cleared — re-arm so a later, separate crossing logs again
+    }
+  }
+  // Same 400ms cadence as the app-wide correction poll (see correctResidualViewportPan's own
+  // setInterval below), but this is its own independent interval — it must keep observing and
+  // logging on its own schedule regardless of whether that poll (or healStuckViewportHeight
+  // specifically) is running, gated, or itself mid-correction at any given tick.
+  setInterval(checkStuckHeightGapObservation, 400);
+  // Also check right on every visualViewport resize — the moment most likely to actually
+  // produce a fresh crossing — so a crossing that happens to land between two 400ms poll ticks
+  // still gets caught as close to the moment it happened as possible.
+  window.visualViewport?.addEventListener('resize', checkStuckHeightGapObservation);
 
   // ---- keeping the button/panel visible through a keyboard interaction (defensive; see
   // this function's header comment) ----

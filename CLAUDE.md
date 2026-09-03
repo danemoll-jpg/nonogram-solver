@@ -171,6 +171,38 @@
   TODO.md's Completed Tasks for the full preview-verification writeup (a real 5x5
   plus-sign drawn, published, played blank, and solved end-to-end against the live
   Firestore project) — not yet real-device-confirmed.
+- **Toolbar cleanup — done, preview-verified.** Reordered to Library → mode toggle
+  (Fill / X / Eraser) → Undo → a visual gap → Stats → Mute → Save → Help, replacing
+  the old `.library-entry-group` clustering. X and Eraser (new inline-SVG
+  pencil-eraser icon in `index.html`, `currentColor`-based so it tracks
+  `.mode-btn[aria-pressed="true"]`'s color swap for free) and Stats all went
+  icon-only. New shared module `src/tooltip.js` (`attachTooltip`/`initTooltips`) —
+  a single floating bubble, wired via `data-tooltip` — gives every icon-only button
+  a hover/focus/touch-press caption instead of relying on native `title`, which
+  this project's whole iOS-Safari history says not to trust. Round 4's
+  `.library-entry-group .btn { margin-top: 0 }` toolbar-alignment fix was rescoped
+  to `.toolbar > .btn` (the wrapper class it was scoped to is gone), kept in the
+  same post-`.btn + .btn` source-order position for the cascade tie-break to still
+  land correctly. Verified in browser preview: correct button order/accessible
+  names, tooltip bubbles shown on hover for Eraser and Stats, mode-toggle
+  `aria-pressed` still switching correctly. All 822 tests pass. Not yet
+  real-device-confirmed — the touch-press tooltip path specifically can't be
+  exercised from preview tooling.
+- **Scroll bug round 5 tooling extension — done, per explicit request.** Three
+  real-device attempts in a row all sampled the pan-stuck (gap already 0) state,
+  never the height-diverged one `healStuckViewportHeight` exists to fix.
+  `initScrollDiagnostics` (`app.js`) now auto-logs a `HEIGHT GAP CROSSED THRESHOLD`
+  entry into the existing `?debug=scroll` history the moment
+  `window.innerHeight − visualViewport.height` first crosses the round 4/5
+  threshold (40px) — edge-triggered (re-arms once the gap clears), checked on its
+  own independent 400ms interval plus every `visualViewport` resize. Purely
+  observational — only calls `logHistory`, never a corrective function — so it
+  can't mask or be masked by whatever fix is or isn't active, and deliberately
+  does not touch the separately-broken pan-correction mechanism
+  (`correctResidualViewportPan`/`window.scrollTo`), which stays un-refined per the
+  standing instruction. `node --check` clean, all 822 tests pass (inert during
+  `npm test`, gated behind the URL flag). Not real-device-testable from this
+  environment, same as the rest of this diagnostic tool.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -204,28 +236,35 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective has two items — the "draw a puzzle" feature (done, preview-
-verified end-to-end against real Firebase, not yet real-device-confirmed) and a
-toolbar cleanup that has NOT actually been sent to Code yet** (an earlier
-assumption that it was already in progress was incorrect — this is its first
-time being requested). The project owner is running all pending real-device
-testing (round 5's scroll fix, and anything else awaiting on-device confirmation)
-in parallel this same round — item 3 below is reference/context only, still not
-this round's task to act on.
+**Current objective: no new build task queued.** Both items from the last round are
+now done — the "draw a puzzle" feature and the toolbar cleanup — both
+preview-verified, neither yet real-device-confirmed. The project owner is running
+all pending real-device testing (round 5's scroll fix, the toolbar cleanup,
+draw-a-puzzle, and anything else awaiting on-device confirmation) in parallel —
+item 3 below is reference/context only, not active work, except the round 5
+tooling extension noted in it, which was this round's one explicit ask.
 
 1. **"Draw a puzzle" — done, preview-verified.** See above and `TODO.md`'s
    Completed Tasks for the full writeup (a real 5x5 plus-sign drawn, published,
    played blank, and solved end-to-end against the live Firestore project). Not
    yet real-device-confirmed.
-2. **Toolbar cleanup — NOT yet sent to Code, first time.** Explicit new order
-   and relabeling from the project owner: Library → mode toggle
-   (Fill / **X** / Eraser — the eraser gets a real pencil-eraser icon, both X
-   and Eraser drop their words, icon-only) → Undo → [gap] → Stats (icon-only,
-   drop the word) → Mute → Save → Help. Every icon-only button needs a tooltip
-   that appears on hover/press and disappears, not a permanent label — native
-   `title` may not be reliable on iOS Safari given this project's history, so
-   a custom tooltip may be the safer choice. See `TODO.md` for the full spec.
-3. **The scroll bug — reference only this round, not active work**:
+2. **Toolbar cleanup — done, preview-verified.** New order and relabeling
+   shipped exactly as specified: Library → mode toggle (Fill / **X** / Eraser —
+   the eraser now has a real inline-SVG pencil-eraser icon, both X and Eraser
+   dropped their words, icon-only) → Undo → a visual gap → Stats (icon-only,
+   word dropped) → Mute → Save → Help. Every newly-icon-only button (plus Undo
+   and Save, which already were) gets a custom hover/press tooltip via the new
+   `src/tooltip.js` module — deliberately not the native `title` attribute,
+   given this project's whole history of iOS-Safari-specific unreliability.
+   Verified in browser preview: correct button order/accessible names via
+   `read_page`, tooltip bubbles shown on hover for Eraser and Stats, and
+   mode-toggle `aria-pressed` still switching correctly across Fill/X/Eraser.
+   All 822 tests pass. Not yet real-device-confirmed — in particular the
+   touch-press (`touchstart`) tooltip path can't be exercised from preview
+   tooling, only hover/focus. See `TODO.md`'s Completed Tasks for the full
+   writeup, including the CSS margin-leak-reset rescoping this reorder required.
+3. **The scroll bug — reference only this round except one explicit ask, not
+   otherwise active work**:
    - The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
      real device.
    - Round 4's scroll fix FAILED real-device verification — the sixth straight
@@ -236,6 +275,17 @@ this round's task to act on.
    - Round 5 (see above) is implemented but NOT real-device-verified — needs a
      real on-device check via the "Force heal viewport height now" debug
      button before it can be trusted, same as every prior round.
+   - **This round's explicit ask, done**: three manual real-device attempts in a
+     row all missed the height-diverged state round 5 is meant to fix, so
+     `app.js`'s `?debug=scroll` history log now auto-detects it instead —
+     `checkStuckHeightGapObservation` logs a `HEIGHT GAP CROSSED THRESHOLD` entry
+     the moment `window.innerHeight − visualViewport.height` first crosses 40px,
+     purely observational (never calls a corrective function itself), so the
+     project owner can reproduce normally and check the log afterward instead of
+     needing perfect manual timing. Does not touch the pan-correction mechanism
+     (`correctResidualViewportPan`/`window.scrollTo`) at all — see the next bullet.
+     Not real-device-testable from this environment. See `TODO.md`'s Completed
+     Tasks for the full writeup.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,

@@ -619,50 +619,98 @@ Completed Tasks
     "preview-verified, awaiting the project owner's on-device pass" status every other
     recent addition has).
 
+* **Toolbar cleanup — done, preview-verified.** Full reorder to the exact spec: Library →
+  mode toggle (Fill / X / Eraser) → Undo → a visual gap → Stats → Mute → Save → Help. The old
+  `.library-entry-group` wrapper (Library+Stats+Save+Undo clustered together) is gone —
+  those four are now spread across the row in the order above instead of grouped by "moved
+  out of the Help menu" history.
+  - **X and Eraser go icon-only**: `mode-x` drops to a bare "✕" (was "✕ Mark empty"— "Mark
+    empty" as *words* is gone, the accessible name/tooltip still says "Mark empty"). The
+    Eraser button's old 🧹 broom-emoji placeholder is replaced with a real inline SVG
+    pencil-eraser icon (`index.html`, `.icon-eraser`) — a rotated rounded rectangle with a
+    dividing line evoking the classic two-tone eraser block, since no single emoji reads as
+    "eraser" consistently across platforms. Deliberately `stroke="currentColor"` rather than a
+    fixed color, so it inherits `.mode-btn[aria-pressed="true"]`'s existing gold/dark color
+    swap for free — no separate active-state CSS needed, same as the plain-text Fill/X
+    buttons already got automatically.
+  - **Stats goes icon-only** too (`btn-open-stats`, was "📊 Stats" → bare 📊).
+  - **New shared tooltip mechanism**: `src/tooltip.js` (new module, `attachTooltip`/
+    `initTooltips`) — a single shared floating bubble element, not the native `title`
+    attribute. Chosen deliberately per the spec's own instinct: this project has repeatedly
+    hit iOS-Safari-specific chrome quirks (the whole scroll-bug saga below), and native
+    `title` tooltips are a known-unreliable case on iOS Safari touch specifically — the
+    platform this app is mainly played on. Shows on `mouseenter`/`focus` (desktop/keyboard,
+    300ms delay to avoid flashing on incidental mouse passes) and on `touchstart` (touch has
+    no hover state at all, so the tap itself is the only "looking at this button" signal —
+    shown immediately, auto-hidden after 1.6s). Wired via `data-tooltip` attributes on
+    `mode-x`, `mode-erase`, `btn-open-stats`, `btn-undo`, `btn-save-progress` — the last two
+    already had a native `title` from an earlier round (Undo/Save were already icon-only);
+    those were switched to the same custom mechanism too rather than mixing both tooltip
+    systems in one toolbar.
+  - **Margin-leak reset rescoped, not reintroduced**: round 4's `.library-entry-group .btn {
+    margin-top: 0 }` fix (for the `.btn + .btn` vertical-stack rule leaking into a horizontal
+    toolbar row) had its wrapper class removed by this reorder, so it was rescoped to
+    `.toolbar > .btn { margin-top: 0 }` — every direct `.btn` child of the toolbar, not just a
+    subset — kept in the same "after `.btn + .btn` in source order" position round 4 already
+    established for the cascade tie-break to land correctly.
+  - **Verified in browser preview**: `read_page` confirmed the exact button order and
+    accessible names (Library → Fill → "Mark empty" → Eraser → "Undo last move" → Stats →
+    "Mute sound" → "Save progress" → Help); hovering Eraser and Stats each correctly showed
+    their custom tooltip bubble; clicking X confirmed `aria-pressed` still toggles correctly
+    across all three mode buttons (no wiring broke — every button is still looked up by id in
+    `app.js`, never by its old text). All 822 tests still pass (this is a markup/CSS/tooltip
+    change only, nothing solver- or model-related). Not yet real-device-confirmed — in
+    particular the touch-press tooltip path (`touchstart`) can't be exercised from this
+    environment's preview tooling, only its hover/focus path.
+
+* **Scroll bug round 5 tooling extension — done, per the project owner's explicit request
+  this round (an exception to the "reference only" framing below — this specific piece was
+  actively commissioned, not just standing state).** Three separate real-device attempts in a
+  row all happened to sample the pan-stuck (height gap already 0) state, never the
+  height-diverged one `healStuckViewportHeight` actually exists to correct — manual timing
+  kept missing the window despite genuine, careful effort each time. `app.js`'s
+  `initScrollDiagnostics` now auto-logs the height-diverged state itself into the existing
+  `?debug=scroll` history log: a `checkStuckHeightGapObservation` function computes the exact
+  same number `healStuckViewportHeight`'s own threshold gate watches
+  (`window.innerHeight − visualViewport.height`) and logs a `HEIGHT GAP CROSSED THRESHOLD`
+  history entry the moment it first crosses `STUCK_HEIGHT_THRESHOLD_PX` (40px) — no manual tap
+  required. Edge-triggered (an `armed`/`disarmed` flag): logs once per crossing, re-arms once
+  the gap drops back under threshold, so a second, later occurrence in the same page load still
+  gets its own entry instead of the capped 60-line history filling up with repeats of the same
+  still-stuck state. Checked on its own independent `setInterval(…, 400)` (same cadence as the
+  existing correction poll, but a separate interval — it has to keep observing regardless of
+  whether the correction poll or `healStuckViewportHeight` itself is running, gated, or
+  mid-correction at any given tick) plus directly on every `visualViewport` `resize` event, for
+  the tightest-possible catch right at the moment most likely to produce a fresh crossing.
+  **Deliberately purely observational**: it only ever calls `logHistory`, never
+  `healStuckViewportHeight` or any other corrective call — it exists solely to answer
+  "did/when did the height-diverged state occur," independent of whatever fix attempt is or
+  isn't active, so it can't mask or be masked by one. Does **not** touch
+  `correctResidualViewportPan` or its `window.scrollTo` mechanism at all — per the standing
+  instruction below, that mechanism is conclusively proven broken and wasn't refined further.
+  Syntax-checked (`node --check app.js`) and all 822 tests still pass (this module is inert
+  during `npm test` — gated behind `?debug=scroll` in the URL, same as the rest of
+  `initScrollDiagnostics`). **Not real-device-testable from this environment**, same as every
+  other piece of this diagnostic tool — the project owner can now reproduce the bug normally,
+  at whatever pace, and check the history log afterward for whether/when a crossing entry
+  appears, rather than needing to catch it live with perfect manual timing.
+
 Current Objective (Focus Area)
 
-* **The "draw a puzzle" feature (this round's build work) is now done and preview-verified
-  end-to-end against the real Firebase project — see its own Completed Tasks entry above
-  for the full writeup.** Not yet real-device-confirmed.
-
-* **Not yet sent to Code — this is the first time this is actually being
-  requested, correcting an earlier assumption that it was already in progress.**
-  Full spec, unchanged from when it was first designed here:
-  1. **Puzzle library** (no change) — confirmed by the project owner: "Puzzle
-     history" meant the existing 📚 library button, not a separate feature.
-  2. **The Fill/Mark-empty/Eraser mode toggle** — two label/icon changes within
-     it: the "Mark empty"/"✕ Mark empty" option shortens to just **"X"** (drop
-     "Mark"/"empty" entirely); the Eraser option's current icon gets replaced
-     with an actual pencil-eraser-style icon (not whatever placeholder emoji it
-     currently uses), and the word "Erase" is dropped entirely — icon-only,
-     matching the minimalism direction of the rest of this cleanup. Exact icon
-     choice is Code's call given no perfect single "pencil eraser" emoji exists
-     in most sets — an SVG/image icon may be worth considering over forcing an
-     imperfect emoji match.
-  3. **Undo** (no change to the button itself)
-  — **a small visual gap here**, separating this first cluster (Library, mode
-  toggle, Undo — the frequently-used play controls) from the second cluster
-  below (secondary/settings-ish controls) —
-  4. **Stats** — icon-only now, drop the word "Stats" entirely (keep the
-     existing 📊 icon)
-  5. **Mute button** (no change)
-  6. **Save icon** (no change)
-  7. **Help icon** (no change)
-  - **Tooltips, not permanent labels**: every button that's losing its visible
-    text (X, Eraser, Stats) should get a "pop-up caption" — a tooltip that
-    appears on hover/press and disappears afterward, not a persistent label
-    that takes up toolbar space. A native `title` attribute is the simplest way
-    to get this for free; a custom small fade-in/fade-out tooltip is the
-    fancier option if native tooltips don't feel responsive enough on
-    touch/mobile (native `title` tooltips are notoriously unreliable on iOS
-    Safari specifically, worth checking given this project's whole iOS-Safari
-    history — a custom tap-and-hold or tap-to-reveal tooltip may end up being
-    the more reliable choice here, Code's call based on what actually works on
-    a real device).
+* **Both items from the last round are now done — see their Completed Tasks entries above.**
+  "Draw a puzzle" (preview-verified end-to-end against real Firebase) and the toolbar cleanup
+  (preview-verified: order, icon-only buttons, tooltips, mode-toggle wiring all confirmed) are
+  both implemented; neither is real-device-confirmed yet. The scroll bug's round-5 tooling
+  extension above is also done, per this round's explicit request.
+* **No new build task is queued right now.** The project owner is running real-device
+  verification (toolbar cleanup, draw-a-puzzle, round 5's height fix via the new auto-logging,
+  and anything else pending) in parallel — the scroll-bug section below remains reference-only
+  standing state until a real-device report comes back with something to act on.
 
 Everything below this point is the scroll bug's own standing state, reference-only
 per the project owner's instruction that they're running its real-device testing
-themselves in parallel — still not this round's task to act on.
+themselves in parallel — still not this round's task to act on (except the round 5 tooling
+extension immediately above, which was this round's explicit request).
 
 * **Round 4's scroll fix (`healStuckViewportHeight`) has now been tested on the real
   device, including the manual "Force heal viewport height now" button — and the

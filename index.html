@@ -21,39 +21,57 @@
     <main class="layout">
       <section class="board-panel">
         <div class="toolbar">
-          <!-- Library consolidation round (see TODO.md): this is where the old "Puzzle"
-               dropdown of built-in samples used to live — it's now the entry point for the
-               merged library modal (built-in + community-saved puzzles in one browsable
-               list), since picking a puzzle isn't a help action and shouldn't live under
-               Help. "Stats & pairing" moved out to sit alongside it for the same reason —
-               it's increasingly the same conceptual area now that per-puzzle solved status
-               and personal stats are part of the library. "Save progress" joined them in the
-               Current Objective round (see TODO.md) — shipped under Help first, then the
-               project owner confirmed the same "not really a help action" reasoning applies
-               to it too. -->
-          <div class="library-entry-group">
-            <button id="btn-open-library" class="btn btn--primary" type="button">📚 Puzzle library</button>
-            <button id="btn-open-stats" class="btn" type="button">📊 Stats</button>
-            <button id="btn-save-progress" class="btn btn--icon" type="button" aria-label="Save progress" title="Save progress">💾</button>
-            <!-- Current Objective (see TODO.md): repeatable undo, distinct from the existing
-                 mistake-driven "back up to move #N" flow — steps back one move (a single click,
-                 or a whole drag/hint/auto-X batch) at a time, indefinitely. Disabled via app.js
-                 whenever board.history is empty (nothing left to undo, or a scan-baseline import
-                 that predates all real history). -->
-            <button id="btn-undo" class="btn btn--icon" type="button" aria-label="Undo last move" title="Undo last move" disabled>↩️</button>
-          </div>
+          <!-- Toolbar cleanup (see TODO.md): explicit project-owner-specified order — Library →
+               mode toggle → Undo (the frequently-used play controls) → a visual gap →
+               Stats/Mute/Save/Help (secondary/settings-ish controls). This replaces the older
+               `.library-entry-group` clustering (Library+Stats+Save+Undo together) — Library,
+               Undo, Stats, and Save are now spread across the row in the order above instead of
+               grouped by "moved out of the Help menu" history, which no longer matches how
+               they're meant to read left-to-right. -->
+          <button id="btn-open-library" class="btn btn--primary" type="button">📚 Puzzle library</button>
+
           <div class="mode-toggle" role="group" aria-label="Marking mode">
             <button id="mode-fill" class="mode-btn" type="button" aria-pressed="true">Fill</button>
-            <button id="mode-x" class="mode-btn" type="button" aria-pressed="false">✕ Mark empty</button>
-            <!-- Current Objective (see TODO.md): dedicated Eraser mode, chosen over inferring
-                 "erase intent" from what a drag happens to cross. Clears FILLED/EMPTY back to
-                 UNKNOWN; a click/drag over an already-UNKNOWN cell is a no-op. -->
-            <button id="mode-erase" class="mode-btn" type="button" aria-pressed="false">🧹 Erase</button>
+            <!-- Icon-only now (was "✕ Mark empty") — see the tooltip note below. -->
+            <button id="mode-x" class="mode-btn mode-btn--icon" type="button" aria-pressed="false" aria-label="Mark empty" data-tooltip="Mark empty">✕</button>
+            <!-- Dedicated Eraser mode (see TODO.md), chosen over inferring "erase intent" from
+                 what a drag happens to cross. Clears FILLED/EMPTY back to UNKNOWN; a click/drag
+                 over an already-UNKNOWN cell is a no-op. Icon-only now too (was "🧹 Erase") — the
+                 🧹 broom emoji was always a placeholder, replaced here with an inline SVG
+                 pencil-eraser glyph (no single emoji reads as "eraser" across platforms) that
+                 inherits the button's own text color via currentColor, so it matches
+                 .mode-btn[aria-pressed="true"]'s color swap the same way the plain-text Fill/X
+                 buttons already do, with no separate active-state CSS needed. -->
+            <button id="mode-erase" class="mode-btn mode-btn--icon" type="button" aria-pressed="false" aria-label="Eraser" data-tooltip="Eraser">
+              <svg class="icon-eraser" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                <g transform="rotate(-40 12 12)">
+                  <rect x="5" y="7.5" width="14" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.7" />
+                  <line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="1.7" />
+                </g>
+              </svg>
+            </button>
           </div>
+
+          <!-- Repeatable undo, distinct from the existing mistake-driven "back up to move #N"
+               flow — steps back one move (a single click, or a whole drag/hint/auto-X batch) at
+               a time, indefinitely. Disabled via app.js whenever board.history is empty (nothing
+               left to undo, or a scan-baseline import that predates all real history). Tooltip
+               replaces the old native `title` — see the mode-x/mode-erase comment above. -->
+          <button id="btn-undo" class="btn btn--icon" type="button" aria-label="Undo last move" data-tooltip="Undo last move" disabled>↩️</button>
+
+          <!-- Toolbar cleanup (see TODO.md): a small visual gap, not a divider line — just extra
+               horizontal space separating the play controls above from the secondary/settings
+               controls below. -->
+          <div class="toolbar__gap" aria-hidden="true"></div>
+
+          <!-- Icon-only now (was "📊 Stats") — see the tooltip note above. -->
+          <button id="btn-open-stats" class="btn btn--icon" type="button" aria-label="Stats" data-tooltip="Stats">📊</button>
 
           <button id="mute-toggle" class="btn mute-toggle" type="button" aria-pressed="false" aria-label="Mute sound">
             <span aria-hidden="true">🔊</span>
           </button>
+
+          <button id="btn-save-progress" class="btn btn--icon" type="button" aria-label="Save progress" data-tooltip="Save progress">💾</button>
 
           <!-- UI/branding polish round (see TODO.md): trimmed from a text "Help ▾" button to a
                plain "?" icon — aria-label carries the accessible name now that the visible
