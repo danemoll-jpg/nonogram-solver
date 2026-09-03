@@ -314,26 +314,22 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**The rename-popup scroll-bug fix and the new hide-a-puzzle feature are DONE and
-preview-verified, shipped together this round per the standing deploy-batching
-note.** Rename now opens a top-pinned `#rename-modal` popup (`showRenameModal` in
-`app.js`, mirroring the existing `showConfirm` pattern) instead of editing the
-library row in place — the same avoid-the-trigger strategy as the scan-wizard
-restructure, targeting a second confirmed real-device scroll-bug trigger (a
-keyboard opening on a text input positioned near the bottom of the screen). Hide
-adds a small icon-only 🙈/👁️ toggle to every library row (built-in or community,
-unlike Rename — hiding is a personal preference, not an edit) plus a required
-"Show hidden puzzles" checkbox to reveal/unhide again, backed by a new
-`users/{uid}/hiddenLibraryPuzzles/{puzzleId}` collection synced across paired
-devices, same pattern as solved/in-progress tracking. **One blocking follow-up
-before Hide/Unhide actually works live: `firebase deploy --only firestore:rules`
-still needs to run** — attempted this round and blocked by this environment's own
-auto-mode permission classifier as a production security-rules change, so it
-needs the project owner's explicit go-ahead. Preview-confirmed everything up to
-that point, including the correct "Missing or insufficient permissions" failure
-behavior while the rule isn't live yet. See `TODO.md`'s Completed Tasks for the
-full writeup. Not yet real-device-confirmed, same standing caveat as the rest of
-this arc.
+**The rename-popup scroll-bug fix and the new hide-a-puzzle feature are DONE,
+deployed, and preview-verified end-to-end, shipped together this round per the
+standing deploy-batching note.** Rename now opens a top-pinned `#rename-modal`
+popup (`showRenameModal` in `app.js`, mirroring the existing `showConfirm`
+pattern) instead of editing the library row in place — the same avoid-the-trigger
+strategy as the scan-wizard restructure, targeting a second confirmed real-device
+scroll-bug trigger (a keyboard opening on a text input positioned near the bottom
+of the screen). Hide adds a small icon-only 🙈/👁️ toggle to every library row
+(built-in or community, unlike Rename — hiding is a personal preference, not an
+edit) plus a required "Show hidden puzzles" checkbox to reveal/unhide again,
+backed by a new `users/{uid}/hiddenLibraryPuzzles/{puzzleId}` collection synced
+across paired devices, same pattern as solved/in-progress tracking; its
+`firestore.rules` entry is deployed and live. Verified the full hide→show
+hidden→unhide round trip against the live Firebase project with no console
+errors. See `TODO.md`'s Completed Tasks for the full writeup. Not yet
+real-device-confirmed, same standing caveat as the rest of this arc.
 
 Everything else is done: the scan-a-puzzle size-first restructure and the three
 related library/draw-puzzle cleanup items (name drawn puzzles at save time, drop

@@ -924,18 +924,19 @@ Completed Tasks
     the TOP of the screen, pre-filled, Cancel reverts with no change; the
     Show hidden puzzles checkbox toggles cleanly with no console errors. All
     822 tests pass; `node --check` clean on every edited file.
-  - **NOT yet fully verified: the actual hide/unhide write.** Clicking Hide
-    in preview correctly surfaced "Couldn't hide — Missing or insufficient
-    permissions" and left the row untouched — the right failure-handling
-    behavior, but expected here because `firestore.rules`' new
-    `hiddenLibraryPuzzles` rule is only in the local file so far.
-    **`firebase deploy --only firestore:rules` was attempted and blocked by
-    this environment's own auto-mode permission classifier** (a production
-    security-rules deploy, treated as needing explicit sign-off) — it still
-    needs to be run, with the project owner's go-ahead, before Hide/Unhide
-    will actually work live. Once deployed, the full hide→"Show hidden
-    puzzles"→unhide round trip still needs to be re-verified in preview (and
-    eventually on the real device, same as everything else in this arc).
+  - **Firestore rules deployed and the full hide/unhide write verified.**
+    First preview attempt correctly surfaced "Couldn't hide — Missing or
+    insufficient permissions" and left the row untouched (right
+    failure-handling behavior, before `firestore.rules`' new
+    `hiddenLibraryPuzzles` rule was live). `firebase deploy --only
+    firestore:rules` was blocked once by this environment's own auto-mode
+    permission classifier as a production security-rules change; re-run
+    after the project owner's explicit go-ahead and succeeded. Re-verified
+    in preview against the live project afterward: hiding "Puzzle 3"
+    removed it from the default view with no error; checking "Show hidden
+    puzzles" revealed it again, dimmed, with a "🙈 Hidden" badge and its
+    button swapped to 👁️ Unhide; clicking Unhide restored it to a normal
+    row. No console errors at any step.
   - Not yet real-device-confirmed (same standing caveat as every other item
     in this arc).
 
@@ -946,13 +947,11 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **None queued right now, except one blocking follow-up from the round just
-  above: `firebase deploy --only firestore:rules` still needs to be run (with
-  explicit go-ahead — see that entry) before the new Hide/Unhide feature will
-  work against the live project.** Once that's done, re-verify the hide→show
-  hidden→unhide round trip in preview. Everything else from this round and
-  the ones before it is done; see "Next Steps" below for what's deliberately
-  deferred (item 8, item 9's remaining scope).
+* **None queued right now.** The rename-popup fix and the hide-a-puzzle
+  feature (including its `firestore.rules` deploy) are fully done and
+  preview-verified end-to-end against the live project — see the Completed
+  Tasks entry above. See "Next Steps" below for what's deliberately deferred
+  (item 8, item 9's remaining scope).
 
 Everything below this point is the scroll bug's own historical/mechanism
 reference material — not active work, kept for context on why direct fixes to
@@ -1171,12 +1170,9 @@ Technical Notes / Blockers
 * No CI is configured — run `npm test` (or `node test/run.js`) locally before pushing.
 * Node.js 20→22 runtime bump — done and deployed.
 * Firestore security rules: in active use for `users/{uid}/stats/*`, `pairingCodes/*`,
-  `puzzles/{puzzleId}`, `users/{uid}/solvedLibraryPuzzles/{puzzleId}`, and
-  `users/{uid}/inProgressPuzzles/{puzzleId}`. `users/{uid}/hiddenLibraryPuzzles/{puzzleId}`
-  (hide-a-puzzle item, see Completed Tasks) is written to `firestore.rules` locally but
-  **NOT yet deployed** — `firebase deploy --only firestore:rules` was blocked by this
-  environment's auto-mode permission classifier and needs the project owner's explicit
-  go-ahead to run.
+  `puzzles/{puzzleId}`, `users/{uid}/solvedLibraryPuzzles/{puzzleId}`,
+  `users/{uid}/inProgressPuzzles/{puzzleId}`, and (deployed this round, see Completed
+  Tasks) `users/{uid}/hiddenLibraryPuzzles/{puzzleId}`.
 * Hint phrasing has an invisible-by-design fallback — "a hint appeared" is not proof
   the LLM call actually succeeded; check console/Cloud Function logs after any Cloud
   Function change.
