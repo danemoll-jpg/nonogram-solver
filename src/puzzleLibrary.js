@@ -26,7 +26,7 @@
 // update restricted to the original creator and scoped to only the `title` field — see
 // firestore.rules.
 
-import { ensureSignedIn, getFirestoreClient } from './firebase.js';
+import { ensureSignedIn, getFirestoreClient, getCallable } from './firebase.js';
 import { parseClueText, buildScannedPuzzle } from './scanPuzzle.js';
 import { UNKNOWN, FILLED, EMPTY, hasUnstableId } from './model.js';
 
@@ -183,6 +183,51 @@ export async function recordPuzzleSolved(puzzle, timeMs) {
   } catch (err) {
     console.warn('recordPuzzleSolved: write failed (offline, not deployed yet, or blocked) — ignoring', err);
     return false;
+  }
+}
+
+// ---- Global fastest-time-across-all-users stat (Current Objective — see TODO.md) ----
+//
+// `puzzleStats/{puzzleId}` — public-read, no client write at all (see firestore.rules and
+// functions/index.js's recordFastestTime, the only writer). Keyed the same uniform way as
+// solvedLibraryPuzzles above (works for a built-in or community puzzle id) but deliberately
+// its OWN top-level collection rather than a field on `puzzles/{puzzleId}` — see
+// recordFastestTime's own comment for why (a built-in puzzle has no doc there at all, and
+// stashing a stats-only doc under one would corrupt fetchLibraryPuzzles' plain "every doc in
+// `puzzles` is a full community puzzle" scan above).
+
+// Resolves a Map<puzzleId, fastestTimeMs> for every puzzle that has a recorded global
+// fastest time. Throws on failure — the library modal falls back to just not showing a
+// global time (same "fail soft, don't fake it" pattern as fetchSolvedPuzzles) rather than
+// guessing. Small, single bulk read like fetchLibraryPuzzles above — reasonable at this
+// project's library size; would need pagination if the puzzle count ever got large.
+export async function fetchGlobalFastestTimes() {
+  const { db, mod } = await getFirestoreClient();
+  const snap = await mod.getDocs(mod.collection(db, 'puzzleStats'));
+  const out = new Map();
+  snap.forEach((docSnap) => {
+    const fastestTimeMs = docSnap.data().fastestTimeMs;
+    if (typeof fastestTimeMs === 'number') out.set(docSnap.id, fastestTimeMs);
+  });
+  return out;
+}
+
+// Reports one completion's time to recordFastestTime (functions/index.js), which only ever
+// keeps it if it genuinely beats the current global record — the comparison and the write
+// both happen server-side, never trusted from this call alone. Same eligibility rule and
+// fire-and-forget contract as recordPuzzleSolved (an unpublished scan/drawn-origin puzzle has
+// no stable identity worth recording a global stat against either); callers don't need the
+// resolved value, but it's returned (null on skip/failure) in case a caller ever wants to
+// react to a genuine new record.
+export async function submitGlobalFastestTime(puzzle, timeMs) {
+  if (hasUnstableId(puzzle)) return null;
+  try {
+    const recordFastestTime = await getCallable('recordFastestTime');
+    const { data } = await recordFastestTime({ puzzleId: puzzle.id, timeMs });
+    return data;
+  } catch (err) {
+    console.warn('submitGlobalFastestTime: call failed (offline, not deployed yet, or blocked) — ignoring', err);
+    return null;
   }
 }
 

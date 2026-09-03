@@ -440,6 +440,17 @@ body {
   background: var(--grid-line);
   border: 2px solid var(--grid-line-strong);
   width: max-content;
+  /* Current Objective (TODO.md): a drag occasionally caused the whole page to scroll.
+     .nono-cell already has touch-action: none, but that only covers the cell elements
+     themselves — a fast/imprecise touch can land on the 1px gap between cells, the grid's
+     own border/corner, or a .nono-clue label, none of which had any touch-action set, so
+     the browser was free to start its own native pan gesture right there and "occasionally"
+     hijack the drag. Setting it here on the whole grid closes every one of those seams at
+     once. Deliberately NOT set on .board-root (its ancestor, which owns `overflow: auto`)
+     — that's the fallback scroll path for a puzzle fitBoardToViewport's sizing math didn't
+     manage to fully fit on screen, and should keep working if that math is ever imperfect.
+     Unrelated to the separate visualViewport/keyboard scroll saga elsewhere in this file. */
+  touch-action: none;
 }
 
 .nono-cell,

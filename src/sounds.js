@@ -21,6 +21,12 @@ const SOUND_FILES = {
   completeFanfare: 'complete-fanfare.mp3',
   lock: 'lock.mp3',
   unlock: 'unlock.mp3',
+  // Current Objective (see TODO.md): plumbing only, for a single clue NUMBER newly becoming
+  // anchored (grayed out) — see app.js's allAnchoredSnapshot/anyNewlyAnchored for the actual
+  // trigger logic. The project owner is sourcing this file themselves (a light, short chime,
+  // quieter than `lock` — it can fire far more often); until anchor.mp3 exists at this path,
+  // playSound('anchor') just fails silently like any other missing file (see file header).
+  anchor: 'anchor.mp3',
 };
 
 const MUTE_STORAGE_KEY = 'nonogram:muted';

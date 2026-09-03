@@ -48,6 +48,16 @@ rules_version = '2';
 //     this is a public write-open collection. update is restricted to the original creator
 //     AND scoped to only the `title` field — dimensions, clues, and creatorUid must never
 //     change after creation. No delete yet (not needed for this round).
+//
+//   puzzleStats/{puzzleId} — the global fastest-time-across-all-users stat (Current
+//     Objective — see TODO.md and functions/index.js's recordFastestTime). Keyed the same
+//     uniform way as solvedLibraryPuzzles/etc. above (works for a built-in or a community
+//     puzzle's id) but public-read since the value itself is genuinely global, unlike those
+//     per-user collections. No client write at all, in either direction — this is the one
+//     piece of player-facing data in this whole schema where a plain client-writable field
+//     would be directly exploitable (anyone could claim an instant/impossible time), so
+//     every write goes through recordFastestTime's Cloud Function (Admin SDK, bypasses these
+//     rules entirely) instead of a rule trying to validate it.
 service cloud.firestore {
   match /databases/{database}/documents {
     match /users/{uid}/stats/{size} {
@@ -86,6 +96,11 @@ service cloud.firestore {
         && request.resource.data.title is string
         && request.resource.data.title.size() > 0;
       allow delete: if false;
+    }
+
+    match /puzzleStats/{puzzleId} {
+      allow read: if true;
+      allow write: if false;
     }
   }
 }

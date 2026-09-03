@@ -27,6 +27,8 @@ import {
   fetchHiddenPuzzles,
   hidePuzzleInLibrary,
   unhidePuzzleInLibrary,
+  fetchGlobalFastestTimes,
+  submitGlobalFastestTime,
 } from './src/puzzleLibrary.js';
 import { ensureSignedIn } from './src/firebase.js';
 import { cellsOnLine } from './src/geometry.js';
@@ -662,6 +664,10 @@ function maybeShowCompletion() {
   // recording stats against, size-bucketed or per-puzzle.
   recordCompletion(puzzle, { timeMs, hintsUsed, mistakes }).catch(() => {});
   recordPuzzleSolved(puzzle, timeMs).catch(() => {});
+  // Current Objective (see TODO.md): the global fastest-time-across-all-users stat. Same
+  // fire-and-forget contract as the two calls above — submitGlobalFastestTime already skips
+  // unpublished scan/drawn-origin puzzles internally (see its own comment).
+  submitGlobalFastestTime(puzzle, timeMs).catch(() => {});
   // A genuinely solved puzzle has nothing left to "resume" — clear any stale in-progress
   // save so it stops showing under the library's Incomplete filter (see TODO.md's
   // saved/incomplete-progress item). Same fire-and-forget contract as the two calls above;
@@ -843,6 +849,22 @@ function targetStateFor(current) {
   return current === EMPTY ? UNKNOWN : EMPTY;
 }
 
+// Current Objective (TODO.md): a drag starting on a cell already in the mode's own target
+// state (e.g. starting a Fill-mode drag on a cell that's already FILLED) did nothing at all,
+// beyond clearing that one starting cell. Cause: pointerdown used targetStateFor's click
+// semantics (toggle-to-clear an already-marked cell) to decide the WHOLE drag's paintState,
+// so that single toggle silently redefined the entire stroke's intent to "paint UNKNOWN" —
+// and since dragStep cells are only ever painted when they're already UNKNOWN (the
+// drag-only-touches-blank-cells rule below), every later cell in the drag became a same-state
+// no-op. This is the mode's own normal target regardless of what the first cell happens to
+// already be — the toggle-to-clear behavior stays exactly as before for a plain single click
+// (see the pointerdown handler below), just no longer leaks into what a drag-sweep paints.
+function modeTargetState() {
+  if (activeMode === 'fill') return FILLED;
+  if (activeMode === 'erase') return UNKNOWN;
+  return EMPTY;
+}
+
 // If a pending batch of changes would leave some row or column's placed fills exactly
 // matching its clue, every other still-unknown cell in that line can never be filled
 // without breaking the clue — so it's forced empty. Uses isLineSatisfied's proper run
@@ -1010,6 +1032,33 @@ function anyNewlyFalse(before, after) {
   );
 }
 
+// Current Objective (TODO.md): a sound for an individual clue NUMBER newly becoming anchored
+// (grayed out) — a per-number event (anchoredClueNumbers, lineSolver.js), distinct from an
+// entire line locking. Same before/after-snapshot-around-the-mutation shape as
+// allLockedSnapshot/anyNewlyTrue above, just per-number instead of per-line: each line's own
+// anchored array is skipped (returned empty) whenever the line is in contradiction, matching
+// applyAnchoredClasses' own rule that anchoredClueNumbers' walk assumes a consistent line.
+// Plumbing only — see sounds.js's SOUND_FILES for the 'anchor' slot; the actual audio file is
+// the project owner's own to source, not Code's.
+function allAnchoredSnapshot() {
+  return {
+    rows: Array.from({ length: puzzle.rows }, (_, r) => {
+      const row = board.getRow(r);
+      return isLineConsistent(row, puzzle.rowClues[r]) ? anchoredClueNumbers(row, puzzle.rowClues[r]) : [];
+    }),
+    cols: Array.from({ length: puzzle.cols }, (_, c) => {
+      const col = board.getCol(c);
+      return isLineConsistent(col, puzzle.colClues[c]) ? anchoredClueNumbers(col, puzzle.colClues[c]) : [];
+    }),
+  };
+}
+
+function anyNewlyAnchored(before, after) {
+  const newlyInLines = (beforeLines, afterLines) =>
+    afterLines.some((afterArr, i) => afterArr.some((v, j) => v && !beforeLines[i][j]));
+  return newlyInLines(before.rows, after.rows) || newlyInLines(before.cols, after.cols);
+}
+
 // Applies a fill/empty batch (manual mark or hint deduction) and plays exactly one sound for
 // it, in priority order:
 //   1. a line newly locking — 'lock' (this always also covers auto-X completing a line,
@@ -1027,17 +1076,28 @@ function anyNewlyFalse(before, after) {
 function applyMoveWithSound(changes, opts) {
   const lockedBefore = allLockedSnapshot();
   const contradictionBefore = allContradictionSnapshot();
+  const anchoredBefore = allAnchoredSnapshot();
   const applied = applyWithAutoX(changes, opts);
   if (applied.length === 0) return applied;
   // Undo button (Current Objective — see TODO.md): bump the permanent hint-count floor here,
   // once per hint-sourced move actually applied — see computeCompletionStats' own comment.
   if (opts?.source === 'hint') hintsUsedFloor++;
 
-  if (anyNewlyTrue(lockedBefore, allLockedSnapshot())) {
+  const justLocked = anyNewlyTrue(lockedBefore, allLockedSnapshot());
+  if (justLocked) {
     playSound('lock');
   } else if (applied.length > 1) {
     playSound('batchCompleteChime');
   }
+
+  // Current Objective (TODO.md): 'anchor' — see allAnchoredSnapshot's comment. Skipped
+  // whenever this same move already played 'lock': every remaining number in a
+  // freshly-satisfied-and-locked line trivially finishes "anchored" too, so a separate ping
+  // on top of the more significant lock sound would be redundant noise, not new information.
+  // One shared sound per move no matter how many numbers anchor at once — the simpler of the
+  // two options the TODO called out as an open design choice, and consistent with
+  // lock/batchCompleteChime above already being exactly-one-sound-per-move.
+  if (!justLocked && anyNewlyAnchored(anchoredBefore, allAnchoredSnapshot())) playSound('anchor');
 
   if (anyNewlyTrue(contradictionBefore, allContradictionSnapshot())) playSound('error');
   return applied;
@@ -1209,7 +1269,11 @@ function attachPointerHandlers(grid) {
     const c = Number(el.dataset.col);
     setCrosshairHighlight(r, c);
     const newState = targetStateFor(board.get(r, c));
-    dragging = { paintState: newState, touched: new Set([`${r},${c}`]), count: 0, lastRow: r, lastCol: c };
+    // paintState (what a drag-sweep paints into later cells) is the mode's own normal target —
+    // see modeTargetState's comment — NOT `newState`, which is only this pressed cell's own
+    // click-toggle result and would wrongly redefine the whole stroke as "clear" when the
+    // pressed cell happened to already be marked.
+    dragging = { paintState: modeTargetState(), touched: new Set([`${r},${c}`]), count: 0, lastRow: r, lastCol: c };
     const changed = paintCell(el, newState);
     // Only show/count for a genuine fill or X paint — not a plain click-to-clear (newState
     // UNKNOWN), which isn't "painting a run" and wouldn't make sense to badge (see this
@@ -1464,6 +1528,9 @@ let inProgressPuzzlesCache = new Map(); // puzzleId -> { elapsedMs, hintsUsed }
 // player has personally hidden, same caching contract as the two above. Excluded from
 // applyLibraryFilters' output entirely unless "Show hidden puzzles" is checked.
 let hiddenPuzzlesCache = new Set();
+// Global fastest-time-across-all-users item (Current Objective — see TODO.md), same caching
+// contract as the others above — puzzleId -> fastestTimeMs.
+let globalFastestTimesCache = new Map();
 let libraryMyUid = null;
 
 function builtinLibraryEntries() {
@@ -1504,7 +1571,7 @@ function populateLibrarySizeFilter(entries) {
 // item — see TODO.md) is unrelated to ownership — every row, built-in or not, gets a Hide/
 // Unhide toggle regardless of who created it, since hiding is a personal display preference,
 // not an edit to the puzzle itself.
-function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, hiddenPuzzles, myUid) {
+function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, hiddenPuzzles, myUid, globalFastestTimes) {
   els.libraryList.innerHTML = '';
   for (const entry of entries) {
     const solved = solvedPuzzles.get(entry.id);
@@ -1549,7 +1616,15 @@ function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, hiddenPuzz
       statsSpan.className = 'library-row__personal-stats';
       const times = `${solved.timesSolved}×`;
       const best = solved.bestTimeMs != null ? ` · best ${formatDuration(solved.bestTimeMs)}` : '';
-      statsSpan.textContent = `${times}${best}`;
+      // Global fastest-time-across-all-users item (Current Objective — see TODO.md): shown
+      // only once the puzzle is solved/revealed, alongside (not instead of) the player's own
+      // personal best above — a separate 🌍-prefixed value so it reads as a distinct, global
+      // stat rather than a second personal one. Absent until someone's completion has
+      // actually reported a time for this puzzle (see submitGlobalFastestTime) — no
+      // placeholder shown before then.
+      const globalTimeMs = globalFastestTimes.get(entry.id);
+      const global = globalTimeMs != null ? ` · 🌍 ${formatDuration(globalTimeMs)}` : '';
+      statsSpan.textContent = `${times}${best}${global}`;
       li.append(solvedBadge, statsSpan);
     } else if (inProgress) {
       const inProgressBadge = document.createElement('span');
@@ -1700,11 +1775,12 @@ async function refreshLibraryList() {
   // affordance), the solved-puzzle/in-progress lookups, and now the hidden-puzzle lookup
   // (hide-a-puzzle item — see TODO.md); browsing/reading the library itself is public and
   // doesn't require it (see firestore.rules).
-  const [user, solvedPuzzles, inProgressPuzzles, hiddenPuzzles] = await Promise.all([
+  const [user, solvedPuzzles, inProgressPuzzles, hiddenPuzzles, globalFastestTimes] = await Promise.all([
     ensureSignedIn().catch(() => null),
     fetchSolvedPuzzles().catch(() => new Map()),
     fetchInProgressPuzzles().catch(() => new Map()),
     fetchHiddenPuzzles().catch(() => new Set()),
+    fetchGlobalFastestTimes().catch(() => new Map()),
   ]);
 
   const merged = builtinLibraryEntries().concat(saved.map((p) => ({ ...p, builtin: false })));
@@ -1716,6 +1792,7 @@ async function refreshLibraryList() {
   solvedPuzzlesCache = solvedPuzzles;
   inProgressPuzzlesCache = inProgressPuzzles;
   hiddenPuzzlesCache = hiddenPuzzles;
+  globalFastestTimesCache = globalFastestTimes;
   libraryMyUid = user?.uid ?? null;
   populateLibrarySizeFilter(merged);
 
@@ -1757,7 +1834,7 @@ function applyLibraryFilters() {
     return;
   }
   els.libraryStatus.textContent = '';
-  renderLibraryList(filtered, solvedPuzzlesCache, inProgressPuzzlesCache, hiddenPuzzlesCache, libraryMyUid);
+  renderLibraryList(filtered, solvedPuzzlesCache, inProgressPuzzlesCache, hiddenPuzzlesCache, libraryMyUid, globalFastestTimesCache);
 }
 
 els.libraryFilterSolved.addEventListener('change', applyLibraryFilters);

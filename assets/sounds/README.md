@@ -20,3 +20,15 @@ changes are needed — `src/sounds.js` references them by these names.
 `src/sounds.js` — the per-cell dinging on every routine fill/X mark or drag-sweep step was
 removed per the project owner's direct feedback (see `TODO.md`'s Completed Tasks). The
 files are left in place harmlessly rather than deleted; nothing loads them anymore.
+
+## `anchor.mp3` — Current Objective (see `TODO.md`), plumbing only
+
+`src/sounds.js` now references `anchor.mp3` (trigger: an individual clue NUMBER newly
+becomes anchored/grayed-out — a per-number event, distinct from `lock`'s per-line one), but
+**no file has been added at this path, deliberately** — unlike the eight placeholders above,
+the project owner is sourcing this specific sound themselves (their own description: "a
+pleasant chime, like a ping," light and short, quieter than `lock`) and asked Code not to
+pick, generate, or placeholder one. Until it's dropped in at `assets/sounds/anchor.mp3`,
+`playSound('anchor')` just fails silently (a 404, caught the same as any other missing file
+— see the top of `src/sounds.js`) — no console noise beyond a normal failed network request,
+and no code changes needed once the real file lands here.

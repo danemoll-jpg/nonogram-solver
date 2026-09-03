@@ -5,8 +5,10 @@
 //     never in client code or source control) — see functions/README.md for deploy steps.
 //   - createPairingCode / redeemPairingCode (item 4): cross-device stats pairing. See the
 //     comment above createPairingCode for the design.
+//   - recordFastestTime (Current Objective — see TODO.md): the global fastest-time-across-
+//     all-users stat per puzzle. See its own comment below for the design.
 //
-// All three are callable (not raw HTTPS endpoints) so the client gets request/response
+// All four are callable (not raw HTTPS endpoints) so the client gets request/response
 // marshalling, auth-context propagation, and CORS handling for free via the Firebase SDK
 // (see src/firebase.js).
 
@@ -241,4 +243,55 @@ exports.redeemPairingCode = onCall(async (request) => {
 
   const customToken = await getAuth().createCustomToken(toUid);
   return { customToken };
+});
+
+// ---- Global fastest-time-across-all-users stat (Current Objective — see TODO.md) ----
+//
+// Deliberately NOT a field on `puzzles/{puzzleId}` despite that being this feature's original
+// sketch in TODO.md: that collection is the public PUZZLE-DEFINITION store (rows/cols/clues/
+// title/creatorUid — see firestore.rules' own comment and its `create` rule's shape check),
+// and a built-in puzzle (e.g. 'heart-5') never has a doc there at all — writing a
+// fastestTimeMs-only doc under a built-in's id would (a) need to invent a doc for a puzzle
+// that Firestore has never heard of, and (b) start showing up as a broken, title-less,
+// dimension-less row in fetchLibraryPuzzles' plain "list every doc in `puzzles`" scan, which
+// is specifically the community-authored browse list. A separate `puzzleStats/{puzzleId}`
+// collection sidesteps both problems and works uniformly for a built-in or a community
+// puzzle's id, the same "just a client-chosen doc id, not a reference that has to resolve
+// against `puzzles`" pattern solvedLibraryPuzzles/inProgressPuzzles/hiddenLibraryPuzzles
+// already use (src/puzzleLibrary.js) — just public-read instead of owning-uid-only, since
+// this one value is genuinely global.
+//
+// Still must go through a callable, per the original design constraint: a plain
+// client-writable public field would be trivially fakeable (nothing stops a client from
+// writing an instant/impossible time directly). This function is the only writer —
+// firestore.rules locks puzzleStats down to public read, no client write at all. It does NOT
+// attempt to verify the reported time is authentic (this app's timer has always been
+// client-side and client-reported — see src/puzzleLibrary.js's recordPuzzleSolved, which
+// trusts the same timeMs for the personal-best stat); what it actually guarantees is that the
+// stored global value can only ever move via this validated, monotonically-decreasing
+// read-then-write, never an arbitrary direct write.
+//
+// No backfill for puzzles solved before this shipped, per TODO.md's accepted-gap default —
+// the stat simply starts accumulating from whenever this goes live.
+const MAX_PLAUSIBLE_TIME_MS = 24 * 60 * 60 * 1000; // 24h — generous upper bound against garbage/overflow values, not a real solve-time guess
+
+exports.recordFastestTime = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign-in required.');
+  const puzzleId = typeof request.data?.puzzleId === 'string' ? request.data.puzzleId.trim() : '';
+  const timeMs = request.data?.timeMs;
+  if (!puzzleId) throw new HttpsError('invalid-argument', 'Expected a non-empty puzzleId.');
+  if (typeof timeMs !== 'number' || !Number.isFinite(timeMs) || timeMs <= 0 || timeMs > MAX_PLAUSIBLE_TIME_MS) {
+    throw new HttpsError('invalid-argument', 'Expected a positive, plausible timeMs.');
+  }
+
+  const ref = db.collection('puzzleStats').doc(puzzleId);
+  const { fastestTimeMs, updated } = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const prevBest = snap.exists ? snap.data().fastestTimeMs : null;
+    if (prevBest != null && prevBest <= timeMs) return { fastestTimeMs: prevBest, updated: false }; // doesn't beat the record
+    tx.set(ref, { fastestTimeMs: timeMs, updatedAt: Date.now() }, { merge: true });
+    return { fastestTimeMs: timeMs, updated: true };
+  });
+
+  return { updated, fastestTimeMs };
 });
