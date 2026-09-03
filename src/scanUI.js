@@ -5,24 +5,35 @@
 // per CLAUDE.md's "each module does one job"; app.js just calls initScanWizard() once at
 // boot and wires one Help-menu button to open the modal.
 //
-// Wizard steps: upload a photo -> confirm the grid rectangle (auto-detected and highlighted
-// on load with draggable corner/edge handles, falling back to manual drag-to-select only
-// when auto-detection isn't confident — see gridDetect.js's findGridCandidates/
-// detectBestGrid) -> OCR every row's and column's clue strip -> a correction pass (editable
-// text next to a thumbnail of what was actually cropped) -> solve the confirmed clues into a
-// real solution and hand the finished puzzle back to app.js via the onPuzzleReady callback.
+// Wizard steps: enter the puzzle's size -> upload a photo -> confirm the grid rectangle
+// (auto-detected and highlighted on load with draggable corner/edge handles, falling back to
+// manual drag-to-select only when auto-detection isn't confident — see gridDetect.js's
+// findGridCandidates/detectBestGrid) -> OCR every row's and column's clue strip -> a
+// correction pass (editable text next to a thumbnail of what was actually cropped) -> solve
+// the confirmed clues into a real solution and hand the finished puzzle back to app.js via the
+// onPuzzleReady callback.
 //
 // The grid step always has one clear, visible, enabled-when-ready button to move forward
 // ("Looks good") regardless of whether the rectangle came from auto-detection or a manual
 // drag — see TODO.md's "Current Objective" for the bug (no working way to proceed after a
 // manual drag) this design replaces, not just patches.
+//
+// Size-first restructure (TODO.md's Current Objective — "stop chasing our tails on this
+// stupid bug"): dimension entry moved to its own screen shown FIRST, before the photo/grid
+// step, matching the draw-a-puzzle wizard's own screen exactly rather than living inside a
+// more complex step alongside grid detection — a player scanning an existing puzzle already
+// knows its size before taking the photo, so asking up front matches how they actually think
+// about the task. This sidesteps the app-wide iOS scroll bug's most common trigger (a text
+// field focused mid-wizard, layered into a more complex screen) for this specific
+// interaction, without claiming to fix the underlying bug everywhere — see TODO.md. The old
+// second dimension-confirmation step (re-displaying/re-editing a suggested row/col count
+// AFTER grid detection) is gone entirely: once the player has given the real dimensions up
+// front, there's no reason to show them again — the grid step now only locates the grid's
+// POSITION on the photo and uses the given counts directly.
 
 import {
-  rowProfile,
-  colProfile,
   snapRectToBorder,
   centerRectOnBorders,
-  countGridLines,
   computeClueBands,
   sliceHorizontal,
   sliceVertical,
@@ -60,6 +71,13 @@ const MIN_RECT_SIZE = 20;
 // CSS custom properties directly.
 const GOLD = '#e6b73f';
 
+// Bounds for the size step's row/col inputs. Wider than draw-a-puzzle's MIN_SIZE/MAX_SIZE
+// (drawUI.js, 2-30) on both ends: a real printed puzzle being scanned can be smaller than any
+// picture worth hand-drawing (min 1) and larger than what's practical to draw by hand (the
+// project's own 25x25 ground-truth test puzzle is already most of the way to this cap).
+const MIN_SIZE = 1;
+const MAX_SIZE = 60;
+
 export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   const state = {
     analysisCanvas: null,
@@ -79,22 +97,23 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     activeHandle: null, // the handle being resize-dragged, from getHandles()
     dragStart: null, // canvas-space point where the current drag began
     dragOrigRect: null, // gridRect snapshot at drag start, for 'move'/'resize' deltas
-    rows: 0,
+    rows: 0, // set from the size step (Current Objective — see TODO.md), before any photo/grid work
     cols: 0,
     rowClueInputs: [],
     colClueInputs: [],
     pendingPuzzle: null,
     // Detected fill/X state (Current Objective — see TODO.md), one FILLED/EMPTY/UNKNOWN per
-    // cell, rows x cols. Computed once alongside the OCR pass (see scanBtnScanClues) since
-    // both need the same confirmed grid rect; mutated in place by the fill-state review
-    // step's click-to-correct handler (see renderFillStateGrid) before being handed off as
-    // the puzzle's initialMarks.
+    // cell, rows x cols. Computed once alongside the OCR pass (see the scanBtnConfirmGrid
+    // handler) since both need the same confirmed grid rect; mutated in place by the
+    // fill-state review step's click-to-correct handler (see renderFillStateGrid) before
+    // being handed off as the puzzle's initialMarks.
     fillMarks: null,
     scanCount: 0, // used to mint a unique id per scanned puzzle this session
   };
 
   function showStep(name) {
     for (const el of [
+      els.scanStepSize,
       els.scanStepUpload,
       els.scanStepGrid,
       els.scanStepOcr,
@@ -107,6 +126,8 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   }
 
   function resetWizard() {
+    state.rows = 0;
+    state.cols = 0;
     state.analysisCanvas = null;
     state.analysisCtx = null;
     state.fullCanvas = null;
@@ -120,22 +141,47 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     state.colClueInputs = [];
     state.pendingPuzzle = null;
     state.fillMarks = null;
+    els.scanRowsInput.value = '10';
+    els.scanColsInput.value = '10';
+    els.scanSizeError.classList.add('hidden');
     els.scanFileInput.value = '';
     els.scanBtnPlay.disabled = false;
     els.scanPlayStatus.textContent = '';
     els.scanGridHint.textContent = '';
-    els.scanKnownRowsInput.value = '';
-    els.scanKnownColsInput.value = '';
-    els.scanKnownCountMismatch.classList.add('hidden');
-    els.scanGridConfirm.classList.add('hidden');
     els.scanBtnConfirmGrid.disabled = true;
     els.scanRowClueList.innerHTML = '';
     els.scanColClueList.innerHTML = '';
     els.scanRecheckWarning.classList.add('hidden');
     els.scanBuildError.classList.add('hidden');
     els.scanFillstateGrid.innerHTML = '';
-    showStep('upload');
+    showStep('size');
   }
+
+  // ---- step 1: enter the puzzle's size (Current Objective — see TODO.md) ----
+  //
+  // Shown before any photo/grid work, matching draw-a-puzzle's own size-first screen exactly.
+  // The player already knows the real puzzle's dimensions from looking at it, so this is the
+  // one and only place they're asked — the grid step below no longer re-suggests or
+  // re-confirms a count of its own.
+
+  function parseSize(inputEl) {
+    const n = parseInt(inputEl.value, 10);
+    return Number.isInteger(n) && n >= MIN_SIZE && n <= MAX_SIZE ? n : null;
+  }
+
+  els.scanBtnSizeContinue.addEventListener('click', () => {
+    const rows = parseSize(els.scanRowsInput);
+    const cols = parseSize(els.scanColsInput);
+    if (!rows || !cols) {
+      els.scanSizeError.textContent = `Enter a size between ${MIN_SIZE} and ${MAX_SIZE} for both rows and columns.`;
+      els.scanSizeError.classList.remove('hidden');
+      return;
+    }
+    els.scanSizeError.classList.add('hidden');
+    state.rows = rows;
+    state.cols = cols;
+    showStep('upload');
+  });
 
   // #scan-modal is a full-screen VIEW, not a floating modal (see its own comment in
   // index.html for the real-iOS scroll-bug history behind that) — opening it means hiding
@@ -173,7 +219,7 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     onClose?.();
   }
 
-  // ---- step 1: load the photo onto both canvases ----
+  // ---- step 2: load the photo onto both canvases ----
 
   function scaledSize(width, height, maxDim) {
     const scale = Math.min(1, maxDim / Math.max(width, height));
@@ -252,7 +298,7 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     }
   });
 
-  // ---- step 2: confirm the grid rectangle (auto-detected, or drag one out by hand) ----
+  // ---- step 3: confirm the grid rectangle (auto-detected, or drag one out by hand) ----
 
   function toCanvasPoint(evt) {
     const rect = els.scanCanvas.getBoundingClientRect();
@@ -368,7 +414,6 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     state.autoDetected = false;
     state.dragStart = p;
     state.gridRect = { left: p.x, top: p.y, right: p.x, bottom: p.y };
-    els.scanGridConfirm.classList.add('hidden');
   });
 
   els.scanCanvas.addEventListener('pointermove', (e) => {
@@ -432,57 +477,15 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     return Math.max(2, Math.round(Math.min(width, height) * 0.01));
   }
 
-  // Parses the optional "I already know the puzzle's size" fields (Current Objective #1 —
-  // see TODO.md) into a positive cell count, or null when left blank/invalid — blank is the
-  // normal case (most photos don't have a player who already knows the exact size) and
-  // falls through to the existing auto-suggestion untouched.
-  function parseKnownCount(inputEl) {
-    const n = parseInt(inputEl.value, 10);
-    return Number.isInteger(n) && n >= 1 ? n : null;
-  }
-
-  // Suggests a row/col CELL count for one axis. With no known count, this is exactly the
-  // old behavior: countGridLines' own best guess. With a known count, the player's own
-  // number is trusted directly for the value shown — a player-confirmed ground truth beats
-  // any pixel heuristic, which is the whole point of asking for it — but a real local-run
-  // pass is still performed (via countGridLines' expectedLines option) so a genuine
-  // disagreement between the photo and what was entered still surfaces as `mismatch` rather
-  // than being silently swallowed by trusting the player unconditionally.
-  function suggestLineCount(profile, start, end, knownCells) {
-    if (knownCells) {
-      const expectedLines = knownCells + 1;
-      const detectedLines = countGridLines(profile, start, end, { expectedLines });
-      return { count: knownCells, mismatch: Math.abs(detectedLines - expectedLines) >= 2, detectedLines };
-    }
-    const lines = countGridLines(profile, start, end);
-    return { count: Math.max(1, lines - 1), mismatch: false };
-  }
-
-  function updateKnownCountMismatchHint(rowResult, colResult) {
-    const notes = [];
-    if (rowResult.mismatch) {
-      notes.push(`rows (you entered ${rowResult.count}, the photo looks more like ${Math.max(1, rowResult.detectedLines - 1)})`);
-    }
-    if (colResult.mismatch) {
-      notes.push(`columns (you entered ${colResult.count}, the photo looks more like ${Math.max(1, colResult.detectedLines - 1)})`);
-    }
-    if (notes.length) {
-      els.scanKnownCountMismatch.textContent =
-        `The photo doesn't clearly show that many grid lines for: ${notes.join('; ')}. Your ` +
-        "count is still used below — double-check the grid box actually captures the whole " +
-        'grid before continuing.';
-      els.scanKnownCountMismatch.classList.remove('hidden');
-    } else {
-      els.scanKnownCountMismatch.classList.add('hidden');
-    }
-  }
-
   // The one, always-available "proceed" action for the grid step — the fix for the bug this
   // redesign replaces (see the module-level comment). Works the same whether gridRect is
   // still exactly what auto-detection produced, or the user dragged/resized it: snaps it
-  // onto the photo's actual printed border and suggests a row/col count either way, since
-  // that refinement is just as valid a step after a nudge as after a fresh manual drag.
-  els.scanBtnConfirmGrid.addEventListener('click', () => {
+  // onto the photo's actual printed border, then goes straight into slicing + OCR using the
+  // row/col counts already given on the size step — this step's only remaining job is
+  // locating the grid's POSITION on the photo, not re-deriving or re-confirming its
+  // row/column COUNT (the old second dimension-confirmation step this replaces did both;
+  // see the module-level comment and TODO.md's Current Objective).
+  els.scanBtnConfirmGrid.addEventListener('click', async () => {
     if (!state.gridRect) return;
     const { width, height } = state.analysisCanvas;
     const gray = analysisGrayscale();
@@ -491,27 +494,55 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     state.gridRect = snapped;
     redrawGridCanvas();
 
-    // Row count comes from horizontal grid lines, found in the row profile (restricted to
-    // the grid's own column span) across its vertical extent; column count is the mirror
-    // image. See gridDetect.js's countGridLines: this suggests a count, it doesn't decide
-    // one — the inputs below are always left editable.
-    const rp = rowProfile(gray, width, height, { xStart: snapped.left, xEnd: snapped.right });
-    const cp = colProfile(gray, width, height, { yStart: snapped.top, yEnd: snapped.bottom });
-    // snapped.bottom/right are inclusive pixel positions (the darkest pixel found), but
-    // countGridLines takes an exclusive end (it slices the profile) — without the +1 the
-    // line sitting exactly on the far edge is cut off before being scanned, undercounting
-    // by one line (one fewer row/col than the photo actually has).
-    const knownRows = parseKnownCount(els.scanKnownRowsInput);
-    const knownCols = parseKnownCount(els.scanKnownColsInput);
-    const rowResult = suggestLineCount(rp, snapped.top, snapped.bottom + 1, knownRows);
-    const colResult = suggestLineCount(cp, snapped.left, snapped.right + 1, knownCols);
-    els.scanRowsInput.value = String(rowResult.count);
-    els.scanColsInput.value = String(colResult.count);
-    updateKnownCountMismatchHint(rowResult, colResult);
-    els.scanGridConfirm.classList.remove('hidden');
+    // One shared border-centered rect for both the fill-state cell grid and the clue-band
+    // slicing below (see computeCellsRect's own comment for why using two different rects
+    // here was the root cause of a column-crop bleed bug).
+    const cellsRect = computeCellsRect();
+    detectFillState(cellsRect);
+    showStep('ocr');
+    els.scanOcrStatus.textContent = 'Reading clue numbers…';
+
+    const fullRect = { left: 0, top: 0, right: width, bottom: height };
+    const { rowBand, colBand } = computeClueBands(fullRect, cellsRect);
+    const rowStrips = sliceHorizontal(rowBand, state.rows);
+    const colStrips = sliceVertical(colBand, state.cols);
+
+    els.scanRowClueList.innerHTML = '';
+    els.scanColClueList.innerHTML = '';
+    state.rowClueInputs = [];
+    state.colClueInputs = [];
+
+    const total = rowStrips.length + colStrips.length;
+    let done = 0;
+    for (let i = 0; i < rowStrips.length; i++) {
+      const canvas = cropStripCanvas(rowStrips[i]);
+      const text = await recognizeStripSegmented(canvas);
+      done++;
+      els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
+      const input = buildClueRow(
+        els.scanRowClueList,
+        `Row ${i + 1}`,
+        canvas,
+        parseClueText(text).join(', '),
+        state.fillMarks[i]
+      );
+      state.rowClueInputs.push(input);
+    }
+    for (let i = 0; i < colStrips.length; i++) {
+      const canvas = cropStripCanvas(colStrips[i]);
+      const text = await recognizeStripSegmented(canvas);
+      done++;
+      els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
+      const colFillLine = state.fillMarks.map((row) => row[i]);
+      const input = buildClueRow(els.scanColClueList, `Col ${i + 1}`, canvas, parseClueText(text).join(', '), colFillLine);
+      state.colClueInputs.push(input);
+    }
+
+    els.scanBuildError.classList.add('hidden');
+    showStep('correct');
   });
 
-  // ---- step 3: slice + OCR every clue strip ----
+  // ---- step 4: slice + OCR every clue strip ----
 
   // A few source-canvas px of real image margin added around every strip crop, on all four
   // sides, before anything else touches it. Confirmed necessary against the real 25x25
@@ -1008,65 +1039,7 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     cell.classList.toggle('empty', markState === EMPTY);
   }
 
-  els.scanBtnScanClues.addEventListener('click', async () => {
-    const rows = parseInt(els.scanRowsInput.value, 10);
-    const cols = parseInt(els.scanColsInput.value, 10);
-    if (!Number.isInteger(rows) || rows < 1 || !Number.isInteger(cols) || cols < 1) {
-      els.scanRowsInput.reportValidity?.();
-      return;
-    }
-    state.rows = rows;
-    state.cols = cols;
-    // One shared border-centered rect for both the fill-state cell grid and the clue-band
-    // slicing below (see computeCellsRect's own comment for why using two different rects
-    // here was the root cause of a column-crop bleed bug).
-    const cellsRect = computeCellsRect();
-    detectFillState(cellsRect);
-    showStep('ocr');
-    els.scanOcrStatus.textContent = 'Reading clue numbers…';
-
-    const { width, height } = state.analysisCanvas;
-    const fullRect = { left: 0, top: 0, right: width, bottom: height };
-    const { rowBand, colBand } = computeClueBands(fullRect, cellsRect);
-    const rowStrips = sliceHorizontal(rowBand, rows);
-    const colStrips = sliceVertical(colBand, cols);
-
-    els.scanRowClueList.innerHTML = '';
-    els.scanColClueList.innerHTML = '';
-    state.rowClueInputs = [];
-    state.colClueInputs = [];
-
-    const total = rowStrips.length + colStrips.length;
-    let done = 0;
-    for (let i = 0; i < rowStrips.length; i++) {
-      const canvas = cropStripCanvas(rowStrips[i]);
-      const text = await recognizeStripSegmented(canvas);
-      done++;
-      els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
-      const input = buildClueRow(
-        els.scanRowClueList,
-        `Row ${i + 1}`,
-        canvas,
-        parseClueText(text).join(', '),
-        state.fillMarks[i]
-      );
-      state.rowClueInputs.push(input);
-    }
-    for (let i = 0; i < colStrips.length; i++) {
-      const canvas = cropStripCanvas(colStrips[i]);
-      const text = await recognizeStripSegmented(canvas);
-      done++;
-      els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
-      const colFillLine = state.fillMarks.map((row) => row[i]);
-      const input = buildClueRow(els.scanColClueList, `Col ${i + 1}`, canvas, parseClueText(text).join(', '), colFillLine);
-      state.colClueInputs.push(input);
-    }
-
-    els.scanBuildError.classList.add('hidden');
-    showStep('correct');
-  });
-
-  // ---- step 4: correct + build ----
+  // ---- step 5: correct + build ----
 
   els.scanBtnBuild.addEventListener('click', () => {
     const rowClues = state.rowClueInputs.map((el) => parseClueText(el.value));
@@ -1093,7 +1066,7 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     showStep('fillstate');
   });
 
-  // ---- step 5: confirm/correct detected fill state ----
+  // ---- step 6: confirm/correct detected fill state ----
 
   els.scanBtnConfirmState.addEventListener('click', () => {
     if (state.pendingPuzzle) {

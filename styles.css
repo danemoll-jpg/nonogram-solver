@@ -1002,22 +1002,15 @@ body {
   margin: 0.5rem 0 0.75rem;
 }
 
-/* Current Objective #1: lets the player supply a known row/col count BEFORE the grid step
-   commits to a guess (see scanUI.js's suggestLineCount) — sits right above the "Looks good"
-   button so it's visible and fillable before that click, not tacked on after the fact. */
+/* Size-step row/col fields — shared by scan-a-puzzle's #scan-step-size and draw-a-puzzle's
+   #draw-step-size (TODO.md's Current Objective: both wizards ask for dimensions on their own
+   simple screen before any photo/grid/drawing work). */
 .scan-known-count {
   margin-top: 0.9rem;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
-}
-
-.scan-known-count__hint {
-  flex-basis: 100%;
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--text-dim);
 }
 
 .scan-known-count__field {
@@ -1038,48 +1031,16 @@ body {
   font-size: 0.95rem;
 }
 
-/* Shown only when a known count was entered but the photo's own line search still can't
-   find anything close to that many lines (see suggestLineCount's `mismatch`) — a concrete,
-   checkable discrepancy rather than a silent override, pointing back at the grid box crop
-   rather than the count itself. */
-.scan-known-count-mismatch {
-  flex-basis: 100%;
-  margin: 0;
-  color: var(--warn);
-  font-size: 0.8rem;
-}
-
+/* Plain button-row layout, reused as-is by draw-a-puzzle's Clear/Done drawing row
+   (index.html's #draw-step-draw) — this class predates the scan wizard's size-first
+   restructure (TODO.md's Current Objective), which removed the row/col re-confirmation
+   fields this class originally existed for; kept for its still-live layout use. */
 .scan-grid-confirm {
   margin-top: 0.9rem;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
-}
-
-.scan-grid-confirm__field {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.9rem;
-  color: var(--text-dim);
-}
-
-.scan-grid-confirm__field input {
-  width: 3.5rem;
-  background: var(--panel-bg);
-  color: var(--text);
-  border: 1px solid rgba(230, 183, 63, 0.3);
-  border-radius: 0.4rem;
-  padding: 0.3rem 0.4rem;
-  font-size: 0.95rem;
-}
-
-.scan-grid-confirm__hint {
-  flex-basis: 100%;
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--text-dim);
 }
 
 .scan-correct-columns {

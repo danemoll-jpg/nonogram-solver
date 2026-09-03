@@ -769,47 +769,56 @@ Completed Tasks
      `rect.top`/`rect.bottom` (192.2/227.4 in that run), not just a visual eyeball check. All
      822 tests still pass. Not yet real-device-confirmed.
 
-Current Objective (Focus Area)
+* **Scan-a-puzzle size-first restructure — done, preview-verified end-to-end against the
+  real 25x25 ground-truth test image.** Per direct instruction ("Let's just do this and
+  stop chasing our tails on this stupid bug") — sidesteps the scroll bug for this specific
+  interaction rather than continuing to chase the underlying WebKit issue. Two changes,
+  both applying the draw-a-puzzle wizard's already-working pattern to the scan wizard:
+  1. **Dimension entry moved to its own screen, shown FIRST — before the photo/grid step —
+     matching draw-a-puzzle's own step-size screen exactly** (`src/scanUI.js`'s new
+     `scanBtnSizeContinue` handler, `#scan-step-size` in `index.html`, shown by default
+     instead of `#scan-step-upload`). Validates 1-60 per side (wider than draw's 2-30 — a
+     real printed puzzle being scanned can be smaller than anything worth hand-drawing, and
+     this project's own 25x25 ground-truth test puzzle is already most of the way to a
+     30-cap) before advancing; `state.rows`/`state.cols` are set here, before any photo is
+     even chosen.
+  2. **The second, redundant dimension-confirmation step (re-displaying/re-editing a
+     suggested count after grid detection) is gone entirely.** `#scan-grid-confirm`'s
+     duplicate Rows/Columns inputs and the "Scan clue numbers" button are removed from
+     `index.html`; the grid step's "Looks good" button (`scanBtnConfirmGrid`) now snaps the
+     rectangle AND goes straight into fill-state detection + OCR in one click, using
+     `state.rows`/`state.cols` from step 1 directly — no re-suggestion, no re-display. This
+     also deleted the row/col-count-guessing machinery that only existed to feed that
+     redundant step: `suggestLineCount`/`parseKnownCount`/`updateKnownCountMismatchHint` and
+     the `rowProfile`/`colProfile`/`countGridLines` imports they used are gone from
+     `scanUI.js` — dead code once dimensions are always given up front, not left unreachable.
+  - **This closes the loop specifically for the scan wizard's known trigger interaction, not
+    necessarily the whole underlying scroll bug** — the earlier round-4/round-5
+    investigation showed the same stuck-viewport symptom can also occur on the plain main
+    play screen, unrelated to the scan wizard, which this redesign doesn't touch and doesn't
+    claim to fix. Per the "stop chasing our tails" instruction, further investigation into
+    the underlying `visualViewport` mechanism (rounds 1-5, still unresolved) remains
+    deprioritized — unaffected by this round.
+  - **Verified end-to-end in browser preview against the real ground-truth image**
+    (`scratch-images/sample-mid-solve.jpg`, injected into the file input via a scripted
+    `DataTransfer` since the preview tooling has no native file picker): confirmed the size
+    step appears first (Rows/Columns/Continue, no upload/grid content visible yet); entered
+    the puzzle's real 25x25 size and confirmed it advanced straight to the upload step with
+    no dimension fields anywhere on the grid step; confirmed clicking "Looks good" went
+    directly into fill-state detection and a live "Reading clue numbers… (N of 50)" OCR
+    progress count (25 rows + 25 cols, matching the given size) with no intermediate
+    re-confirmation screen; confirmed the resulting correction step's clues matched the
+    known ground truth exactly for every line spot-checked (Row 1: 2,5; Row 2: 1,4; Row 3:
+    1,1,4,4; Col 1: 11); confirmed "Build puzzle" and "Cancel" both still wire through
+    correctly (this run hit the already-accepted residual OCR noise on some other line,
+    correctly surfacing the existing "couldn't find a valid solution" message — not a
+    regression, see the standing OCR-accuracy acceptance above); confirmed the draw-a-puzzle
+    wizard's own step-size screen is visually unaffected (shared `.scan-known-count` CSS).
+    No console errors. All 822 tests pass (this module has no dedicated unit tests, same as
+    the rest of scanUI.js's DOM wiring — consistent with the rest of the codebase). Not yet
+    real-device-confirmed.
 
-* **DECIDED: restructure the scan-a-puzzle flow to sidestep the scroll bug
-  entirely, rather than continue chasing the underlying WebKit issue for this
-  interaction.** Direct instruction from the project owner: "Let's just do
-  this and stop chasing our tails on this stupid bug." The draw-a-puzzle
-  wizard does still use numeric text entry (correcting the earlier hypothesis
-  that it avoided a keyboard entirely) — the real difference is that it asks
-  for dimensions on their own simple, standalone screen BEFORE any grid/photo
-  work happens, not layered into a more complex screen alongside grid
-  detection. Two concrete changes, both applying that same already-working
-  pattern to the scan wizard:
-  1. **Move dimension entry to its own simple screen, shown FIRST — before the
-     photo/grid-detection step — matching the draw wizard's screen exactly,
-     not just conceptually.** The reasoning given: a player scanning an
-     existing puzzle already knows its size before they even take the photo
-     ("I tell you the dimensions up front, that isn't going to change"), so
-     asking up front isn't a workflow regression — if anything it matches how
-     the player actually thinks about the task.
-  2. **Eliminate the second, redundant dimension-confirmation step that
-     currently follows grid detection entirely.** Direct feedback: "I don't
-     see the point of the second set of dimensions on the scan a puzzle
-     either." Once the player has explicitly given the real dimensions up
-     front, there's no reason to show them again for re-confirmation — the
-     grid-detection step should just use the given numbers directly. (The
-     grid-detection step's own job — finding the grid's POSITION on the
-     photo, distinct from its row/column COUNT — is unaffected; only the
-     redundant re-display/re-confirmation of the count goes away.)
-  - **This closes the loop specifically for the scan wizard's known trigger
-    interaction, not necessarily the whole underlying scroll bug** — the
-    earlier "breakthrough"/round-4/round-5 investigation showed the same
-    stuck-viewport symptom can also occur on the plain main play screen
-    (unrelated to the scan wizard at all), which this redesign doesn't touch
-    and doesn't claim to fix. Treat this as resolving the practical, most
-    commonly hit trigger, not as evidence the underlying WebKit issue is
-    understood or fixed — if it resurfaces elsewhere, that's still a real,
-    separate open question.
-  - Given the explicit "stop chasing our tails" instruction, further
-    investigation into the underlying `visualViewport` mechanism (rounds 1-5,
-    all still technically unresolved/unconfirmed) is deprioritized rather than
-    actively pursued — this redesign is the priority instead.
+Current Objective (Focus Area)
 
 * **New: three related library/draw-puzzle cleanup items, all from real use of
   the puzzle library screen.**
@@ -850,8 +859,9 @@ Current Objective (Focus Area)
 * **All previously requested work remains done — see the Completed Tasks entries above.**
   "Draw a puzzle," the toolbar cleanup, its direct follow-up (Help position, one-line
   tightening, page/header padding), moving Scan/Draw into the library modal, the small
-  "Library" rename + Scan/Draw button-alignment fix, and the scroll bug's round-5 tooling
-  extension are all implemented and preview-verified; none is yet real-device-confirmed.
+  "Library" rename + Scan/Draw button-alignment fix, the scroll bug's round-5 tooling
+  extension, and the scan-a-puzzle size-first restructure are all implemented and
+  preview-verified; none is yet real-device-confirmed.
 
 Everything below this point is the scroll bug's own standing state, reference-only
 per the project owner's instruction that they're running its real-device testing
