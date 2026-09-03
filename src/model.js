@@ -59,6 +59,16 @@ export function makePuzzle({ id, name, rows, cols, rowClues, colClues, solution 
   return { id, name, rows, cols, rowClues, colClues, solution, source };
 }
 
+// A puzzle whose origin has no stable identity to save progress/stats against — the rare
+// fallback case where a scan (src/scanUI.js) or a hand-drawn puzzle (src/drawUI.js)'s
+// auto-publish attempt failed (offline, not deployed yet) before it ever became a real
+// library entry. A puzzle whose publish DID succeed is overridden to source:'authored' at
+// that point, same as any other library puzzle, so this only ever matches the rare
+// unpublished fallback — see each wizard's own "Play it" handler.
+export function hasUnstableId(puzzle) {
+  return puzzle.source === 'scan' || puzzle.source === 'drawn';
+}
+
 // Build a puzzle directly from a solution grid, deriving its clues from it.
 export function puzzleFromSolution({ id, name, solution, source = 'authored' }) {
   const rows = solution.length;

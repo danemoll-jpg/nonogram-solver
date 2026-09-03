@@ -1200,6 +1200,76 @@ body {
   margin-top: 1rem;
 }
 
+/* ---- "Draw a puzzle" wizard (TODO.md's Current Objective) ----
+   The editable drawing grid: a CSS grid with one extra header row (column clue numbers) and
+   one extra header column (row clue numbers), same corner+headers+cells layout the real
+   board (.nono-grid) uses, but far simpler — no chunk guides, satisfied-graying, or
+   highlight states, since there's no solving involved yet (see src/drawUI.js). Sized
+   independently of --cell-size (like .scan-fillstate-cell) since this grid can be as large as
+   30x30 and needs to stay compact and finger-friendly regardless of viewport, not scale with
+   the real play board's own fit-to-viewport logic. */
+.draw-grid-wrap {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  max-width: 100%;
+}
+
+.draw-grid {
+  display: grid;
+  grid-template-columns: minmax(1.8rem, auto) repeat(var(--draw-grid-cols, 10), 1.5rem);
+  gap: 1px;
+  width: max-content;
+  background: rgba(230, 183, 63, 0.15);
+  border: 1px solid rgba(230, 183, 63, 0.3);
+  border-radius: 0.3rem;
+  padding: 1px;
+}
+
+.draw-grid__corner {
+  background: transparent;
+}
+
+.draw-grid__col-clue,
+.draw-grid__row-clue {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  line-height: 1.05;
+  padding: 0.15rem 0.1rem;
+  text-align: center;
+}
+
+.draw-grid__col-clue {
+  /* Stacked one number per line (see drawUI.js's refreshClueLabels) — a narrow column-width
+     cell has no room to run a multi-number clue inline. */
+  white-space: pre-line;
+  align-items: flex-end;
+}
+
+.draw-grid__row-clue {
+  white-space: nowrap;
+  justify-content: flex-end;
+  padding-right: 0.4rem;
+}
+
+.draw-cell {
+  width: 1.5rem;
+  height: 1.5rem;
+  background: var(--cell-unknown);
+  cursor: pointer;
+  /* Same reason as .nono-cell: without this, a drag-paint stroke fights the browser's own
+     touch-scroll/pan gesture on a touchscreen. */
+  touch-action: none;
+}
+
+.draw-cell.filled {
+  background: var(--gold);
+}
+
 /* Current Objective (see TODO.md): the old separate "Save to library" step (manual title +
    button) is gone — every played scan now auto-publishes before onPuzzleReady fires (see
    src/scanUI.js's scanBtnPlay handler), so its dedicated styling below was removed too. */

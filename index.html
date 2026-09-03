@@ -70,6 +70,7 @@
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-check">Check my work</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-remove-bad">Remove bad marks</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-scan">Scan a puzzle</button></li>
+              <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-draw">Draw a puzzle</button></li>
               <li role="none" class="help-menu__toggle-item">
                 <label class="help-menu__item help-menu__item--toggle">
                   <input type="checkbox" id="toggle-autocheck" />
@@ -300,6 +301,57 @@
       </div>
 
       <button id="scan-btn-cancel" class="btn btn--ghost" type="button">Cancel</button>
+    </div>
+  </div>
+
+  <!-- "Draw a puzzle" (TODO.md's Current Objective) — a blank grid the player fills in by
+       hand; the app derives row/column clues from it and validates they have exactly one
+       solution (src/drawPuzzle.js) before it can be played/published. See src/drawUI.js for
+       the step wiring — this module's closest sibling is the scan wizard above (same
+       publish-a-picture-as-a-real-puzzle shape), so it reuses the exact same full-screen-view
+       pattern (`.scan-screen`, not `.modal-overlay` — see that comment above for the real
+       iOS-scroll-bug history behind that choice) rather than introducing a second one. -->
+  <div id="draw-modal" class="scan-screen hidden">
+    <div class="scan-screen__panel">
+      <h2 id="draw-title" class="scan-screen__title">Draw a puzzle</h2>
+
+      <div class="scan-screen__body">
+      <div class="scan-step" data-step="size" id="draw-step-size">
+        <p>Pick a grid size for your picture — you can't change it once you start drawing.</p>
+        <div class="scan-known-count">
+          <label class="scan-known-count__field">Rows <input id="draw-rows-input" type="number" min="2" max="30" value="10" /></label>
+          <label class="scan-known-count__field">Columns <input id="draw-cols-input" type="number" min="2" max="30" value="10" /></label>
+        </div>
+        <p id="draw-size-error" class="scan-build-error hidden"></p>
+        <button id="draw-btn-start" class="btn btn--primary" type="button">Start drawing</button>
+      </div>
+
+      <div class="scan-step hidden" data-step="draw" id="draw-step-draw">
+        <p>Click or drag to fill in cells — the numbers along the top and left update as you
+          draw. When you're done, the app checks that your picture is the <strong>only</strong>
+          arrangement that matches those numbers before it can be played.</p>
+        <div class="draw-grid-wrap">
+          <div id="draw-grid" class="draw-grid"></div>
+        </div>
+        <p id="draw-build-error" class="scan-build-error hidden"></p>
+        <div class="scan-grid-confirm">
+          <button id="draw-btn-clear" class="btn btn--ghost" type="button">Clear</button>
+          <button id="draw-btn-done" class="btn btn--primary" type="button">Done drawing</button>
+        </div>
+      </div>
+
+      <div class="scan-step hidden" data-step="done" id="draw-step-done">
+        <p>Puzzle ready — your picture has exactly one solution. Playing it adds it to the
+          public shared puzzle library (like any other puzzle you'd pick from there), starting
+          blank so it can actually be solved: full undo, save progress, and stats. Its name
+          stays hidden — same as every library puzzle — until it's solved, and you can rename
+          it from the library afterward.</p>
+        <button id="draw-btn-play" class="btn btn--primary" type="button">Play it</button>
+        <p id="draw-play-status" class="stats-status" aria-live="polite"></p>
+      </div>
+      </div>
+
+      <button id="draw-btn-cancel" class="btn btn--ghost" type="button">Cancel</button>
     </div>
   </div>
 

@@ -3,7 +3,7 @@
 // (solving, hints, mistake-checking) lives in src/*; this file only renders the board and
 // dispatches user actions to those modules.
 
-import { Board, UNKNOWN, FILLED, EMPTY, isLineSatisfied, isLineLocked } from './src/model.js';
+import { Board, UNKNOWN, FILLED, EMPTY, isLineSatisfied, isLineLocked, hasUnstableId } from './src/model.js';
 import { getNextHint } from './src/solver.js';
 import { findContradictionHint } from './src/contradiction.js';
 import { isLineConsistent, anchoredClueNumbers } from './src/lineSolver.js';
@@ -13,6 +13,7 @@ import { SAMPLE_PUZZLES } from './src/puzzles.js';
 import { playSound, isMuted, toggleMuted } from './src/sounds.js';
 import { recordCompletion, fetchAllStats, generatePairingCode, redeemPairingCode } from './src/stats.js';
 import { initScanWizard } from './src/scanUI.js';
+import { initDrawWizard } from './src/drawUI.js';
 import {
   fetchLibraryPuzzles,
   loadLibraryPuzzle,
@@ -25,6 +26,7 @@ import {
   loadInProgressPuzzle,
 } from './src/puzzleLibrary.js';
 import { ensureSignedIn } from './src/firebase.js';
+import { cellsOnLine } from './src/geometry.js';
 
 let puzzle = null;
 let board = null;
@@ -75,6 +77,7 @@ const els = {
   menuCheck: document.getElementById('menu-check'),
   menuRemoveBad: document.getElementById('menu-remove-bad'),
   menuScan: document.getElementById('menu-scan'),
+  menuDraw: document.getElementById('menu-draw'),
   menuRestart: document.getElementById('menu-restart'),
   menuAllGames: document.getElementById('menu-all-games'),
   explainBody: document.getElementById('explain-panel-body'),
@@ -134,6 +137,21 @@ const els = {
   scanBtnPlay: document.getElementById('scan-btn-play'),
   scanPlayStatus: document.getElementById('scan-play-status'),
   scanBtnCancel: document.getElementById('scan-btn-cancel'),
+  drawModal: document.getElementById('draw-modal'),
+  drawStepSize: document.getElementById('draw-step-size'),
+  drawStepDraw: document.getElementById('draw-step-draw'),
+  drawStepDone: document.getElementById('draw-step-done'),
+  drawRowsInput: document.getElementById('draw-rows-input'),
+  drawColsInput: document.getElementById('draw-cols-input'),
+  drawSizeError: document.getElementById('draw-size-error'),
+  drawBtnStart: document.getElementById('draw-btn-start'),
+  drawGrid: document.getElementById('draw-grid'),
+  drawBuildError: document.getElementById('draw-build-error'),
+  drawBtnClear: document.getElementById('draw-btn-clear'),
+  drawBtnDone: document.getElementById('draw-btn-done'),
+  drawBtnPlay: document.getElementById('draw-btn-play'),
+  drawPlayStatus: document.getElementById('draw-play-status'),
+  drawBtnCancel: document.getElementById('draw-btn-cancel'),
   libraryModal: document.getElementById('library-modal'),
   libraryStatus: document.getElementById('library-status'),
   libraryList: document.getElementById('library-list'),
@@ -192,19 +210,19 @@ function setExplain(content) {
 // ---- puzzle lifecycle ----
 
 // Shared init for any puzzle, however it was loaded — a library-modal selection (built-in
-// or community-saved, see the "puzzle library browse" section below) or a freshly scanned
-// one (passed straight through as initScanWizard's onPuzzleReady, which now auto-publishes
-// every played scan to the library first — see src/scanUI.js's scanBtnPlay handler — so a
-// scanned puzzle arrives here as a normal source:'authored' puzzle with a real library id in
-// the overwhelming common case). `board.hasHistory` is unconditionally true: even the rare
-// fallback case (scan played offline, before publishing could succeed — see scanUI.js) gets
-// real post-import history/Undo per the corrected Current Objective guidance in TODO.md; only
-// the imported baseline itself (seeded straight into the grid below, never into history) is
-// permanently un-undoable, same shape as the resumed-progress case described next. The
-// remaining `puzzle.source === 'scan'` checks elsewhere (saveProgressIfApplicable,
-// recordCompletion, recordPuzzleSolved, mistakes.js's snapshot-vs-history branch) still matter
-// for that same rare fallback case — no stable id to save/track stats against — but no longer
-// affect Undo.
+// or community-saved, see the "puzzle library browse" section below), a freshly scanned one,
+// or a freshly drawn one (both passed straight through as initScanWizard's/initDrawWizard's
+// onPuzzleReady, which now auto-publish every played scan/drawing to the library first — see
+// src/scanUI.js's scanBtnPlay handler and src/drawUI.js's own equivalent — so either arrives
+// here as a normal source:'authored' puzzle with a real library id in the overwhelming common
+// case). `board.hasHistory` is unconditionally true: even the rare fallback case (a scan or
+// drawing played offline, before publishing could succeed) gets real post-import
+// history/Undo per the corrected Current Objective guidance in TODO.md; only the imported
+// baseline itself (seeded straight into the grid below, never into history) is permanently
+// un-undoable, same shape as the resumed-progress case described next. The remaining
+// `hasUnstableId(puzzle)` checks elsewhere (saveProgressIfApplicable, recordCompletion,
+// recordPuzzleSolved, mistakes.js's snapshot-vs-history branch) still matter for that same
+// rare fallback case — no stable id to save/track stats against — but no longer affect Undo.
 //
 // `puzzle.initialMarks`, when present (a scanned puzzle whose fill/X state was detected and
 // confirmed — see src/scanUI.js's fill-state review step and TODO.md's Current Objective),
@@ -637,9 +655,9 @@ function maybeShowCompletion() {
   // A genuinely solved puzzle has nothing left to "resume" — clear any stale in-progress
   // save so it stops showing under the library's Incomplete filter (see TODO.md's
   // saved/incomplete-progress item). Same fire-and-forget contract as the two calls above;
-  // skips scan-origin puzzles the same way saveProgressIfApplicable does (see its own
-  // comment) since they were never eligible to be saved in the first place.
-  if (puzzle.source !== 'scan') deleteInProgressPuzzle(puzzle.id).catch(() => {});
+  // skips unpublished scan/drawn-origin puzzles the same way saveProgressIfApplicable does
+  // (see its own comment) since they were never eligible to be saved in the first place.
+  if (!hasUnstableId(puzzle)) deleteInProgressPuzzle(puzzle.id).catch(() => {});
 }
 
 els.btnCompleteClose.addEventListener('click', () => {
@@ -655,17 +673,18 @@ els.btnCompleteClose.addEventListener('click', () => {
 // each one's own comment. All funnel through this one function so the eligibility rules
 // below only need to stay in sync in one place.
 //
-// Eligible puzzles only: scan-origin snapshots have no stable identity worth saving against
-// (same reasoning recordCompletion/recordPuzzleSolved already use to skip them), and a
-// puzzle with no known solution can't produce the hintsUsed/mistakes stats this feature
-// tracks anyway. A completed board has nothing left to "resume" (maybeShowCompletion already
-// deletes any stale save on a genuine solve; a complete-but-wrong board is a rare edge case
-// better left to Check my work / Remove bad marks than folded in here). An untouched
-// (all-UNKNOWN) board deletes any stale save instead of writing an empty one — covers the
-// case where a player resumed a puzzle, then manually cleared it back to blank by hand
-// (short of a full Restart) without ever adding a new mark worth preserving.
+// Eligible puzzles only: unpublished scan/drawn-origin snapshots have no stable identity
+// worth saving against (same reasoning recordCompletion/recordPuzzleSolved already use to
+// skip them — see hasUnstableId), and a puzzle with no known solution can't produce the
+// hintsUsed/mistakes stats this feature tracks anyway. A completed board has nothing left to
+// "resume" (maybeShowCompletion already deletes any stale save on a genuine solve; a
+// complete-but-wrong board is a rare edge case better left to Check my work / Remove bad
+// marks than folded in here). An untouched (all-UNKNOWN) board deletes any stale save
+// instead of writing an empty one — covers the case where a player resumed a puzzle, then
+// manually cleared it back to blank by hand (short of a full Restart) without ever adding a
+// new mark worth preserving.
 async function saveProgressIfApplicable() {
-  if (!puzzle || !board || puzzle.source === 'scan' || !puzzle.solution) return;
+  if (!puzzle || !board || hasUnstableId(puzzle) || !puzzle.solution) return;
   if (board.isComplete()) return;
   const hasAnyMarks = board.grid.some((row) => row.some((cell) => cell !== UNKNOWN));
   if (!hasAnyMarks) {
@@ -682,11 +701,11 @@ async function saveProgressIfApplicable() {
 // under Help that the same "not really a help action" reasoning already applied to those two
 // applies here too, and the UI-polish round's toolbar trimming left room for it.
 els.btnSaveProgress.addEventListener('click', async () => {
-  // Current Objective (see TODO.md): a played scan now auto-publishes to the library before
-  // it ever reaches startPuzzle (see src/scanUI.js's scanBtnPlay handler), so source:'scan'
-  // here means that publish attempt specifically failed (offline, not deployed yet) — the
-  // rare fallback case, not the normal state for a scanned puzzle any more.
-  if (puzzle.source === 'scan') {
+  // Current Objective (see TODO.md): a played scan or drawing now auto-publishes to the
+  // library before it ever reaches startPuzzle (see src/scanUI.js's/src/drawUI.js's "Play
+  // it" handlers), so hasUnstableId(puzzle) here means that publish attempt specifically
+  // failed (offline, not deployed yet) — the rare fallback case, not the normal state.
+  if (hasUnstableId(puzzle)) {
     setExplain("Couldn't save — this puzzle wasn't added to the library (offline, or not deployed yet), so it has no stable identity to save progress against.");
     return;
   }
@@ -1105,36 +1124,6 @@ function attachPointerHandlers(grid) {
     return el && el.classList && el.classList.contains('nono-cell') ? el : null;
   }
 
-  // Real-device report (see TODO.md): dragging across more than a few cells, finger never
-  // leaving the screen and never crossing an already-marked cell, would sometimes still leave
-  // some cells unpainted. Root cause: pointermove only ever painted whichever single cell was
-  // exactly under the pointer at the moment each event fired (see below) — on a fast swipe,
-  // especially over small cells (a large puzzle's cells shrink toward MIN_CELL_PX), two
-  // consecutive samples can easily land in non-adjacent cells, silently skipping whatever was
-  // in between even though the finger visually passed straight over it without lifting.
-  // Standard Bresenham line algorithm between two grid cells (inclusive of both endpoints) —
-  // grid cells are just integer (row, col) coordinates, no different from pixels here — lets
-  // pointermove paint every cell the pointer's path crossed since the last sample, not just
-  // its final resting point.
-  function cellsOnLine(r0, c0, r1, c1) {
-    const cells = [];
-    const dr = Math.abs(r1 - r0);
-    const dc = Math.abs(c1 - c0);
-    const sr = r0 < r1 ? 1 : -1;
-    const sc = c0 < c1 ? 1 : -1;
-    let err = dr - dc;
-    let r = r0;
-    let c = c0;
-    while (true) {
-      cells.push([r, c]);
-      if (r === r1 && c === c1) break;
-      const e2 = 2 * err;
-      if (e2 > -dc) { err -= dc; r += sr; }
-      if (e2 < dr) { err += dr; c += sc; }
-    }
-    return cells;
-  }
-
   // ---- row/column crosshair highlight (Current Objective — see TODO.md) ----
   //
   // Highlights the full row and column of whichever cell is currently being pressed or
@@ -1377,6 +1366,26 @@ const scanWizard = initScanWizard({
 els.menuScan.addEventListener('click', () => {
   closeHelpMenu();
   scanWizard.open();
+});
+
+// Current Objective (see TODO.md): "draw a puzzle" — the same auto-save-outgoing-puzzle-
+// first/start-blank pattern handleScannedPuzzleReady above already established, since
+// finishing the draw wizard replaces the current puzzle exactly the same way finishing the
+// scan wizard does.
+async function handleDrawnPuzzleReady(p) {
+  await saveProgressIfApplicable().catch(() => {});
+  startPuzzle(p);
+}
+
+const drawWizard = initDrawWizard({
+  els,
+  onPuzzleReady: handleDrawnPuzzleReady,
+  onClose: fitBoardToViewport,
+  onOpen: syncExplainPanelSpace,
+});
+els.menuDraw.addEventListener('click', () => {
+  closeHelpMenu();
+  drawWizard.open();
 });
 
 // ---- puzzle library browse (library-consolidation round — see TODO.md; started as item
@@ -1695,7 +1704,7 @@ els.menuRestart.addEventListener('click', async () => {
   // leaving that save in place would let a later "Resume" silently undo the restart by
   // loading the pre-restart snapshot back in. Fire-and-forget, same contract as every other
   // progress-save cleanup call (see maybeShowCompletion).
-  if (puzzle.source !== 'scan') deleteInProgressPuzzle(puzzle.id).catch(() => {});
+  if (!hasUnstableId(puzzle)) deleteInProgressPuzzle(puzzle.id).catch(() => {});
   if (puzzle.resumed) {
     const { initialMarks, resumeElapsedMs, resumeHintsUsed, resumed, ...fresh } = puzzle;
     startPuzzle(fresh);
@@ -2195,6 +2204,7 @@ function initScrollDiagnostics() {
     ['stats-modal', els.statsModal],
     ['library-modal (puzzle library)', els.libraryModal],
     ['scan-modal (scan wizard)', els.scanModal],
+    ['draw-modal (draw-a-puzzle wizard)', els.drawModal],
     ['help-menu-list (Help dropdown)', els.helpMenuList],
   ];
 

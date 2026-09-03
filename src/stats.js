@@ -5,13 +5,15 @@
 // every stats read/write uses the same plain per-uid security rule (see firestore.rules).
 //
 // Stats are bucketed by exact grid size ("10x10"), per the earlier design pass. A puzzle
-// with `source: 'scan'` (item 10, not yet built) never counts — see recordCompletion.
+// with no stable published id (an unpublished scan or drawing — see model.js's
+// hasUnstableId) never counts — see recordCompletion.
 //
 // Every function here fails soft: stats/pairing are a nice-to-have layered on top of a
 // fully-playable offline game, not a requirement for it. A network error, not-yet-deployed
 // Cloud Functions, or a blocked/offline device should never interrupt play.
 
 import { ensureSignedIn, getFirestoreClient, getCallable, signInWithPairingToken } from './firebase.js';
+import { hasUnstableId } from './model.js';
 
 function sizeKey(rows, cols) {
   return `${rows}x${cols}`;
@@ -21,7 +23,7 @@ function sizeKey(rows, cols) {
 // true/false for whether the write actually happened — callers don't need to react either
 // way, since a failed stats write must never block or alter the completion UI.
 export async function recordCompletion(puzzle, { timeMs, hintsUsed, mistakes }) {
-  if (puzzle.source === 'scan') return false; // resolved design decision — see TODO.md
+  if (hasUnstableId(puzzle)) return false; // resolved design decision — see TODO.md
   try {
     const user = await ensureSignedIn();
     const { db, mod } = await getFirestoreClient();

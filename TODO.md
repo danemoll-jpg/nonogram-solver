@@ -547,64 +547,86 @@ Completed Tasks
     yet re-verified against a real Firebase save→resume→undo round trip or on the real
     device.
 
+* **New feature — "draw a puzzle" — built and verified end-to-end in browser preview
+  against the real Firebase project (not just unit-tested).** A new Help-menu entry
+  ("Draw a puzzle") opens a third full-screen wizard alongside Scan: pick a grid size (2-30
+  per side) → draw on a blank grid (click/tap/drag toggles a cell filled; row/column clue
+  numbers along the top/left update live via `deriveClues`/`cluesFromLine` — no solving
+  logic involved at this step) → "Done drawing" derives clues and validates they have
+  exactly one solution → "Play it" auto-publishes to the public library and starts the
+  puzzle blank, exactly like any other library puzzle.
+  - **New modules**: `src/drawPuzzle.js` (pure — builds+validates a puzzle from a drawn
+    grid, no DOM) and `src/drawUI.js` (DOM wiring, modeled directly on `src/scanUI.js`'s
+    structure/step pattern but much simpler — no canvas/image/OCR pipeline at all).
+    `src/geometry.js` is new too: `cellsOnLine` (the Bresenham drag-fill-gap fix) was
+    extracted out of `app.js`, its original single-purpose home, once the draw grid's own
+    drag-painting needed the exact identical logic — both the real board and the drawing
+    grid now import it from one place instead of duplicating it.
+  - **Uniqueness enforcement, resolved exactly per this item's earlier design decision (see
+    the old Current Objective entry this replaces)**: `buildDrawnPuzzle` derives clues from
+    the drawn grid, then runs `fullSolve.js`'s `solvePuzzleFully` against ONLY those derived
+    clues (no peeking at the known solution) — reusing scanned puzzles' existing validation
+    call, not a new checker. Confirmed (and worth recording, since `fullSolve.js`'s own
+    comment disclaims proving uniqueness) that this reuse is mathematically sound as a
+    genuine uniqueness proof, not just a solvability check: every technique
+    `solvePuzzleFully` applies (line deduction, contradiction search) is SOUND — it only
+    ever fixes a cell when every valid completion of the clues agrees on that cell — so
+    reaching a fully-marked board (`solved: true`) proves the clues have exactly one
+    solution. A second, different valid solution would mean two completions disagree on
+    some cell, and neither value at that cell could ever be soundly forced, so full
+    completion could never be reached. `MIN_FILLED_CELLS` also rejects an all-blank
+    drawing (trivially "unique" but not a real picture).
+  - A drawn puzzle deliberately does **not** seed `initialMarks` the way a scan does — a
+    scan's marks are already-observed real-world progress, but a drawing IS the solution,
+    so the player (or anyone else) needs to solve it from a blank board for the picture to
+    mean anything. Confirmed directly in preview: the published puzzle loaded with 0/25
+    cells marked and the correct derived clues.
+  - **`source: 'drawn'`** joins `'scan'` as the second "unpublished, no stable library id
+    yet" origin (only reachable if the library publish itself fails — offline, not deployed
+    — same rare fallback shape `scanUI.js`'s `'scan'` case already has; overridden to
+    `'authored'` on a successful publish, same as scan). Generalized the four places that
+    used to check `puzzle.source === 'scan'` specifically (`app.js`'s
+    saveProgressIfApplicable/menuRestart/maybeShowCompletion/btnSaveProgress, plus
+    `stats.js`'s recordCompletion and `puzzleLibrary.js`'s recordPuzzleSolved) into one
+    shared `model.js` export, `hasUnstableId(puzzle)`, rather than duplicating a second
+    `|| puzzle.source === 'drawn'` at each site.
+  - **Verified end-to-end in browser preview against the real Firestore project**: drew a
+    5x5 plus-sign, confirmed live clue labels updated correctly during drawing, confirmed
+    "Done drawing" passed (plus-sign clues are genuinely unique), confirmed "Play it"
+    published a real `puzzles/{id}` doc (checked directly via `fetchLibraryPuzzles()` and
+    the library modal — showed up as "Puzzle 5 — 5x5" with a Rename affordance, confirming
+    it's this session's own creation, title correctly hidden until solved), confirmed the
+    puzzle loaded BLANK (0 filled/0 empty of 25 cells) with the correct derived clues,
+    solved it for real by filling the plus-sign pattern on the actual play board, and
+    confirmed the completion modal fired correctly (revealed the real name "Drawn puzzle",
+    0 mistakes, 0 hints) — the full draw→validate→publish→play-blank→solve round trip,
+    not just the build step in isolation. Separately confirmed the ambiguity-rejection
+    message renders correctly (a 2x2 diagonal — the classic two-solution nonogram case) and
+    that Cancel returns cleanly to the play screen. Checked mobile viewport (375px): the
+    drawing grid correctly scrolls horizontally within its own `.draw-grid-wrap` container
+    (`overflow: auto`) without the page itself ever gaining horizontal overflow. This
+    testing round's own "Drawn puzzle" (5x5) is now a real, permanent entry in the live
+    public library, alongside a pre-existing "Scanned puzzle" test entry from a past
+    round — same acceptable testing footprint prior rounds' real-Firestore verification
+    has always had.
+  - **Tests**: `test/drawPuzzle.test.js` (new) — rejects an all-blank grid, accepts every
+    built-in `SAMPLE_PUZZLES` solution as a drawing (each turned out to already be uniquely
+    solvable — a useful confirmation, since none of them had ever been run through this
+    check before), rejects a genuinely ambiguous 2x2 diagonal, and accepts the minimum
+    single-filled-cell case. Plus two new `hasUnstableId` tests in `test/model.test.js`.
+    All 822 tests pass (818 + 4 new draw tests + 2 new `hasUnstableId` tests less
+    duplication — see the file for the exact count). Not yet real-device-confirmed (same
+    "preview-verified, awaiting the project owner's on-device pass" status every other
+    recent addition has).
+
 Current Objective (Focus Area)
 
-* **This round's ONLY active build work is the "draw a puzzle" feature below —
-  the project owner is running all pending real-device testing (round 5's scroll
-  fix, and anything else awaiting on-device confirmation) in parallel this same
-  round, not asking Code to build anything further on those until that testing
-  is back.** Don't touch the scroll bug or any other pending-verification item
-  this round; everything below the puzzle-builder item is for reference/context
-  only, not this round's task.
-
-* **New feature idea from the project owner: a "draw a puzzle" mode — a blank grid
-  the player fills in by hand to design their own picture, with the app deriving
-  row/column clues from that drawing and turning it into a real playable puzzle.**
-  Genuinely low-complexity relative to most of this project's recent work, because
-  the hard parts already exist and this mostly needs new UI wiring, not new
-  algorithms:
-  - **Reuse, not new work**: clue derivation (turning a filled grid into row/column
-    run-length numbers) is the same core logic the solver has always used.
-    Solvability/uniqueness checking already exists (`fullSolve.js`), currently used
-    to validate scanned puzzles before they're playable — the same check applies
-    directly here. The publish-to-library flow (a played puzzle auto-publishing,
-    per the recent scan-auto-publish redesign) could very plausibly treat a
-    hand-drawn puzzle as just another `source` value feeding the same existing
-    pipeline, rather than needing its own separate save/publish logic.
-  - **New work needed**: a size picker up front (can likely reuse the existing
-    known-rows/known-cols UI pattern from the scan wizard), and a blank editable
-    drawing grid — plausibly a repurposed version of the existing board-rendering
-    component itself, in a simple toggle-to-draw mode (click/tap/drag to mark a
-    cell filled or blank, no clues shown yet, no solving logic involved) rather
-    than a new rendering component from scratch.
-  - **Uniqueness question, RESOLVED — verified against the real code, not just
-    reasoned about abstractly.** Checked the live source directly: completion and
-    mistake-checking (`boardMatchesSolution`, `computeCompletionStats` in `app.js`,
-    plus `checkForMistakes`/`autoCheckMark` in `mistakes.js`) all compare the
-    player's grid CELL-BY-CELL against one specific stored `puzzle.solution`
-    array — not against generic clue-satisfaction. **This means a non-unique
-    puzzle would be a genuinely broken experience, not just a lesser one**: a
-    player who correctly satisfies every row/column clue via a different valid
-    arrangement than the one stored as the "answer" would never see the
-    completion celebration, would be told "something's off," and would have
-    correctly-placed cells counted as mistakes in their stats. The solver itself
-    (hints, auto-X, line-locking) is fine regardless — pure clue-based logical
-    deduction, unaffected by non-uniqueness, it would just correctly leave
-    genuinely ambiguous cells unresolved.
-  - **Decision: enforce uniqueness before a drawn puzzle can be saved/published,
-    rather than trying to make completion-checking tolerant of multiple
-    solutions.** Retrofitting `boardMatchesSolution`/`computeCompletionStats`/
-    `checkForMistakes` to handle non-uniqueness gracefully would be a real,
-    invasive change touching several files, and has its own real cost even if
-    done — losing the ability to pinpoint "this exact cell is wrong" once there's
-    no single correct answer to compare a mistake against. Enforcing uniqueness
-    up front is the smaller, safer change: reuse the exact same solvability check
-    (`fullSolve.js`) already used to validate scanned puzzles before they're
-    playable. If a drawn pattern's derived clues don't have a unique solution,
-    reject it or prompt the player to adjust the drawing before it can be saved —
-    exact UI wording/flow is Code's call. **This same resolution should also
-    apply to item 8** (deferred photo-generation) whenever that's picked back up,
-    for consistency — same underlying constraint, same fix.
+* **The "draw a puzzle" feature (this round's build work) is now done and preview-verified
+  end-to-end against the real Firebase project — see its own Completed Tasks entry above
+  for the full writeup.** Not yet real-device-confirmed. Everything below this point is the
+  scroll bug's own standing state, reference-only per the project owner's instruction that
+  they're running its real-device testing themselves in parallel — still not this round's
+  task to act on.
 
 * **Round 4's scroll fix (`healStuckViewportHeight`) has now been tested on the real
   device, including the manual "Force heal viewport height now" button — and the

@@ -28,7 +28,7 @@
 
 import { ensureSignedIn, getFirestoreClient } from './firebase.js';
 import { parseClueText, buildScannedPuzzle } from './scanPuzzle.js';
-import { UNKNOWN, FILLED, EMPTY } from './model.js';
+import { UNKNOWN, FILLED, EMPTY, hasUnstableId } from './model.js';
 
 const COLLECTION = 'puzzles';
 
@@ -157,14 +157,15 @@ export async function fetchSolvedPuzzles() {
 
 // Called once per genuine completion of a library-list puzzle (see app.js's
 // maybeShowCompletion, right alongside src/stats.js's recordCompletion) — increments
-// timesSolved and lowers bestTimeMs only if this run genuinely beat it. A scan-origin
-// puzzle never has a stable identity worth tracking as "solved" (same reasoning
-// recordCompletion already uses to skip it), so it's skipped here too. Resolves true/false
+// timesSolved and lowers bestTimeMs only if this run genuinely beat it. An unpublished
+// scan/drawn-origin puzzle never has a stable identity worth tracking as "solved" (same
+// reasoning recordCompletion already uses to skip it — see model.js's hasUnstableId), so
+// it's skipped here too. Resolves true/false
 // for whether the write happened; callers don't need to react either way, matching
 // recordCompletion's fire-and-forget contract — a failed write must never affect completion
 // UI the player already sees.
 export async function recordPuzzleSolved(puzzle, timeMs) {
-  if (puzzle.source === 'scan') return false;
+  if (hasUnstableId(puzzle)) return false;
   try {
     const user = await ensureSignedIn();
     const { db, mod } = await getFirestoreClient();

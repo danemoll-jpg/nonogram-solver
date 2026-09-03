@@ -1,5 +1,5 @@
 import { describe, test, assert, assertEqual } from './harness.js';
-import { Board, cluesFromLine, deriveClues, isLineSatisfied, isLineLocked, FILLED, EMPTY, UNKNOWN } from '../src/model.js';
+import { Board, cluesFromLine, deriveClues, isLineSatisfied, isLineLocked, hasUnstableId, FILLED, EMPTY, UNKNOWN } from '../src/model.js';
 
 describe('cluesFromLine / deriveClues', () => {
   test('empty line has an empty clue', () => {
@@ -155,5 +155,17 @@ describe('Board.fromGrid baseline survives undo (real bug, found via a drag-plac
     board.set(0, 0, EMPTY);
     board.undoLast();
     assertEqual(board.get(0, 0), UNKNOWN);
+  });
+});
+
+describe('hasUnstableId', () => {
+  test('true for an unpublished scan or drawn puzzle (no stable library id yet)', () => {
+    assertEqual(hasUnstableId({ source: 'scan' }), true);
+    assertEqual(hasUnstableId({ source: 'drawn' }), true);
+  });
+
+  test('false for a real authored/library puzzle — including a published scan/drawing, ' +
+    'which is overridden to source:\'authored\' on successful publish', () => {
+    assertEqual(hasUnstableId({ source: 'authored' }), false);
   });
 });

@@ -6,6 +6,7 @@ import './contradiction.test.js';
 import './mistakes.test.js';
 import './gridDetect.test.js';
 import './scanPuzzle.test.js';
+import './drawPuzzle.test.js';
 import './ocrSegment.test.js';
 import './cellStateDetect.test.js';
 

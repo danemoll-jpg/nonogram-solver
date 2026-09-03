@@ -130,6 +130,26 @@
   baseline-specific, not an X-mode-specific or drag-specific defect. Verified with 4 new
   unit tests (`test/model.test.js`); not yet re-verified against a real Firebase
   save→resume→undo round trip.
+- **New feature — "draw a puzzle" — built and verified end-to-end in browser preview
+  against the real Firebase project.** A new Help-menu wizard (`src/drawUI.js`) lets a
+  player pick a grid size, draw a picture on a blank grid (click/tap/drag, with live
+  row/column clue numbers), then "Done drawing" validates the derived clues have exactly
+  one solution before "Play it" auto-publishes to the library and starts the puzzle blank
+  (deliberately not pre-filled the way a scan's `initialMarks` is — the drawing IS the
+  solution, so it has to be solved from scratch to mean anything). Uniqueness is enforced
+  by reusing `fullSolve.js`'s `solvePuzzleFully` against the derived clues alone (no
+  peeking at the known solution) via new pure module `src/drawPuzzle.js` — confirmed this
+  reuse is a genuine uniqueness proof (every technique it applies is sound, so a full
+  solve is only reachable when no second valid solution exists), not just a solvability
+  check, despite that module's own comment disclaiming uniqueness-proving. `src/geometry.js`
+  is new too — `cellsOnLine` (the Bresenham drag-fill-gap fix) was extracted out of `app.js`
+  once the draw grid's own drag-painting needed the identical logic. `source: 'drawn'`
+  joins `'scan'` as a second "no stable library id yet" origin, unified behind one new
+  `model.js` export (`hasUnstableId(puzzle)`) rather than duplicating the check at each of
+  the half-dozen call sites that used to test `puzzle.source === 'scan'` directly. See
+  TODO.md's Completed Tasks for the full preview-verification writeup (a real 5x5
+  plus-sign drawn, published, played blank, and solved end-to-end against the live
+  Firestore project) — not yet real-device-confirmed.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -163,31 +183,15 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective: this round's ONLY active build work is the "draw a puzzle"
-feature (item 1 below)** — the Eraser mode, sound removal, and the Undo
-baseline-wipe bug are done. The project owner is running all pending real-device
+**Current objective: this round's build work — the "draw a puzzle" feature — is
+done, preview-verified end-to-end against the real Firebase project (see the
+entry above and `TODO.md`'s Completed Tasks for the full writeup), not yet
+real-device-confirmed.** The project owner is running all pending real-device
 testing (round 5's scroll fix, and anything else awaiting on-device confirmation)
-in parallel this same round — item 2 below is reference/context only, not this
-round's task. Don't touch the scroll bug or anything else pending verification
-until that testing comes back.
+in parallel this same round — item 1 below is reference/context only, still not
+this round's task to act on.
 
-1. **New feature idea: a "draw a puzzle" mode** — a blank grid the player fills in
-   by hand, with the app deriving clues and turning it into a real playable
-   puzzle. Genuinely low-complexity: clue derivation and solvability/uniqueness
-   checking already exist (reused from the scan flow), and the auto-publish
-   pipeline could likely treat this as just another `source` value. Mainly new
-   UI work (a size picker, a blank editable drawing grid) rather than new
-   algorithms. **The uniqueness question is RESOLVED, not open**: verified
-   directly against the real code that completion/mistake-checking
-   (`boardMatchesSolution`, `computeCompletionStats`, `checkForMistakes`) all
-   compare cell-by-cell against one stored solution, not clue-satisfaction — a
-   non-unique puzzle would genuinely break the experience (false "mistakes,"
-   no completion celebration for an otherwise-valid solve). Decision: enforce
-   uniqueness before save/publish via the existing `fullSolve.js` check, same
-   as scanned puzzles already get — don't retrofit the completion system.
-   Same resolution applies to the deferred item 8 for consistency. See
-   `TODO.md` for full detail.
-2. **The scroll bug — reference only this round, not active work**:
+1. **The scroll bug — reference only this round, not active work**:
    - The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
      real device.
    - Round 4's scroll fix FAILED real-device verification — the sixth straight
