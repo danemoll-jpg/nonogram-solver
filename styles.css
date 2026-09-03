@@ -1347,6 +1347,15 @@ body {
   border-bottom: 1px solid rgba(230, 183, 63, 0.2);
 }
 
+/* Same misalignment bug as round 4's toolbar fix and .toolbar > .btn (see TODO.md for the
+   full history of this exact class of bug): `.btn + .btn { margin-top: 0.5rem }` exists for
+   vertical button stacks elsewhere, and every horizontal `.btn` row has to reset it back to
+   0 for itself — this row was the one that got missed this time, so "Draw a puzzle" (directly
+   following another `.btn`) sat 8px lower than "Scan a puzzle". */
+.library-actions .btn {
+  margin-top: 0;
+}
+
 .library-filters {
   display: flex;
   flex-wrap: wrap;

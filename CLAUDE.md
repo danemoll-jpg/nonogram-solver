@@ -233,6 +233,15 @@
   directly in preview: both buttons close the library and open their wizard; the
   Help dropdown no longer lists either item. All 822 tests pass. Not yet
   real-device-confirmed.
+- **Two small direct follow-ups — done.** "Puzzle library" shortened to just
+  "Library" (toolbar button and modal `<h2>` both). "Scan a puzzle"/"Draw a
+  puzzle" were misaligned — the exact same bug class as round 4's original
+  toolbar-alignment bug (`.btn + .btn`'s vertical-stack margin leaking into a
+  horizontal `.btn` row that hadn't reset it), just in the new
+  `.library-actions` row this project added. Fixed the same way:
+  `.library-actions .btn { margin-top: 0 }`. Verified via direct
+  `getBoundingClientRect` comparison (identical `rect.top`/`rect.bottom`), not
+  just eyeballing. All 822 tests pass.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)

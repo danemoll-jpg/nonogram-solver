@@ -749,6 +749,20 @@ Completed Tasks
   clicking "Draw a puzzle" does the same for the draw wizard; the Help dropdown's item list no
   longer contains either entry. All 822 tests still pass. Not yet real-device-confirmed.
 
+* **Two small direct follow-ups — done, preview-verified.**
+  1. "Puzzle library" shortened to just **"Library"**, both on the toolbar button and the
+     modal's own `<h2>` title, so the two stay consistent with each other.
+  2. **"Scan a puzzle" / "Draw a puzzle" misaligned — the exact same bug class as round 4's
+     original toolbar-alignment bug, in a new location.** `.library-actions .btn` (the new row
+     added this project) was the one horizontal `.btn` group that didn't reset the shared
+     `.btn + .btn { margin-top: 0.5rem }` rule (meant for vertical stacks elsewhere) back to
+     0, so "Draw a puzzle" — directly following another `.btn` — sat 8px lower than "Scan a
+     puzzle", same mechanism as `.toolbar > .btn`/the old `.library-entry-group .btn` fix.
+     Fixed the same way: `.library-actions .btn { margin-top: 0 }`. Verified by direct
+     `getBoundingClientRect` comparison in preview: both buttons now report identical
+     `rect.top`/`rect.bottom` (192.2/227.4 in that run), not just a visual eyeball check. All
+     822 tests still pass. Not yet real-device-confirmed.
+
 Current Objective (Focus Area)
 
 * **All requested work is now done — see the Completed Tasks entries above.** "Draw a puzzle,"
