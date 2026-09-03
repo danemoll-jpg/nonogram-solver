@@ -549,6 +549,63 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
+* **This round's ONLY active build work is the "draw a puzzle" feature below —
+  the project owner is running all pending real-device testing (round 5's scroll
+  fix, and anything else awaiting on-device confirmation) in parallel this same
+  round, not asking Code to build anything further on those until that testing
+  is back.** Don't touch the scroll bug or any other pending-verification item
+  this round; everything below the puzzle-builder item is for reference/context
+  only, not this round's task.
+
+* **New feature idea from the project owner: a "draw a puzzle" mode — a blank grid
+  the player fills in by hand to design their own picture, with the app deriving
+  row/column clues from that drawing and turning it into a real playable puzzle.**
+  Genuinely low-complexity relative to most of this project's recent work, because
+  the hard parts already exist and this mostly needs new UI wiring, not new
+  algorithms:
+  - **Reuse, not new work**: clue derivation (turning a filled grid into row/column
+    run-length numbers) is the same core logic the solver has always used.
+    Solvability/uniqueness checking already exists (`fullSolve.js`), currently used
+    to validate scanned puzzles before they're playable — the same check applies
+    directly here. The publish-to-library flow (a played puzzle auto-publishing,
+    per the recent scan-auto-publish redesign) could very plausibly treat a
+    hand-drawn puzzle as just another `source` value feeding the same existing
+    pipeline, rather than needing its own separate save/publish logic.
+  - **New work needed**: a size picker up front (can likely reuse the existing
+    known-rows/known-cols UI pattern from the scan wizard), and a blank editable
+    drawing grid — plausibly a repurposed version of the existing board-rendering
+    component itself, in a simple toggle-to-draw mode (click/tap/drag to mark a
+    cell filled or blank, no clues shown yet, no solving logic involved) rather
+    than a new rendering component from scratch.
+  - **Uniqueness question, RESOLVED — verified against the real code, not just
+    reasoned about abstractly.** Checked the live source directly: completion and
+    mistake-checking (`boardMatchesSolution`, `computeCompletionStats` in `app.js`,
+    plus `checkForMistakes`/`autoCheckMark` in `mistakes.js`) all compare the
+    player's grid CELL-BY-CELL against one specific stored `puzzle.solution`
+    array — not against generic clue-satisfaction. **This means a non-unique
+    puzzle would be a genuinely broken experience, not just a lesser one**: a
+    player who correctly satisfies every row/column clue via a different valid
+    arrangement than the one stored as the "answer" would never see the
+    completion celebration, would be told "something's off," and would have
+    correctly-placed cells counted as mistakes in their stats. The solver itself
+    (hints, auto-X, line-locking) is fine regardless — pure clue-based logical
+    deduction, unaffected by non-uniqueness, it would just correctly leave
+    genuinely ambiguous cells unresolved.
+  - **Decision: enforce uniqueness before a drawn puzzle can be saved/published,
+    rather than trying to make completion-checking tolerant of multiple
+    solutions.** Retrofitting `boardMatchesSolution`/`computeCompletionStats`/
+    `checkForMistakes` to handle non-uniqueness gracefully would be a real,
+    invasive change touching several files, and has its own real cost even if
+    done — losing the ability to pinpoint "this exact cell is wrong" once there's
+    no single correct answer to compare a mistake against. Enforcing uniqueness
+    up front is the smaller, safer change: reuse the exact same solvability check
+    (`fullSolve.js`) already used to validate scanned puzzles before they're
+    playable. If a drawn pattern's derived clues don't have a unique solution,
+    reject it or prompt the player to adjust the drawing before it can be saved —
+    exact UI wording/flow is Code's call. **This same resolution should also
+    apply to item 8** (deferred photo-generation) whenever that's picked back up,
+    for consistency — same underlying constraint, same fix.
+
 * **Round 4's scroll fix (`healStuckViewportHeight`) has now been tested on the real
   device, including the manual "Force heal viewport height now" button — and the
   real data shows the technique doesn't touch the actual broken variable. This is
@@ -640,8 +697,10 @@ Next Steps (Do Not Start Yet)
   grid detection). **Explicitly deprioritized by the project owner** — not a current
   priority, kept here for later rather than dropped. Still open whenever it is picked
   up: is grid size user-adjustable at generation time or fixed per image; slider vs.
-  automatic threshold/contrast tuning; reject, flag, or allow non-unique-solution
-  puzzles.
+  automatic threshold/contrast tuning. **The non-unique-solution question is now
+  RESOLVED, not open** — see the "draw a puzzle" item above: enforce uniqueness via
+  the same `fullSolve.js` check before a generated puzzle can be saved/published,
+  same as the resolution for that feature, for consistency.
 * Item 9 — remaining scope: richer library browsing only now (search over titles,
   sort options like newest/most-solved, pagination once the library grows) — the
   friends-only/private sharing question is resolved.

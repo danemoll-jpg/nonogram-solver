@@ -163,19 +163,41 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective is now down to the scroll bug** — the Eraser mode, sound removal,
-and the Undo baseline-wipe bug (all above) are done. For history:
+**Current objective: this round's ONLY active build work is the "draw a puzzle"
+feature (item 1 below)** — the Eraser mode, sound removal, and the Undo
+baseline-wipe bug are done. The project owner is running all pending real-device
+testing (round 5's scroll fix, and anything else awaiting on-device confirmation)
+in parallel this same round — item 2 below is reference/context only, not this
+round's task. Don't touch the scroll bug or anything else pending verification
+until that testing comes back.
 
-1. **The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
-   real device** — both verified by the project owner directly.
-2. **Round 4's scroll fix FAILED real-device verification — the sixth straight
-   round to fail on this bug class.** A real before/after capture (manually
-   forcing the "heal" button) proved the technique only recomputes
-   `window.innerHeight`, never `visualViewport.height` — the visible symptom
-   (EXCESS) was completely unchanged, 79px both before and after.
-3. **Round 5 (see above) is implemented but NOT real-device-verified** — needs a
-   real on-device check via the "Force heal viewport height now" debug button
-   before it can be trusted, same as every prior round.
+1. **New feature idea: a "draw a puzzle" mode** — a blank grid the player fills in
+   by hand, with the app deriving clues and turning it into a real playable
+   puzzle. Genuinely low-complexity: clue derivation and solvability/uniqueness
+   checking already exist (reused from the scan flow), and the auto-publish
+   pipeline could likely treat this as just another `source` value. Mainly new
+   UI work (a size picker, a blank editable drawing grid) rather than new
+   algorithms. **The uniqueness question is RESOLVED, not open**: verified
+   directly against the real code that completion/mistake-checking
+   (`boardMatchesSolution`, `computeCompletionStats`, `checkForMistakes`) all
+   compare cell-by-cell against one stored solution, not clue-satisfaction — a
+   non-unique puzzle would genuinely break the experience (false "mistakes,"
+   no completion celebration for an otherwise-valid solve). Decision: enforce
+   uniqueness before save/publish via the existing `fullSolve.js` check, same
+   as scanned puzzles already get — don't retrofit the completion system.
+   Same resolution applies to the deferred item 8 for consistency. See
+   `TODO.md` for full detail.
+2. **The scroll bug — reference only this round, not active work**:
+   - The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
+     real device.
+   - Round 4's scroll fix FAILED real-device verification — the sixth straight
+     round to fail on this bug class. A real before/after capture (manually
+     forcing the "heal" button) proved the technique only recomputes
+     `window.innerHeight`, never `visualViewport.height` — the visible symptom
+     (EXCESS) was completely unchanged, 79px both before and after.
+   - Round 5 (see above) is implemented but NOT real-device-verified — needs a
+     real on-device check via the "Force heal viewport height now" debug
+     button before it can be trusted, same as every prior round.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,
