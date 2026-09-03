@@ -314,13 +314,40 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**No current objective is queued right now.** The scan-a-puzzle size-first
+**No current objective is queued right now** except the new library-rename fix
+below — everything else in this section is done. The scan-a-puzzle size-first
 restructure and the three related library/draw-puzzle cleanup items (name
 drawn puzzles at save time, drop the Built-in/Community badge entirely,
-replace the "Rename" text button with a compact icon) are all DONE and
-preview-verified — see above and `TODO.md`'s Completed Tasks. `TODO.md`'s
-"Next Steps" section has what's deliberately deferred (item 8, item 9's
-remaining scope).
+replace the "Rename" text button with a compact icon) are all DONE. The
+scan-wizard restructure is CONFIRMED on the real device — that specific
+interaction no longer triggers the scroll bug. `TODO.md`'s "Next Steps"
+section has what's deliberately deferred (item 8, item 9's remaining scope).
+
+**NEW, active — two items to ship together in the same round, per the standing
+deploy-batching note in Technical Notes**:
+
+1. **The scroll bug has a second confirmed real-device trigger — the
+library's inline rename edit, specifically when the row being renamed is near
+the BOTTOM of the screen.** The project owner's own diagnosis, and it's a
+better, more general theory than "specific to the scan wizard": renaming a row
+near the top of the list is fine; renaming one near the bottom reproduces the
+bug. This suggests the real trigger all along has been a keyboard opening on
+a text input positioned near the bottom of the screen, not something unique
+to the old scan-wizard layout — which also retroactively explains the one
+earlier capture that happened on the plain play screen. Decided fix, same
+successful strategy as the scan-wizard restructure — avoid the trigger,
+don't fight the bug: replace the inline edit-in-place rename UI with a
+popup/modal shown at the TOP of the screen instead, so the rename text input
+is never positioned near the bottom regardless of which row triggered it.
+2. **New feature: allow hiding a puzzle from the library**, personal to
+whoever hid it, not a global change — a small icon-only "Hide" button per row
+(explicitly NOT a text button — the old Rename text button hiding the
+puzzle's name is the exact mistake not to repeat), plus a required "show
+hidden" way to reveal/unhide them again. CONFIRMED: per-account, synced
+across paired devices (matching the existing solved/in-progress pattern), not
+device-local.
+
+See `TODO.md`'s Current Objective for full detail on both.
 
 **The eraser icon is DECIDED, final — no third attempt.** The project owner
 weighed the flagged design tradeoff (a literal yellow-pencil/pink-eraser icon
@@ -345,9 +372,13 @@ bug's round-5 tooling extension (auto-logging the height-diverged state into
 `?debug=scroll`'s history log) is also done, per its own explicit ask. See
 `TODO.md`'s Completed Tasks section for the full writeup of each.
 
-The scroll bug itself otherwise remains reference/standing-state only, not active
-work, while the project owner runs real-device verification on everything above in
-parallel:
+The scroll bug's original scan-wizard trigger remains genuinely fixed and
+confirmed — the underlying `visualViewport` mechanism was never actually
+fixed, but that specific trigger is gone by design, confirmed on the real
+device. **The bug as a general class is NOT fully closed, per the new
+bottom-of-screen finding above** — the section below is kept purely for
+historical reference on the mechanism itself, not active work; the active
+work is the rename-popup fix above:
 - The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
   real device.
 - Round 4's scroll fix FAILED real-device verification — the sixth straight
@@ -362,6 +393,7 @@ parallel:
   is conclusively proven broken on the real device and should not be refined
   further — a genuinely different technique is needed if that gets picked up.
 
-Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
-by the project owner. Item 9's remaining scope is now just richer browsing (search,
-sort, pagination) — the friends-sharing question is resolved.
+Item 8 (arbitrary-photo puzzle generation) is DECIDED WON'T BE BUILT — see `TODO.md`'s
+Next Steps for the full reasoning (genuinely hard image-processing problem, limited
+realistic use even if built well). Item 9's remaining scope is now just richer browsing
+(search, sort, pagination) — the friends-sharing question is resolved.

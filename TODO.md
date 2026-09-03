@@ -815,8 +815,21 @@ Completed Tasks
     regression, see the standing OCR-accuracy acceptance above); confirmed the draw-a-puzzle
     wizard's own step-size screen is visually unaffected (shared `.scan-known-count` CSS).
     No console errors. All 822 tests pass (this module has no dedicated unit tests, same as
-    the rest of scanUI.js's DOM wiring — consistent with the rest of the codebase). Not yet
-    real-device-confirmed.
+    the rest of scanUI.js's DOM wiring — consistent with the rest of the codebase).
+  - **CONFIRMED on the real device by the project owner: the scroll bug no longer occurs on
+    this interaction.** After six straight failed rounds trying to fix the underlying
+    WebKit `visualViewport` mechanism directly, sidestepping the trigger entirely worked.
+    This closes the scroll-bug investigation as far as its practical, most commonly-hit
+    manifestation is concerned — the scan wizard's own dimension entry, the interaction
+    every real-device capture this whole saga was built from. **Worth stating precisely
+    what is and isn't actually resolved**: the underlying WebKit issue itself was never
+    understood or fixed — it was successfully routed around by removing the specific
+    trigger (a text-input keyboard opening inside that screen), not addressed at its root.
+    The same class of symptom was separately observed once on the plain main play screen,
+    unrelated to any wizard, and that path remains completely untouched by this fix — if
+    it resurfaces there or anywhere else, that would be new, separate work, not something
+    this closes out by extension. For everything this project actually needed solved in
+    practice, though, this is done.
 
 * **Three related library/draw-puzzle cleanup items — done, preview-verified end-to-end
   against the real Firebase project.** All from real use of the puzzle library screen:
@@ -870,16 +883,82 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **None queued right now.** The scan-a-puzzle size-first restructure and all three
-  library/draw-puzzle cleanup items above are done and preview-verified; see "Next Steps"
-  below for what's deliberately deferred (item 8, item 9's remaining scope), and see the
-  scroll-bug reference section below for standing state the project owner is verifying on
-  the real device in parallel, not active work.
+* **NEW, active: the scroll bug has a second confirmed real-device trigger — the
+  library's inline rename edit, specifically when the row being renamed is near
+  the BOTTOM of the screen.** The project owner's own real-device diagnosis,
+  after live-testing that everything else from the prior round works correctly:
+  renaming a row near the top of the library list is fine; renaming one near
+  the bottom reproduces the stuck-viewport symptom. **This points at a better,
+  more general theory than "specific to the scan wizard's old layout"**: the
+  real trigger all along appears to be a keyboard opening on a text input
+  positioned near the bottom of the screen, not something unique to that one
+  screen's structure. This retroactively explains the one earlier capture that
+  happened on the plain main play screen too (see the historical section
+  below) — that was very plausibly the same root trigger, just never
+  identified as such at the time.
+  - **Decided fix — the same successful strategy as the scan-wizard restructure:
+    avoid the trigger entirely, don't attempt to fix the underlying WebKit
+    mechanism.** Replace the library's inline edit-in-place rename UI (the
+    `<input>` that currently replaces a row's contents where that row already
+    sits in the scrollable list — see `renderLibraryList`'s rename handler in
+    `app.js`) with a popup/modal shown at the TOP of the screen instead, so the
+    rename text input's on-screen position is always safely near the top
+    regardless of which row in the list triggered it.
+  - **General principle worth carrying forward, not just fixing this one
+    instance**: any future feature with a text input that could end up
+    rendered near the bottom of the screen (especially inside a scrollable
+    list, where the same control can appear anywhere depending on scroll
+    position) carries this same risk. The established, working mitigation
+    pattern is to move such inputs to a dedicated top-positioned screen or
+    modal rather than editing in place wherever the control happens to be —
+    worth defaulting to this pattern for new text-input UI going forward,
+    not just applying it retroactively when a new instance of the bug turns up.
+  - **Scope check, not yet confirmed**: is this specific to the rename control,
+    or would ANY text input near the bottom of the screen trigger it (e.g. a
+    hypothetical future search box at the bottom of the library list)? The
+    project owner's repro is specifically about rename; the fix above resolves
+    that instance regardless, but the general principle bullet above is the
+    right takeaway if this comes up again elsewhere.
 
-Everything below this point is the scroll bug's own standing state, reference-only
-per the project owner's instruction that they're running its real-device testing
-themselves in parallel — still not this round's task to act on (except the round 5 tooling
-extension immediately above, which was a prior round's explicit request).
+* **NEW feature, deliberately bundled into this same round as the rename-popup
+  fix above (per the standing deploy-batching note in Technical Notes) — allow
+  hiding a puzzle from the library.** The project owner had this queued to ask
+  before the round that shipped without full confirmation (see Technical
+  Notes' process note) — not a new priority shift, just finally getting sent.
+  - **Hide a puzzle from the library's default view, personal to the player who
+    hid it — not a global change other players see.** A "Hide" affordance on
+    each library row — **explicitly confirmed: this must be a small,
+    compact icon, not a text button** — matching the existing Rename/Undo/
+    Stats/Eraser icon-button + tooltip pattern via `src/tooltip.js` exactly.
+    Worth calling out directly given this project's own recent history: the
+    old "Rename" text button ate enough row space to hide the puzzle's actual
+    name, which is exactly the mistake to avoid repeating with a new row
+    control. Removes that entry from the player's own normal browsing view
+    without touching the puzzle itself in any way other players would notice
+    — it stays fully intact in the shared library for everyone else.
+  - **A way to reveal hidden puzzles again is required, not optional** — a
+    "Show hidden puzzles" toggle/filter (Code's call whether this is a new
+    value alongside the existing Solved/Unsolved/Incomplete filter, or a
+    separate persistent toggle that reveals hidden entries within whatever
+    filter is currently active, marked with some visual indicator and an
+    "unhide" action) so hiding is always reversible, never a dead end.
+  - **CONFIRMED, resolved — not an open question anymore: per-account, synced
+    across the player's own paired devices.** Same established pattern as
+    solved-puzzle tracking and in-progress saves
+    (`users/{uid}/solvedLibraryPuzzles`, `users/{uid}/inProgressPuzzles`,
+    synced via the existing anonymous-auth + pairing mechanism) —
+    `users/{uid}/hiddenLibraryPuzzles/{puzzleId}` (or equivalent), not
+    device-local/`localStorage`-only.
+
+* **The scan wizard's own size-first restructure remains genuinely fixed and
+  confirmed on the real device** — unaffected by the new finding above, this
+  was a different specific interaction and its own fix still holds. See its
+  Completed Tasks entry for the full writeup.
+
+Everything below this point is the scroll bug's own historical/mechanism
+reference material — not active work, kept for context on why direct fixes to
+the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
+(the same strategy now being applied to the rename popup above):
 
 * **Round 4's scroll fix (`healStuckViewportHeight`) has now been tested on the real
   device, including the manual "Force heal viewport height now" button — and the
@@ -1060,15 +1139,19 @@ extension immediately above, which was a prior round's explicit request).
 
 Next Steps (Do Not Start Yet)
 
-* Item 8 — Photo → puzzle generation (arbitrary photo, thresholded/downsampled grid;
-  the pre-pixelated/blocky-image direct-mapping path may now overlap with item 10's
-  grid detection). **Explicitly deprioritized by the project owner** — not a current
-  priority, kept here for later rather than dropped. Still open whenever it is picked
-  up: is grid size user-adjustable at generation time or fixed per image; slider vs.
-  automatic threshold/contrast tuning. **The non-unique-solution question is now
-  RESOLVED, not open** — see the "draw a puzzle" item above: enforce uniqueness via
-  the same `fullSolve.js` check before a generated puzzle can be saved/published,
-  same as the resolution for that feature, for consistency.
+* **Item 8 — Photo → puzzle generation. DECIDED: WON'T BE BUILT, not just
+  deferred.** Originally added because it seemed conceptually cool, but the
+  project owner has since concluded — correctly, on reflection — that it
+  would be genuinely difficult to build well (turning an arbitrary photo into
+  a recognizable ~15-30-cell binary grid is a hard, open-ended image problem
+  with no reliable general solution, only techniques that help *some* photos
+  and not others; uniqueness would also be a much harder problem here than it
+  was for hand-drawn puzzles, since a thresholded photo has no intentional
+  design behind it the way a drawing does), and that even a well-executed
+  version would only be occasional novelty use, not something actually used
+  regularly. Kept here as a record of the idea and why it was closed, not as
+  a live backlog item — do not pick this up without the project owner
+  explicitly reopening it.
 * Item 9 — remaining scope: richer library browsing only now (search over titles,
   sort options like newest/most-solved, pagination once the library grows) — the
   friends-only/private sharing question is resolved.
