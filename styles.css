@@ -1288,6 +1288,32 @@ body {
   background: var(--gold);
 }
 
+/* Name-at-save prompt (TODO.md's Current Objective) — a drawn puzzle is the player's own
+   original creation, unlike a scan (which recreates someone else's already-existing puzzle
+   under a generic placeholder title), so this wizard's own "done" step asks for a real name
+   before publishing. Full-width block, not the inline `.scan-known-count__field` row-of-
+   number-inputs style used elsewhere in these wizards — a puzzle title needs much more room
+   than a 2-digit grid dimension. */
+.draw-name-field {
+  display: block;
+  margin: 0.9rem 0;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+}
+
+.draw-name-field input {
+  display: block;
+  width: 100%;
+  margin-top: 0.35rem;
+  background: var(--panel-bg);
+  color: var(--text);
+  border: 1px solid rgba(230, 183, 63, 0.3);
+  border-radius: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+}
+
 /* Current Objective (see TODO.md): the old separate "Save to library" step (manual title +
    button) is gone — every played scan now auto-publishes before onPuzzleReady fires (see
    src/scanUI.js's scanBtnPlay handler), so its dedicated styling below was removed too. */
@@ -1360,28 +1386,6 @@ body {
   border-radius: 0.5rem;
 }
 
-/* Light visual distinction between built-in and community-saved rows (nice-to-have per
-   TODO.md, not a functional requirement) — a small label, not a structural difference. */
-.library-row__badge {
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 0.2rem 0.45rem;
-  border-radius: 1rem;
-  white-space: nowrap;
-}
-
-.library-row__badge--builtin {
-  color: var(--text-dim);
-  background: rgba(242, 236, 221, 0.1);
-}
-
-.library-row__badge--community {
-  color: var(--gold);
-  background: rgba(230, 183, 63, 0.14);
-}
-
 .library-row__title {
   flex: 1;
   min-width: 0;
@@ -1440,6 +1444,17 @@ body {
   padding: 0.35rem 0.7rem;
   font-size: 0.8rem;
   flex-shrink: 0;
+}
+
+/* Compact icon-only Rename control (Current Objective — see TODO.md): same specificity as
+   `.library-row .btn` above (two classes each), so this has to come AFTER it in source order
+   for the cascade tie-break to land here instead — same pattern round 4's toolbar-alignment
+   fix established. Without this override, .btn--icon's own square-ish padding (styles.css's
+   Save-progress-button comment) would lose to the text-button padding above, leaving Rename
+   looking like a stretched, off-proportion icon instead of a compact square button. */
+.library-row .btn--icon {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.95rem;
 }
 
 /* Scroll diagnostics (Current Objective — see TODO.md and app.js's initScrollDiagnostics

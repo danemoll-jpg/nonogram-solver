@@ -376,6 +376,10 @@
           blank so it can actually be solved: full undo, save progress, and stats. Its name
           stays hidden — same as every library puzzle — until it's solved, and you can rename
           it from the library afterward.</p>
+        <label class="draw-name-field">Name your puzzle
+          <input id="draw-name-input" type="text" maxlength="80" placeholder="e.g. Sailboat" />
+        </label>
+        <p id="draw-name-error" class="scan-build-error hidden"></p>
         <button id="draw-btn-play" class="btn btn--primary" type="button">Play it</button>
         <p id="draw-play-status" class="stats-status" aria-live="polite"></p>
       </div>

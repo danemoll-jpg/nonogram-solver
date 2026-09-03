@@ -818,50 +818,63 @@ Completed Tasks
     the rest of scanUI.js's DOM wiring — consistent with the rest of the codebase). Not yet
     real-device-confirmed.
 
+* **Three related library/draw-puzzle cleanup items — done, preview-verified end-to-end
+  against the real Firebase project.** All from real use of the puzzle library screen:
+  1. **"Draw a puzzle" now prompts for a name at save time.** A new "Name your puzzle"
+     text field on `#draw-step-done` (`index.html`, `.draw-name-field` in `styles.css`);
+     `els.drawBtnPlay`'s handler (`src/drawUI.js`) requires a non-empty trimmed value
+     (shows an inline "Give your puzzle a name before playing it." error otherwise, same
+     `.scan-build-error` pattern used elsewhere in these wizards) before calling
+     `savePuzzleToLibrary` with that title instead of the old hardcoded `'Drawn puzzle'`
+     string. Also patches `p.name = title` after a successful publish — without this,
+     THIS SAME play-through's own completion modal would have revealed the stale
+     placeholder name instead of what was just typed (a later re-open via
+     `loadLibraryPuzzle` always gets it right off Firestore's own `title` field
+     regardless; only the first, same-session play needed the local object corrected to
+     match). The scan wizard's own auto-publish-under-a-placeholder behavior is
+     deliberately untouched — a scan recreates someone else's existing puzzle, so naming
+     it doesn't carry the same meaning a player's own original drawing does.
+  2. **The Built-in/Community badge is removed entirely**, not shrunk — there's no way to
+     grow "Built-in" past whatever small handful `SAMPLE_PUZZLES` hardcodes, so the
+     distinction could only ever read as permanent, meaningless clutter as the library
+     grows. `renderLibraryList` (`app.js`) no longer creates the badge span at all;
+     `.library-row__badge`/`--builtin`/`--community` are deleted from `styles.css` as
+     fully dead code, not left unreachable. `entry.builtin` itself is untouched — still
+     used functionally to pick the right puzzle source and to gate the rename
+     affordance to non-built-in rows, just no longer rendered as a visible label.
+  3. **The "Rename" control is now a compact icon-only button**, not a long-press
+     gesture — chosen over long-press because this project already has an established,
+     working pattern for exactly this (icon-only toolbar buttons + `src/tooltip.js`'s
+     shared hover/focus/touch-press tooltip, used for Undo/Stats/Eraser), while a
+     long-press gesture would be new, unproven interaction surface with its own timing/
+     feedback questions and no precedent anywhere else in the app. `renameBtn` (`app.js`)
+     drops its `btn btn--ghost` "Rename" text for `btn btn--icon`, a bare "✏️", an
+     `aria-label`/`data-tooltip` of "Rename", and an explicit `attachTooltip(renameBtn)`
+     call (needed because this button is created fresh on every list render, long after
+     the one-time boot-time `initTooltips()` sweep). `styles.css` adds a
+     `.library-row .btn--icon` override, placed after the equal-specificity
+     `.library-row .btn` rule for the cascade tie-break to land here instead — the same
+     source-order pattern round 4's toolbar-alignment fix established — so the icon gets
+     compact square padding instead of the wider text-button padding `.library-row .btn`
+     sets for Play/Resume/Save.
+  - **Verified end-to-end in browser preview**: confirmed both badges gone from every row
+    (built-in and community); confirmed the existing "Drawn puzzle" test entry's rename
+    icon opens the same inline Save/Cancel edit state as before (only the trigger control
+    changed, not the edit flow itself) and Cancel correctly reverts it; drew a fresh 3x3
+    solid-block puzzle (a trivially unique picture), confirmed "Play it" with an empty
+    name field shows the validation error and does NOT publish, then confirmed entering
+    "Verification Square" and clicking "Play it" published it, started it blank, and
+    solving it showed the completion modal with the real typed name "Verification
+    Square" (not a placeholder) — proving the `p.name` patch works. No console errors.
+    All 822 tests pass. Not yet real-device-confirmed.
+
 Current Objective (Focus Area)
 
-* **New: three related library/draw-puzzle cleanup items, all from real use of
-  the puzzle library screen.**
-  1. **"Draw a puzzle" should prompt for a name at save time.** Currently drawn
-     puzzles likely follow the same auto-publish-with-generated-placeholder
-     pattern scanned puzzles use (no naming step, since a scan is recreating
-     someone else's existing puzzle and naming it doesn't carry the same
-     meaning) — but a drawn puzzle is an original creation by the player
-     themselves, and naming it at save time feels meaningfully different and
-     wanted. Add a title prompt specifically to the draw-a-puzzle save flow;
-     leave the scan-auto-publish flow's behavior as-is (this is not asking to
-     revert that redesign, just to add naming specifically for drawings).
-  2. **The Built-in/Community badge distinction should probably go away
-     entirely, not just shrink.** Direct reasoning from the project owner:
-     there is currently no way to ADD to the "Built-in" set except Code
-     hardcoding a new entry into `SAMPLE_PUZZLES` directly — the player has no
-     path to grow it through the app itself. That means "Built-in" will
-     permanently stay frozen at whatever small handful Code originally
-     created (four, currently), while literally everything anyone ever
-     creates through the app (scan or draw) will always be labeled
-     "Community" — the distinction can never meaningfully shift and reads
-     increasingly like dead-weight visual clutter as the library grows
-     rather than a real categorization. **Leaning toward removing the badge
-     entirely** as the cleaner fix; shrinking it is a fallback only if there's
-     a reason to keep some distinction that isn't obvious from here — Code's
-     call which to do, but removing it entirely is the stated preference.
-  3. **The "Rename" control is taking up so much row space that the puzzle's
-     actual name is getting squeezed out/hidden — a real, direct UX bug, not
-     just clutter.** Direct quote: "you just can't see the name of a
-     community puzzle because all the space is covered." Replace the
-     persistent "Rename" text button with either a compact icon-only control
-     (e.g. a small pencil/edit icon) or a long-press-to-rename gesture on the
-     row itself (freeing the space entirely, no persistent visible control at
-     all) — either approach reclaims the row space so the name (the single
-     most important piece of information in that row) is actually visible.
-     Exact choice between icon-button vs. long-press is Code's call.
-
-* **All previously requested work remains done — see the Completed Tasks entries above.**
-  "Draw a puzzle," the toolbar cleanup, its direct follow-up (Help position, one-line
-  tightening, page/header padding), moving Scan/Draw into the library modal, the small
-  "Library" rename + Scan/Draw button-alignment fix, the scroll bug's round-5 tooling
-  extension, and the scan-a-puzzle size-first restructure are all implemented and
-  preview-verified; none is yet real-device-confirmed.
+* **None queued right now.** The scan-a-puzzle size-first restructure and all three
+  library/draw-puzzle cleanup items above are done and preview-verified; see "Next Steps"
+  below for what's deliberately deferred (item 8, item 9's remaining scope), and see the
+  scroll-bug reference section below for standing state the project owner is verifying on
+  the real device in parallel, not active work.
 
 Everything below this point is the scroll bug's own standing state, reference-only
 per the project owner's instruction that they're running its real-device testing

@@ -259,6 +259,28 @@
   `TODO.md`'s Completed Tasks for the full preview-verification writeup
   (real-image OCR run, clue spot-checks against known ground truth). Not yet
   real-device-confirmed.
+- **Three related library/draw-puzzle cleanup items — done, preview-verified.**
+  (1) "Draw a puzzle" now prompts for a required name at save time
+  (`#draw-step-done`'s new name field, `src/drawUI.js`'s `drawBtnPlay` handler)
+  before publishing under that title — the scan wizard's own auto-publish-
+  under-a-placeholder behavior is untouched, since naming doesn't carry the
+  same meaning for a scan (recreating someone else's puzzle) as it does for a
+  drawing (the player's own original creation). Also patches `p.name = title`
+  after publish so THIS play-through's own completion modal reveals the real
+  name instead of a stale placeholder. (2) The Built-in/Community badge is
+  gone entirely (not shrunk) — `renderLibraryList` (`app.js`) no longer
+  renders it, and its now-fully-dead CSS is deleted; `entry.builtin` itself
+  still works exactly as before for picking the puzzle source and gating the
+  rename affordance, just isn't shown as a label anymore. (3) The "Rename"
+  text button is now a compact icon-only "✏️" button using the existing
+  `src/tooltip.js` mechanism (the same established pattern Undo/Stats/Eraser
+  already use) rather than a new long-press gesture, reclaiming the row space
+  that was squeezing out the puzzle's own name. Verified end-to-end in
+  browser preview: badges gone from every row, rename icon opens the same
+  inline edit flow as before, and a fresh drawn 3x3 puzzle correctly rejected
+  an empty name, then published/played/solved with the real typed name
+  showing in the completion modal. All 822 tests pass. Not yet
+  real-device-confirmed.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -292,25 +314,13 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective is now the three related library/draw-puzzle cleanup
-items** from real use of the library screen (the scan-a-puzzle size-first
-restructure that used to be item 1 here is DONE, preview-verified — see above
-and `TODO.md`'s Completed Tasks):
-
-1. "Draw a puzzle" should prompt for a name at save time — unlike scanned
-   puzzles (which auto-publish without naming, since a scan recreates
-   someone else's existing puzzle), a drawn puzzle is the player's own
-   original creation and naming it feels meaningfully wanted.
-2. The Built-in/Community badge should probably be removed entirely, not just
-   shrunk — there's no way to add to "Built-in" except Code hardcoding
-   `SAMPLE_PUZZLES` directly, so it will forever stay frozen at four while
-   everything else is always "Community," making the distinction permanent
-   dead-weight clutter rather than a real categorization.
-3. The "Rename" control is eating so much row space that the puzzle's actual
-   name gets hidden — a real UX bug, not just clutter. Replace it with a
-   compact icon or a long-press gesture.
-
-See `TODO.md` for full detail on all three.
+**No current objective is queued right now.** The scan-a-puzzle size-first
+restructure and the three related library/draw-puzzle cleanup items (name
+drawn puzzles at save time, drop the Built-in/Community badge entirely,
+replace the "Rename" text button with a compact icon) are all DONE and
+preview-verified — see above and `TODO.md`'s Completed Tasks. `TODO.md`'s
+"Next Steps" section has what's deliberately deferred (item 8, item 9's
+remaining scope).
 
 **The eraser icon is DECIDED, final — no third attempt.** The project owner
 weighed the flagged design tradeoff (a literal yellow-pencil/pink-eraser icon
@@ -329,10 +339,11 @@ buttons weren't lined up — same bug class as the original round-4
 toolbar-alignment bug, just in a new spot), and the scan-a-puzzle size-first
 restructure (dimension entry moved to its own screen shown first, matching
 draw-a-puzzle's pattern; the old redundant second dimension-confirmation step
-is gone). The scroll bug's round-5 tooling extension (auto-logging the
-height-diverged state into `?debug=scroll`'s history log) is also done, per
-its own explicit ask. See `TODO.md`'s Completed Tasks section for the full
-writeup of each.
+is gone), and the three library/draw-puzzle cleanup items (name-at-save for
+drawings, no more Built-in/Community badge, icon-only Rename). The scroll
+bug's round-5 tooling extension (auto-logging the height-diverged state into
+`?debug=scroll`'s history log) is also done, per its own explicit ask. See
+`TODO.md`'s Completed Tasks section for the full writeup of each.
 
 The scroll bug itself otherwise remains reference/standing-state only, not active
 work, while the project owner runs real-device verification on everything above in

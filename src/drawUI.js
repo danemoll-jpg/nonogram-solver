@@ -10,12 +10,14 @@
 // a cell filled; live row/col clue numbers update as you go, for free from
 // model.js's cluesFromLine — no solving logic involved yet) -> "Done drawing" derives clues
 // and validates they have exactly one solution (src/drawPuzzle.js's buildDrawnPuzzle); if not,
-// an inline message explains why and the player keeps editing -> "Play it" publishes to the
-// public shared library (the same auto-publish pipeline the scan wizard's "Play it" already
-// uses — see src/scanUI.js's scanBtnPlay handler) and hands the puzzle back to app.js via
-// onPuzzleReady, starting BLANK (unlike a scan's initialMarks, which seeds the board with
-// already-observed progress) — the whole point is that solving it from scratch is what
-// reveals the picture just drawn.
+// an inline message explains why and the player keeps editing -> name the puzzle and "Play it"
+// publishes to the public shared library (the same auto-publish pipeline the scan wizard's
+// "Play it" already uses — see src/scanUI.js's scanBtnPlay handler, minus the naming step:
+// a scan recreates someone else's already-existing puzzle under a generic placeholder title,
+// but a drawing is the player's own original creation, so this wizard asks for a real name at
+// save time instead) and hands the puzzle back to app.js via onPuzzleReady, starting BLANK
+// (unlike a scan's initialMarks, which seeds the board with already-observed progress) — the
+// whole point is that solving it from scratch is what reveals the picture just drawn.
 
 import { buildDrawnPuzzle } from './drawPuzzle.js';
 import { savePuzzleToLibrary } from './puzzleLibrary.js';
@@ -54,6 +56,8 @@ export function initDrawWizard({ els, onPuzzleReady, onClose, onOpen }) {
     els.drawSizeError.classList.add('hidden');
     els.drawBuildError.classList.add('hidden');
     els.drawGrid.innerHTML = '';
+    els.drawNameInput.value = '';
+    els.drawNameError.classList.add('hidden');
     els.drawBtnPlay.disabled = false;
     els.drawPlayStatus.textContent = '';
     showStep('size');
@@ -249,15 +253,15 @@ export function initDrawWizard({ els, onPuzzleReady, onClose, onOpen }) {
     showStep('done');
   });
 
-  // ---- step 3: publish + play ----
+  // ---- step 3: name + publish + play ----
 
-  // Current Objective (see TODO.md): every drawn puzzle that's actually played auto-publishes
-  // to the public shared library first, the same pipeline src/scanUI.js's "Play it" already
-  // uses — then plays as a completely normal authored/library puzzle from that point on: real
-  // move history, Undo, Save progress, and stats, with no draw-specific gating anywhere in
-  // app.js. A generic placeholder title is used (every library puzzle's real name stays hidden
-  // until solved anyway — see app.js's renderLibraryList); the creator can rename it afterward
-  // via the library's existing rename affordance.
+  // Current Objective (see TODO.md): unlike a scan (which auto-publishes under a generic
+  // placeholder title — it's recreating someone else's already-existing puzzle, so naming it
+  // doesn't carry much meaning), a drawn puzzle is the player's own original creation, and the
+  // project owner asked specifically for a name prompt here at save time. The library's
+  // browse-list placeholder ("Puzzle N — RxC") still hides it from OTHER players until solved,
+  // same as every library puzzle — this name is just chosen by the creator up front instead of
+  // being a generic "Drawn puzzle" string with no real content.
   //
   // If the publish fails (offline, not deployed yet), the player can still play — falls back to
   // source:'drawn' (model.js's hasUnstableId), which still gets working post-import Undo but no
@@ -266,6 +270,13 @@ export function initDrawWizard({ els, onPuzzleReady, onClose, onOpen }) {
   els.drawBtnPlay.addEventListener('click', async () => {
     const p = state.pendingPuzzle;
     if (!p) return;
+    const title = els.drawNameInput.value.trim();
+    if (!title) {
+      els.drawNameError.textContent = 'Give your puzzle a name before playing it.';
+      els.drawNameError.classList.remove('hidden');
+      return;
+    }
+    els.drawNameError.classList.add('hidden');
     els.drawBtnPlay.disabled = true;
     els.drawPlayStatus.textContent = 'Adding to the puzzle library…';
     try {
@@ -274,10 +285,16 @@ export function initDrawWizard({ els, onPuzzleReady, onClose, onOpen }) {
         cols: p.cols,
         rowClues: p.rowClues,
         colClues: p.colClues,
-        title: 'Drawn puzzle',
+        title,
       });
       p.id = libraryId;
       p.source = 'authored';
+      // buildDrawnPuzzle (see els.drawBtnDone above) stamped a placeholder `name` before the
+      // player had chosen a real title — without this, the completion modal on THIS very
+      // play-through would reveal the placeholder instead of what was just entered (a later
+      // loadLibraryPuzzle re-fetch always gets this right via Firestore's own `title` field —
+      // only this first, same-session play needed the local object patched to match).
+      p.name = title;
     } catch (err) {
       console.warn('savePuzzleToLibrary failed — playing locally without save/stats support', err);
     }

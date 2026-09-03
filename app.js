@@ -27,7 +27,7 @@ import {
 } from './src/puzzleLibrary.js';
 import { ensureSignedIn } from './src/firebase.js';
 import { cellsOnLine } from './src/geometry.js';
-import { initTooltips } from './src/tooltip.js';
+import { initTooltips, attachTooltip } from './src/tooltip.js';
 
 let puzzle = null;
 let board = null;
@@ -148,6 +148,8 @@ const els = {
   drawBuildError: document.getElementById('draw-build-error'),
   drawBtnClear: document.getElementById('draw-btn-clear'),
   drawBtnDone: document.getElementById('draw-btn-done'),
+  drawNameInput: document.getElementById('draw-name-input'),
+  drawNameError: document.getElementById('draw-name-error'),
   drawBtnPlay: document.getElementById('draw-btn-play'),
   drawPlayStatus: document.getElementById('draw-play-status'),
   drawBtnCancel: document.getElementById('draw-btn-cancel'),
@@ -1462,10 +1464,6 @@ function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, myUid) {
     const li = document.createElement('li');
     li.className = 'library-row';
 
-    const badge = document.createElement('span');
-    badge.className = `library-row__badge library-row__badge--${entry.builtin ? 'builtin' : 'community'}`;
-    badge.textContent = entry.builtin ? 'Built-in' : 'Community';
-
     const title = document.createElement('span');
     title.className = 'library-row__title';
     // Hidden until solved — same generic "Puzzle N — RxC" placeholder scheme the old
@@ -1478,7 +1476,7 @@ function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, myUid) {
     size.className = 'library-row__size';
     size.textContent = `${entry.rows}x${entry.cols}`;
 
-    li.append(badge, title, size);
+    li.append(title, size);
 
     if (solved) {
       const solvedBadge = document.createElement('span');
@@ -1536,10 +1534,21 @@ function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, myUid) {
     li.appendChild(playBtn);
 
     if (!entry.builtin && entry.creatorUid === myUid) {
+      // Current Objective (see TODO.md): the persistent text "Rename" button used to eat so
+      // much row width that the puzzle's own name (the single most important thing in the
+      // row) got squeezed toward invisible — a real UX bug on a community puzzle with a long
+      // title, not just clutter. Icon-only + the shared tooltip mechanism (src/tooltip.js,
+      // same pattern the toolbar's Undo/Stats/Eraser buttons already use) reclaims that space
+      // without losing discoverability; attachTooltip has to be called here explicitly
+      // (rather than relying on the one-time initTooltips() boot call) since this button is
+      // created fresh on every render, long after boot.
       const renameBtn = document.createElement('button');
-      renameBtn.className = 'btn btn--ghost';
+      renameBtn.className = 'btn btn--icon';
       renameBtn.type = 'button';
-      renameBtn.textContent = 'Rename';
+      renameBtn.setAttribute('aria-label', 'Rename');
+      renameBtn.setAttribute('data-tooltip', 'Rename');
+      renameBtn.textContent = '✏️';
+      attachTooltip(renameBtn);
       renameBtn.addEventListener('click', () => {
         // Swap the row into an inline edit state — a text input pre-filled with the current
         // title plus Save/Cancel — rather than opening yet another modal on top of this one.
