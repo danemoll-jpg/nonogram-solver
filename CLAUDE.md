@@ -275,21 +275,55 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective: no new build task queued.** Everything requested through the
-toolbar-cleanup arc is now done and preview-verified, none of it yet
-real-device-confirmed: "draw a puzzle", the toolbar reorder (Library → mode
-toggle → Undo → gap → Stats → Mute → Save → Help, all icon-only buttons tooltipped
-via `src/tooltip.js`), its direct follow-up (Help no longer pinned to the panel's
-far-right edge, tighter one-line-fit spacing, trimmed page/header padding, and a
-redesigned eraser icon — the first SVG attempt was confirmed unrecognizable, see
-its own bullet above), moving "Scan a puzzle"/"Draw a puzzle" into the library
-modal, and the small "Puzzle library" → "Library" rename plus a
-`.library-actions .btn` margin-leak fix (Scan/Draw buttons weren't lined up — same
-bug class as the original round-4 toolbar-alignment bug, just in a new spot). The
-scroll bug's round-5 tooling extension (auto-logging the height-diverged state
-into `?debug=scroll`'s history log) is also done, per its own explicit ask. See
-`TODO.md`'s Completed Tasks and Current Objective sections for the full writeup of
-each — this file's own bullets above cover the same ground in less detail.
+**Current objective has two items**:
+
+1. **DECIDED: restructure the scan-a-puzzle flow to sidestep the scroll bug
+   entirely, per direct instruction ("stop chasing our tails on this stupid
+   bug").** Draw-a-puzzle still uses numeric text entry (correcting the
+   earlier hypothesis) — the real difference is it asks for dimensions on
+   their own simple standalone screen BEFORE any grid/photo work, not layered
+   into a more complex screen. Two changes: (a) move scan's dimension entry to
+   its own screen shown first, matching draw's pattern exactly; (b) eliminate
+   the redundant second dimension-confirmation step that currently follows
+   grid detection — once given up front, there's no reason to re-show/re-
+   confirm it. This closes the loop for the scan wizard's specific trigger,
+   not necessarily the whole underlying bug (which has also shown up on the
+   plain play screen, unrelated to any wizard) — treat as resolving the most
+   common practical trigger, not as the underlying WebKit issue being
+   understood or fixed. Further investigation into that mechanism is
+   deprioritized per this instruction. See `TODO.md` for full detail.
+2. **Three related library/draw-puzzle cleanup items from real use of the
+   library screen.** (a) "Draw a puzzle" should prompt for a name at save time
+   — unlike scanned puzzles (which auto-publish without naming, since a scan
+   recreates someone else's existing puzzle), a drawn puzzle is the player's
+   own original creation and naming it feels meaningfully wanted. (b) The
+   Built-in/Community badge should probably be removed entirely, not just
+   shrunk — there's no way to add to "Built-in" except Code hardcoding
+   `SAMPLE_PUZZLES` directly, so it will forever stay frozen at four while
+   everything else is always "Community," making the distinction permanent
+   dead-weight clutter rather than a real categorization. (c) The "Rename"
+   control is eating so much row space that the puzzle's actual name gets
+   hidden — a real UX bug, not just clutter. Replace it with a compact icon
+   or a long-press gesture. See `TODO.md` for full detail on all three.
+
+**The eraser icon is DECIDED, final — no third attempt.** The project owner
+weighed the flagged design tradeoff (a literal yellow-pencil/pink-eraser icon
+would need fixed colors and lose the free `currentColor` active-state swap) and
+chose to keep the current second-attempt icon as-is.
+
+Everything else requested through the toolbar-cleanup arc remains done and
+preview-verified, none of it yet real-device-confirmed: "draw a puzzle", the
+toolbar reorder (Library → mode toggle → Undo → gap → Stats → Mute → Save →
+Help, all icon-only buttons tooltipped via `src/tooltip.js`), its direct
+follow-up (Help no longer pinned to the panel's far-right edge, tighter
+one-line-fit spacing, trimmed page/header padding), moving "Scan a puzzle"/
+"Draw a puzzle" into the library modal, and the small "Puzzle library" →
+"Library" rename plus a `.library-actions .btn` margin-leak fix (Scan/Draw
+buttons weren't lined up — same bug class as the original round-4
+toolbar-alignment bug, just in a new spot). The scroll bug's round-5 tooling
+extension (auto-logging the height-diverged state into `?debug=scroll`'s
+history log) is also done, per its own explicit ask. See `TODO.md`'s Completed
+Tasks section for the full writeup of each.
 
 The scroll bug itself otherwise remains reference/standing-state only, not active
 work, while the project owner runs real-device verification on everything above in

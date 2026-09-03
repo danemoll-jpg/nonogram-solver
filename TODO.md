@@ -733,6 +733,12 @@ Completed Tasks
     actively erasing a mark at both sizes, not an ambiguous shape. Still `currentColor`
     throughout, so it still tracks `.mode-btn[aria-pressed="true"]`'s color swap for free.
   - All 822 tests still pass (markup/CSS only). Not yet real-device-confirmed.
+  - **DECIDED, final: keeping this second-attempt icon as-is — no third attempt.**
+    A third round with a specific concrete target was raised (a literal
+    yellow-pencil/pink-eraser icon, per direct feedback), but the project owner
+    weighed the flagged design tradeoff (that icon would need fixed colors and
+    lose the free `currentColor` active-state swap this one gets automatically)
+    and decided it wasn't worth pursuing. This icon is final.
 
 * **"Scan a puzzle" and "Draw a puzzle" moved from the Help menu into the puzzle library
   modal — done, preview-verified.** Per direct request: these are ways to get a puzzle to
@@ -765,20 +771,92 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **All requested work is now done — see the Completed Tasks entries above.** "Draw a puzzle,"
-  the toolbar cleanup, its direct follow-up (Help position, one-line tightening, page/header
-  padding, the redesigned eraser icon), moving Scan/Draw into the library modal, the small
+* **DECIDED: restructure the scan-a-puzzle flow to sidestep the scroll bug
+  entirely, rather than continue chasing the underlying WebKit issue for this
+  interaction.** Direct instruction from the project owner: "Let's just do
+  this and stop chasing our tails on this stupid bug." The draw-a-puzzle
+  wizard does still use numeric text entry (correcting the earlier hypothesis
+  that it avoided a keyboard entirely) — the real difference is that it asks
+  for dimensions on their own simple, standalone screen BEFORE any grid/photo
+  work happens, not layered into a more complex screen alongside grid
+  detection. Two concrete changes, both applying that same already-working
+  pattern to the scan wizard:
+  1. **Move dimension entry to its own simple screen, shown FIRST — before the
+     photo/grid-detection step — matching the draw wizard's screen exactly,
+     not just conceptually.** The reasoning given: a player scanning an
+     existing puzzle already knows its size before they even take the photo
+     ("I tell you the dimensions up front, that isn't going to change"), so
+     asking up front isn't a workflow regression — if anything it matches how
+     the player actually thinks about the task.
+  2. **Eliminate the second, redundant dimension-confirmation step that
+     currently follows grid detection entirely.** Direct feedback: "I don't
+     see the point of the second set of dimensions on the scan a puzzle
+     either." Once the player has explicitly given the real dimensions up
+     front, there's no reason to show them again for re-confirmation — the
+     grid-detection step should just use the given numbers directly. (The
+     grid-detection step's own job — finding the grid's POSITION on the
+     photo, distinct from its row/column COUNT — is unaffected; only the
+     redundant re-display/re-confirmation of the count goes away.)
+  - **This closes the loop specifically for the scan wizard's known trigger
+    interaction, not necessarily the whole underlying scroll bug** — the
+    earlier "breakthrough"/round-4/round-5 investigation showed the same
+    stuck-viewport symptom can also occur on the plain main play screen
+    (unrelated to the scan wizard at all), which this redesign doesn't touch
+    and doesn't claim to fix. Treat this as resolving the practical, most
+    commonly hit trigger, not as evidence the underlying WebKit issue is
+    understood or fixed — if it resurfaces elsewhere, that's still a real,
+    separate open question.
+  - Given the explicit "stop chasing our tails" instruction, further
+    investigation into the underlying `visualViewport` mechanism (rounds 1-5,
+    all still technically unresolved/unconfirmed) is deprioritized rather than
+    actively pursued — this redesign is the priority instead.
+
+* **New: three related library/draw-puzzle cleanup items, all from real use of
+  the puzzle library screen.**
+  1. **"Draw a puzzle" should prompt for a name at save time.** Currently drawn
+     puzzles likely follow the same auto-publish-with-generated-placeholder
+     pattern scanned puzzles use (no naming step, since a scan is recreating
+     someone else's existing puzzle and naming it doesn't carry the same
+     meaning) — but a drawn puzzle is an original creation by the player
+     themselves, and naming it at save time feels meaningfully different and
+     wanted. Add a title prompt specifically to the draw-a-puzzle save flow;
+     leave the scan-auto-publish flow's behavior as-is (this is not asking to
+     revert that redesign, just to add naming specifically for drawings).
+  2. **The Built-in/Community badge distinction should probably go away
+     entirely, not just shrink.** Direct reasoning from the project owner:
+     there is currently no way to ADD to the "Built-in" set except Code
+     hardcoding a new entry into `SAMPLE_PUZZLES` directly — the player has no
+     path to grow it through the app itself. That means "Built-in" will
+     permanently stay frozen at whatever small handful Code originally
+     created (four, currently), while literally everything anyone ever
+     creates through the app (scan or draw) will always be labeled
+     "Community" — the distinction can never meaningfully shift and reads
+     increasingly like dead-weight visual clutter as the library grows
+     rather than a real categorization. **Leaning toward removing the badge
+     entirely** as the cleaner fix; shrinking it is a fallback only if there's
+     a reason to keep some distinction that isn't obvious from here — Code's
+     call which to do, but removing it entirely is the stated preference.
+  3. **The "Rename" control is taking up so much row space that the puzzle's
+     actual name is getting squeezed out/hidden — a real, direct UX bug, not
+     just clutter.** Direct quote: "you just can't see the name of a
+     community puzzle because all the space is covered." Replace the
+     persistent "Rename" text button with either a compact icon-only control
+     (e.g. a small pencil/edit icon) or a long-press-to-rename gesture on the
+     row itself (freeing the space entirely, no persistent visible control at
+     all) — either approach reclaims the row space so the name (the single
+     most important piece of information in that row) is actually visible.
+     Exact choice between icon-button vs. long-press is Code's call.
+
+* **All previously requested work remains done — see the Completed Tasks entries above.**
+  "Draw a puzzle," the toolbar cleanup, its direct follow-up (Help position, one-line
+  tightening, page/header padding), moving Scan/Draw into the library modal, the small
   "Library" rename + Scan/Draw button-alignment fix, and the scroll bug's round-5 tooling
   extension are all implemented and preview-verified; none is yet real-device-confirmed.
-* **No new build task is queued right now.** The project owner is running real-device
-  verification (toolbar cleanup, draw-a-puzzle, round 5's height fix via the new auto-logging,
-  and anything else pending) in parallel — the scroll-bug section below remains reference-only
-  standing state until a real-device report comes back with something to act on.
 
 Everything below this point is the scroll bug's own standing state, reference-only
 per the project owner's instruction that they're running its real-device testing
 themselves in parallel — still not this round's task to act on (except the round 5 tooling
-extension immediately above, which was this round's explicit request).
+extension immediately above, which was a prior round's explicit request).
 
 * **Round 4's scroll fix (`healStuckViewportHeight`) has now been tested on the real
   device, including the manual "Force heal viewport height now" button — and the
