@@ -24,6 +24,9 @@ import {
   deleteInProgressPuzzle,
   fetchInProgressPuzzles,
   loadInProgressPuzzle,
+  fetchHiddenPuzzles,
+  hidePuzzleInLibrary,
+  unhidePuzzleInLibrary,
 } from './src/puzzleLibrary.js';
 import { ensureSignedIn } from './src/firebase.js';
 import { cellsOnLine } from './src/geometry.js';
@@ -158,7 +161,13 @@ const els = {
   libraryList: document.getElementById('library-list'),
   libraryFilterSolved: document.getElementById('library-filter-solved'),
   libraryFilterSize: document.getElementById('library-filter-size'),
+  libraryFilterShowHidden: document.getElementById('library-filter-show-hidden'),
   btnLibraryClose: document.getElementById('btn-library-close'),
+  renameModal: document.getElementById('rename-modal'),
+  renameInput: document.getElementById('rename-input'),
+  renameStatus: document.getElementById('rename-status'),
+  btnRenameCancel: document.getElementById('btn-rename-cancel'),
+  btnRenameSave: document.getElementById('btn-rename-save'),
 };
 
 // ---- background-scroll lock (formerly JS-toggled per modal, now permanent — see styles.css) ----
@@ -752,6 +761,42 @@ function resolveConfirm(result) {
 
 els.btnConfirmCancel.addEventListener('click', () => resolveConfirm(false));
 els.btnConfirmOk.addEventListener('click', () => resolveConfirm(true));
+
+// ---- rename-a-library-puzzle popup (Current Objective — see TODO.md) ----
+//
+// Replaces the old edit-in-place row (a text input swapped into whichever row triggered it,
+// wherever that row sat in the scrollable list) after a second confirmed real-device
+// scroll-bug trigger: a keyboard opening on a text input positioned near the bottom of the
+// screen. Same promise-based shape as showConfirm above — resolves the trimmed new title on
+// Save, or null on Cancel — and `.modal-overlay--top` (styles.css) is what actually avoids the
+// trigger, pinning this modal near the top of the viewport regardless of which row opened it.
+// The Firestore write itself stays in renderLibraryList's click handler (below), same
+// separation of concerns as showConfirm not knowing what it's guarding.
+let renameResolve = null;
+
+function showRenameModal(currentTitle) {
+  els.renameInput.value = currentTitle;
+  els.renameStatus.textContent = '';
+  els.renameModal.classList.remove('hidden');
+  els.renameInput.focus();
+  return new Promise((resolve) => {
+    renameResolve = resolve;
+  });
+}
+
+function resolveRename(result) {
+  els.renameModal.classList.add('hidden');
+  const resolve = renameResolve;
+  renameResolve = null;
+  resolve?.(result);
+}
+
+els.btnRenameCancel.addEventListener('click', () => resolveRename(null));
+els.btnRenameSave.addEventListener('click', () => {
+  const newTitle = els.renameInput.value.trim();
+  if (!newTitle) return;
+  resolveRename(newTitle);
+});
 
 // ---- mistake pop-up (item 7.4) ----
 
@@ -1415,6 +1460,10 @@ let solvedPuzzlesCache = new Map(); // puzzleId -> { timesSolved, bestTimeMs }
 // Saved/incomplete-progress item (see TODO.md) — backs the library's "Incomplete" filter and
 // each matching row's in-progress badge, same caching contract as solvedPuzzlesCache above.
 let inProgressPuzzlesCache = new Map(); // puzzleId -> { elapsedMs, hintsUsed }
+// Hide-a-puzzle item (Current Objective — see TODO.md) — puzzleIds the current (or paired)
+// player has personally hidden, same caching contract as the two above. Excluded from
+// applyLibraryFilters' output entirely unless "Show hidden puzzles" is checked.
+let hiddenPuzzlesCache = new Set();
 let libraryMyUid = null;
 
 function builtinLibraryEntries() {
@@ -1451,8 +1500,11 @@ function populateLibrarySizeFilter(entries) {
 // Renders one row per (already filtered) library entry. `myUid` decides whether that row's
 // rename affordance shows at all — the Firestore rule is what actually enforces who can
 // rename (see firestore.rules), this just avoids showing a control that would fail for
-// everyone but the creator; built-in entries never get one.
-function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, myUid) {
+// everyone but the creator; built-in entries never get one. `hiddenPuzzles` (hide-a-puzzle
+// item — see TODO.md) is unrelated to ownership — every row, built-in or not, gets a Hide/
+// Unhide toggle regardless of who created it, since hiding is a personal display preference,
+// not an edit to the puzzle itself.
+function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, hiddenPuzzles, myUid) {
   els.libraryList.innerHTML = '';
   for (const entry of entries) {
     const solved = solvedPuzzles.get(entry.id);
@@ -1460,9 +1512,10 @@ function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, myUid) {
     // deletes the save the moment a solve is recorded — see its own comment) — checked
     // defensively rather than assumed, so a stale/racing save can't show both badges at once.
     const inProgress = !solved ? inProgressPuzzles.get(entry.id) : null;
+    const hidden = hiddenPuzzles.has(entry.id);
 
     const li = document.createElement('li');
-    li.className = 'library-row';
+    li.className = hidden ? 'library-row library-row--hidden' : 'library-row';
 
     const title = document.createElement('span');
     title.className = 'library-row__title';
@@ -1477,6 +1530,16 @@ function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, myUid) {
     size.textContent = `${entry.rows}x${entry.cols}`;
 
     li.append(title, size);
+
+    // Hide-a-puzzle item (see TODO.md) — only ever rendered when "Show hidden puzzles" is
+    // checked (applyLibraryFilters excludes hidden rows entirely otherwise), so this and the
+    // dimmed .library-row--hidden class above only ever appear together.
+    if (hidden) {
+      const hiddenBadge = document.createElement('span');
+      hiddenBadge.className = 'library-row__hidden';
+      hiddenBadge.textContent = '🙈 Hidden';
+      li.appendChild(hiddenBadge);
+    }
 
     if (solved) {
       const solvedBadge = document.createElement('span');
@@ -1549,51 +1612,68 @@ function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, myUid) {
       renameBtn.setAttribute('data-tooltip', 'Rename');
       renameBtn.textContent = '✏️';
       attachTooltip(renameBtn);
-      renameBtn.addEventListener('click', () => {
-        // Swap the row into an inline edit state — a text input pre-filled with the current
-        // title plus Save/Cancel — rather than opening yet another modal on top of this one.
-        // (Renaming edits the always-real `entry.title`; whether it's currently DISPLAYED
-        // depends on solved status exactly like every other row, unaffected by this.)
-        const input = document.createElement('input');
-        input.className = 'library-row__rename-input';
-        input.type = 'text';
-        input.maxLength = 80;
-        input.value = entry.title;
-
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'btn btn--primary';
-        saveBtn.type = 'button';
-        saveBtn.textContent = 'Save';
-        saveBtn.addEventListener('click', async () => {
-          const newTitle = input.value.trim();
-          if (!newTitle) return;
-          saveBtn.disabled = true;
-          try {
-            await renamePuzzleInLibrary(entry.id, newTitle);
-            entry.title = newTitle;
-            // Simplest correct way back to a normal row: re-render from the (now-updated)
-            // entries array rather than hand-reassembling this one row's children.
-            renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, myUid);
-          } catch (err) {
-            console.warn('renamePuzzleInLibrary failed:', err);
-            els.libraryStatus.textContent = `Couldn't rename — ${err?.message || 'try again.'}`;
-            saveBtn.disabled = false;
-          }
-        });
-
-        const cancelBtn = document.createElement('button');
-        cancelBtn.className = 'btn btn--ghost';
-        cancelBtn.type = 'button';
-        cancelBtn.textContent = 'Cancel';
-        cancelBtn.addEventListener('click', () => {
-          renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, myUid);
-        });
-
-        li.replaceChildren(input, saveBtn, cancelBtn);
-        input.focus();
+      // Opens #rename-modal (see showRenameModal above) instead of swapping this row into an
+      // inline edit state — the old behavior turned out to be a real scroll-bug trigger on a
+      // row near the bottom of the list (a keyboard opening on a text input positioned near
+      // the bottom of the screen — see TODO.md's Current Objective). Renaming still edits the
+      // always-real `entry.title`; whether it's currently DISPLAYED depends on solved status
+      // exactly like every other row, unaffected by this.
+      renameBtn.addEventListener('click', async () => {
+        const newTitle = await showRenameModal(entry.title);
+        if (newTitle == null || newTitle === entry.title) return;
+        renameBtn.disabled = true;
+        els.libraryStatus.textContent = '';
+        try {
+          await renamePuzzleInLibrary(entry.id, newTitle);
+          entry.title = newTitle;
+          // Simplest correct way back to a normal, up-to-date list: re-run the filters
+          // against the (now-updated) cache rather than hand-reassembling this one row.
+          applyLibraryFilters();
+        } catch (err) {
+          console.warn('renamePuzzleInLibrary failed:', err);
+          els.libraryStatus.textContent = `Couldn't rename — ${err?.message || 'try again.'}`;
+          renameBtn.disabled = false;
+        }
       });
       li.appendChild(renameBtn);
     }
+
+    // Hide-a-puzzle item (Current Objective — see TODO.md): a small icon-only toggle, not a
+    // text button — the same "Rename" text-button mistake (eating enough row width to squeeze
+    // out the puzzle's own name) called out directly in the project owner's own request, not
+    // to be repeated here. Personal to this player only — never touches the shared
+    // `puzzles/{puzzleId}` doc, so no other player's view of the library is affected either
+    // way (see src/puzzleLibrary.js's hidePuzzleInLibrary/unhidePuzzleInLibrary).
+    const hideBtn = document.createElement('button');
+    hideBtn.className = 'btn btn--icon';
+    hideBtn.type = 'button';
+    const hideLabel = hidden ? 'Unhide' : 'Hide';
+    hideBtn.setAttribute('aria-label', hideLabel);
+    hideBtn.setAttribute('data-tooltip', hideLabel);
+    hideBtn.textContent = hidden ? '👁️' : '🙈';
+    attachTooltip(hideBtn);
+    hideBtn.addEventListener('click', async () => {
+      hideBtn.disabled = true;
+      els.libraryStatus.textContent = '';
+      try {
+        if (hidden) {
+          await unhidePuzzleInLibrary(entry.id);
+          hiddenPuzzles.delete(entry.id);
+        } else {
+          await hidePuzzleInLibrary(entry.id);
+          hiddenPuzzles.add(entry.id);
+        }
+        // Same "re-run the filters" pattern as rename above — and the only way a hidden row
+        // actually disappears from view when "Show hidden puzzles" is off, since that
+        // exclusion happens in applyLibraryFilters, not here.
+        applyLibraryFilters();
+      } catch (err) {
+        console.warn(`${hidden ? 'unhidePuzzleInLibrary' : 'hidePuzzleInLibrary'} failed:`, err);
+        els.libraryStatus.textContent = `Couldn't ${hideLabel.toLowerCase()} — ${err?.message || 'try again.'}`;
+        hideBtn.disabled = false;
+      }
+    });
+    li.appendChild(hideBtn);
 
     els.libraryList.appendChild(li);
   }
@@ -1617,12 +1697,14 @@ async function refreshLibraryList() {
   }
 
   // Anonymous sign-in only (no UI, no prompt) — needed for "is this my own puzzle" (rename
-  // affordance) and for the solved-puzzle/in-progress lookups; browsing/reading the library
-  // itself is public and doesn't require it (see firestore.rules).
-  const [user, solvedPuzzles, inProgressPuzzles] = await Promise.all([
+  // affordance), the solved-puzzle/in-progress lookups, and now the hidden-puzzle lookup
+  // (hide-a-puzzle item — see TODO.md); browsing/reading the library itself is public and
+  // doesn't require it (see firestore.rules).
+  const [user, solvedPuzzles, inProgressPuzzles, hiddenPuzzles] = await Promise.all([
     ensureSignedIn().catch(() => null),
     fetchSolvedPuzzles().catch(() => new Map()),
     fetchInProgressPuzzles().catch(() => new Map()),
+    fetchHiddenPuzzles().catch(() => new Set()),
   ]);
 
   const merged = builtinLibraryEntries().concat(saved.map((p) => ({ ...p, builtin: false })));
@@ -1633,6 +1715,7 @@ async function refreshLibraryList() {
   libraryEntriesCache = merged;
   solvedPuzzlesCache = solvedPuzzles;
   inProgressPuzzlesCache = inProgressPuzzles;
+  hiddenPuzzlesCache = hiddenPuzzles;
   libraryMyUid = user?.uid ?? null;
   populateLibrarySizeFilter(merged);
 
@@ -1650,7 +1733,13 @@ async function refreshLibraryList() {
 function applyLibraryFilters() {
   const solvedFilter = els.libraryFilterSolved.value;
   const sizeFilter = els.libraryFilterSize.value;
+  const showHidden = els.libraryFilterShowHidden.checked;
   let filtered = libraryEntriesCache;
+  // Hide-a-puzzle item (see TODO.md): excluded by default, same "off unless explicitly asked
+  // for" default every other filter here uses. Checked first, ahead of the other two filters,
+  // since it's a visibility gate rather than a narrowing choice like they are — a hidden
+  // puzzle should never appear just because it also happens to match Solved/Size.
+  if (!showHidden) filtered = filtered.filter((e) => !hiddenPuzzlesCache.has(e.id));
   if (solvedFilter === 'solved') filtered = filtered.filter((e) => solvedPuzzlesCache.has(e.id));
   else if (solvedFilter === 'unsolved') filtered = filtered.filter((e) => !solvedPuzzlesCache.has(e.id));
   // Excludes an already-solved puzzle even if it also has a stale in-progress save (e.g. one
@@ -1668,11 +1757,12 @@ function applyLibraryFilters() {
     return;
   }
   els.libraryStatus.textContent = '';
-  renderLibraryList(filtered, solvedPuzzlesCache, inProgressPuzzlesCache, libraryMyUid);
+  renderLibraryList(filtered, solvedPuzzlesCache, inProgressPuzzlesCache, hiddenPuzzlesCache, libraryMyUid);
 }
 
 els.libraryFilterSolved.addEventListener('change', applyLibraryFilters);
 els.libraryFilterSize.addEventListener('change', applyLibraryFilters);
+els.libraryFilterShowHidden.addEventListener('change', applyLibraryFilters);
 
 // Auto-save trigger #2 (see TODO.md's saved/incomplete-progress item): opening the library
 // modal is "exiting the current puzzle back to the library". The modal itself opens
@@ -2220,6 +2310,7 @@ function initScrollDiagnostics() {
     ['confirm-modal', els.confirmModal],
     ['stats-modal', els.statsModal],
     ['library-modal (puzzle library)', els.libraryModal],
+    ['rename-modal (rename a puzzle)', els.renameModal],
     ['scan-modal (scan wizard)', els.scanModal],
     ['draw-modal (draw-a-puzzle wizard)', els.drawModal],
     ['help-menu-list (Help dropdown)', els.helpMenuList],

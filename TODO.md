@@ -881,79 +881,78 @@ Completed Tasks
     Square" (not a placeholder) — proving the `p.name` patch works. No console errors.
     All 822 tests pass. Not yet real-device-confirmed.
 
-Current Objective (Focus Area)
-
-* **NEW, active: the scroll bug has a second confirmed real-device trigger — the
-  library's inline rename edit, specifically when the row being renamed is near
-  the BOTTOM of the screen.** The project owner's own real-device diagnosis,
-  after live-testing that everything else from the prior round works correctly:
-  renaming a row near the top of the library list is fine; renaming one near
-  the bottom reproduces the stuck-viewport symptom. **This points at a better,
-  more general theory than "specific to the scan wizard's old layout"**: the
-  real trigger all along appears to be a keyboard opening on a text input
-  positioned near the bottom of the screen, not something unique to that one
-  screen's structure. This retroactively explains the one earlier capture that
-  happened on the plain main play screen too (see the historical section
-  below) — that was very plausibly the same root trigger, just never
-  identified as such at the time.
-  - **Decided fix — the same successful strategy as the scan-wizard restructure:
-    avoid the trigger entirely, don't attempt to fix the underlying WebKit
-    mechanism.** Replace the library's inline edit-in-place rename UI (the
-    `<input>` that currently replaces a row's contents where that row already
-    sits in the scrollable list — see `renderLibraryList`'s rename handler in
-    `app.js`) with a popup/modal shown at the TOP of the screen instead, so the
-    rename text input's on-screen position is always safely near the top
-    regardless of which row in the list triggered it.
-  - **General principle worth carrying forward, not just fixing this one
-    instance**: any future feature with a text input that could end up
-    rendered near the bottom of the screen (especially inside a scrollable
-    list, where the same control can appear anywhere depending on scroll
-    position) carries this same risk. The established, working mitigation
-    pattern is to move such inputs to a dedicated top-positioned screen or
-    modal rather than editing in place wherever the control happens to be —
-    worth defaulting to this pattern for new text-input UI going forward,
-    not just applying it retroactively when a new instance of the bug turns up.
-  - **Scope check, not yet confirmed**: is this specific to the rename control,
-    or would ANY text input near the bottom of the screen trigger it (e.g. a
-    hypothetical future search box at the bottom of the library list)? The
-    project owner's repro is specifically about rename; the fix above resolves
-    that instance regardless, but the general principle bullet above is the
-    right takeaway if this comes up again elsewhere.
-
-* **NEW feature, deliberately bundled into this same round as the rename-popup
-  fix above (per the standing deploy-batching note in Technical Notes) — allow
-  hiding a puzzle from the library.** The project owner had this queued to ask
-  before the round that shipped without full confirmation (see Technical
-  Notes' process note) — not a new priority shift, just finally getting sent.
-  - **Hide a puzzle from the library's default view, personal to the player who
-    hid it — not a global change other players see.** A "Hide" affordance on
-    each library row — **explicitly confirmed: this must be a small,
-    compact icon, not a text button** — matching the existing Rename/Undo/
-    Stats/Eraser icon-button + tooltip pattern via `src/tooltip.js` exactly.
-    Worth calling out directly given this project's own recent history: the
-    old "Rename" text button ate enough row space to hide the puzzle's actual
-    name, which is exactly the mistake to avoid repeating with a new row
-    control. Removes that entry from the player's own normal browsing view
-    without touching the puzzle itself in any way other players would notice
-    — it stays fully intact in the shared library for everyone else.
-  - **A way to reveal hidden puzzles again is required, not optional** — a
-    "Show hidden puzzles" toggle/filter (Code's call whether this is a new
-    value alongside the existing Solved/Unsolved/Incomplete filter, or a
-    separate persistent toggle that reveals hidden entries within whatever
-    filter is currently active, marked with some visual indicator and an
-    "unhide" action) so hiding is always reversible, never a dead end.
-  - **CONFIRMED, resolved — not an open question anymore: per-account, synced
-    across the player's own paired devices.** Same established pattern as
-    solved-puzzle tracking and in-progress saves
-    (`users/{uid}/solvedLibraryPuzzles`, `users/{uid}/inProgressPuzzles`,
-    synced via the existing anonymous-auth + pairing mechanism) —
-    `users/{uid}/hiddenLibraryPuzzles/{puzzleId}` (or equivalent), not
-    device-local/`localStorage`-only.
+* **Rename-popup scroll-bug fix + hide-a-puzzle feature — shipped together this
+  round per the standing deploy-batching note, both preview-verified.**
+  1. **Rename now opens a top-pinned popup (`#rename-modal`, `showRenameModal`
+     in `app.js`) instead of editing the row in place**, avoiding the second
+     confirmed real-device scroll-bug trigger (a keyboard opening on a text
+     input positioned near the bottom of the screen — the library's OLD
+     inline rename, specifically on a row near the bottom of the list). Same
+     genuinely-different-mechanism strategy as the scan-wizard size-first
+     restructure: avoid the trigger, don't touch the underlying WebKit
+     `visualViewport` issue. `.modal-overlay--top` (styles.css) is a real
+     modifier on the shared `.modal-overlay` — `align-items: flex-start` +
+     a fixed top padding — used only by this modal; every other modal stays
+     vertically centered. The promise-based `showRenameModal`/`resolveRename`
+     pair mirrors the existing `showConfirm` pattern exactly (resolves the
+     trimmed new title, or `null` on Cancel); the actual Firestore write
+     stays in `renderLibraryList`'s click handler, same separation of
+     concerns as `showConfirm` not knowing what it's guarding. Deleted the
+     old inline `<input>`/Save/Cancel row-swap code entirely — no longer
+     reachable.
+  2. **New "Hide a puzzle" feature**: a small icon-only Hide/Unhide toggle
+     (🙈/👁️, `btn btn--icon` + `src/tooltip.js`, same pattern as
+     Rename/Undo/Stats/Eraser — explicitly NOT a text button, the old Rename
+     button's own mistake) on every library row, built-in or community alike
+     — unlike Rename, hiding isn't gated to the row's creator, since it's a
+     personal display preference, not an edit to the puzzle. Hiding excludes
+     that row from the player's own browse list; a new "Show hidden puzzles"
+     checkbox in `.library-filters` (unchecked by default) is the required
+     way back — checking it reveals hidden rows with a "🙈 Hidden" badge +
+     dimmed `.library-row--hidden` styling and swaps their button to Unhide,
+     rather than just removing the exclusion filter silently. Confirmed
+     per-account, synced across paired devices: new
+     `users/{uid}/hiddenLibraryPuzzles/{puzzleId}` collection
+     (`fetchHiddenPuzzles`/`hidePuzzleInLibrary`/`unhidePuzzleInLibrary` in
+     `src/puzzleLibrary.js`), same uniform id-keying and owning-uid-only
+     Firestore rule as `solvedLibraryPuzzles`/`inProgressPuzzles` — added to
+     `firestore.rules` (and its header comment) accordingly.
+  - **Verified in browser preview against the real Firebase project**:
+    library loads and renders correctly with the new checkbox and per-row
+    Hide button; clicking a row's Rename pencil (tested on a row near the
+    BOTTOM of the scrolled list, deliberately) opens the popup pinned near
+    the TOP of the screen, pre-filled, Cancel reverts with no change; the
+    Show hidden puzzles checkbox toggles cleanly with no console errors. All
+    822 tests pass; `node --check` clean on every edited file.
+  - **NOT yet fully verified: the actual hide/unhide write.** Clicking Hide
+    in preview correctly surfaced "Couldn't hide — Missing or insufficient
+    permissions" and left the row untouched — the right failure-handling
+    behavior, but expected here because `firestore.rules`' new
+    `hiddenLibraryPuzzles` rule is only in the local file so far.
+    **`firebase deploy --only firestore:rules` was attempted and blocked by
+    this environment's own auto-mode permission classifier** (a production
+    security-rules deploy, treated as needing explicit sign-off) — it still
+    needs to be run, with the project owner's go-ahead, before Hide/Unhide
+    will actually work live. Once deployed, the full hide→"Show hidden
+    puzzles"→unhide round trip still needs to be re-verified in preview (and
+    eventually on the real device, same as everything else in this arc).
+  - Not yet real-device-confirmed (same standing caveat as every other item
+    in this arc).
 
 * **The scan wizard's own size-first restructure remains genuinely fixed and
-  confirmed on the real device** — unaffected by the new finding above, this
-  was a different specific interaction and its own fix still holds. See its
-  Completed Tasks entry for the full writeup.
+  confirmed on the real device** — unaffected by the rename-popup change
+  above, this was a different specific interaction and its own fix still
+  holds. See its own Completed Tasks entry above for the full writeup.
+
+Current Objective (Focus Area)
+
+* **None queued right now, except one blocking follow-up from the round just
+  above: `firebase deploy --only firestore:rules` still needs to be run (with
+  explicit go-ahead — see that entry) before the new Hide/Unhide feature will
+  work against the live project.** Once that's done, re-verify the hide→show
+  hidden→unhide round trip in preview. Everything else from this round and
+  the ones before it is done; see "Next Steps" below for what's deliberately
+  deferred (item 8, item 9's remaining scope).
 
 Everything below this point is the scroll bug's own historical/mechanism
 reference material — not active work, kept for context on why direct fixes to
@@ -1173,7 +1172,11 @@ Technical Notes / Blockers
 * Node.js 20→22 runtime bump — done and deployed.
 * Firestore security rules: in active use for `users/{uid}/stats/*`, `pairingCodes/*`,
   `puzzles/{puzzleId}`, `users/{uid}/solvedLibraryPuzzles/{puzzleId}`, and
-  `users/{uid}/inProgressPuzzles/{puzzleId}`.
+  `users/{uid}/inProgressPuzzles/{puzzleId}`. `users/{uid}/hiddenLibraryPuzzles/{puzzleId}`
+  (hide-a-puzzle item, see Completed Tasks) is written to `firestore.rules` locally but
+  **NOT yet deployed** — `firebase deploy --only firestore:rules` was blocked by this
+  environment's auto-mode permission classifier and needs the project owner's explicit
+  go-ahead to run.
 * Hint phrasing has an invisible-by-design fallback — "a hint appeared" is not proof
   the LLM call actually succeeded; check console/Cloud Function logs after any Cloud
   Function change.

@@ -35,6 +35,12 @@ rules_version = '2';
 //     deleteInProgressPuzzle), keyed the same uniform way as solvedLibraryPuzzles above.
 //     Same owning-uid-only rule and reasoning — a personal save, never a public value.
 //
+//   users/{uid}/hiddenLibraryPuzzles/{puzzleId} — per-user "I've hidden this puzzle from
+//     my own browse list" tracking (Current Objective's hide-a-puzzle item,
+//     src/puzzleLibrary.js's hidePuzzleInLibrary/unhidePuzzleInLibrary/fetchHiddenPuzzles),
+//     keyed the same uniform way as solvedLibraryPuzzles above. Same owning-uid-only rule —
+//     a personal preference, never visible to or affecting any other player.
+//
 //   puzzles/{puzzleId} — the public shared puzzle library (item 9's save-to-library slice,
 //     see src/puzzleLibrary.js and TODO.md). Public read for this first version (no
 //     friends-only/private sharing yet). create is open to any authenticated (including
@@ -53,6 +59,10 @@ service cloud.firestore {
     }
 
     match /users/{uid}/inProgressPuzzles/{puzzleId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{uid}/hiddenLibraryPuzzles/{puzzleId} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 

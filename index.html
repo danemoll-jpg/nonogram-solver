@@ -399,7 +399,16 @@
        a badge and personal times-solved/best-time. Tap a puzzle to play it as a real,
        permanent puzzle (full move history, counts toward stats — not a scan snapshot). A
        saved puzzle's creator additionally gets a rename affordance, shown only on their own
-       puzzles; renaming edits the row in place instead of opening another modal. -->
+       puzzles; renaming opens #rename-modal (see below) rather than editing the row in
+       place — a real second scroll-bug trigger (see TODO.md's Current Objective): a text
+       input's keyboard opening while positioned near the bottom of the screen, confirmed on
+       the real device with the old in-place edit for a row near the bottom of this list.
+       Every row also gets a personal, icon-only Hide button (Current Objective's hide-a-
+       puzzle item) that removes it from this player's own browse list only — never a
+       global/other-player-visible change — via src/puzzleLibrary.js's hidePuzzleInLibrary/
+       fetchHiddenPuzzles; the "Show hidden puzzles" checkbox below is the required way back,
+       revealing hidden rows (marked, with an Unhide button in place of Hide) instead of
+       excluding them. -->
   <div id="library-modal" class="modal-overlay hidden">
     <div class="modal-card modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="library-title">
       <h2 id="library-title" class="modal-card__title">Library</h2>
@@ -428,11 +437,39 @@
               <option value="all">All sizes</option>
             </select>
           </label>
+          <!-- Hide-a-puzzle item's required "reveal again" affordance (see the library-modal
+               comment above) — off by default, so hidden rows stay out of the normal browse
+               view; checking it reveals them (visually marked) alongside whatever the two
+               filters above already select, rather than replacing those filters. -->
+          <label class="library-filters__field">
+            <input type="checkbox" id="library-filter-show-hidden" />
+            Show hidden puzzles
+          </label>
         </div>
         <p id="library-status" class="stats-status">Loading…</p>
         <ul id="library-list" class="library-list"></ul>
       </div>
       <button id="btn-library-close" class="btn btn--primary" type="button">Close</button>
+    </div>
+  </div>
+
+  <!-- Rename-a-library-puzzle popup (Current Objective — see TODO.md): replaces the old
+       edit-in-place row (a text input swapped into whichever row happened to trigger it,
+       anywhere in the scrollable list) after a second confirmed real-device scroll-bug
+       trigger — a keyboard opening on a text input positioned near the bottom of the screen.
+       `.modal-overlay--top` (styles.css) is the genuinely different fix, the same avoid-the-
+       trigger strategy the scan-wizard size-first restructure used: pins this modal (and so
+       its input) near the TOP of the screen regardless of which row in the list opened it, so
+       the keyboard never opens on an input positioned near the bottom. -->
+  <div id="rename-modal" class="modal-overlay modal-overlay--top hidden">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="rename-title">
+      <h2 id="rename-title" class="modal-card__title">Rename puzzle</h2>
+      <input id="rename-input" class="rename-modal__input" type="text" maxlength="80" />
+      <p id="rename-status" class="stats-status"></p>
+      <div class="modal-card__actions">
+        <button id="btn-rename-cancel" class="btn btn--ghost" type="button">Cancel</button>
+        <button id="btn-rename-save" class="btn btn--primary" type="button">Save</button>
+      </div>
     </div>
   </div>
 

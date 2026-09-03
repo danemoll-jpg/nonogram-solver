@@ -669,6 +669,19 @@ body {
   padding: 1rem;
 }
 
+/* Rename-popup scroll-bug fix (Current Objective — see TODO.md and index.html's
+   #rename-modal comment): a real modifier on the shared .modal-overlay, not a tweak to it —
+   every other modal stays vertically centered (align-items: center above), this one alone
+   pins its card near the top of the viewport (align-items: flex-start + a fixed top gap)
+   so a keyboard opening on its input can never leave that input positioned near the bottom
+   of the screen, regardless of which library row triggered it or how far down the list was
+   scrolled. `padding-top` (not `margin-top` on the card) keeps the same centered-horizontally
+   flex layout the base class already gives every modal. */
+.modal-overlay--top {
+  align-items: flex-start;
+  padding-top: 3.5rem;
+}
+
 .modal-card {
   background: var(--panel-bg-raised);
   border: 2px solid var(--gold);
@@ -1428,15 +1441,40 @@ body {
   white-space: nowrap;
 }
 
-.library-row__rename-input {
-  flex: 1;
-  min-width: 0;
+/* #rename-modal's input (Current Objective — see TODO.md and index.html's #rename-modal
+   comment) — replaces the old .library-row__rename-input, which styled a text input swapped
+   into the row in place; same visual treatment, just laid out inside a modal card instead of
+   a table row (block-level + its own top/bottom margin instead of `flex: 1`). */
+.rename-modal__input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
   background: var(--panel-bg);
   color: var(--text);
   border: 1px solid rgba(230, 183, 63, 0.3);
   border-radius: 0.4rem;
-  padding: 0.35rem 0.5rem;
-  font-size: 0.9rem;
+  padding: 0.5rem 0.6rem;
+  font-size: 1rem;
+  margin: 0 0 0.75rem;
+}
+
+/* Hidden-puzzle badge (hide-a-puzzle item — see TODO.md's Current Objective) — only ever
+   rendered when "Show hidden puzzles" is checked (see app.js's applyLibraryFilters), so a
+   hidden row stays visually distinct from a normal one instead of looking like any other
+   library entry. --text-dim rather than --warn/--success: being hidden isn't an
+   accomplishment or a problem, just a personal display preference worth flagging plainly. */
+.library-row__hidden {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* A hidden row (visible only via "Show hidden puzzles") is dimmed as a whole, on top of its
+   own badge above, so the distinction reads at a glance while scanning the list, not just on
+   close inspection of the badge text. */
+.library-row--hidden {
+  opacity: 0.6;
 }
 
 .library-row .btn {

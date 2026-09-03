@@ -264,3 +264,43 @@ export async function loadInProgressPuzzle(puzzleId) {
   const d = snap.data();
   return { grid: deserializeGrid(d.grid), elapsedMs: d.elapsedMs || 0, hintsUsed: d.hintsUsed || 0 };
 }
+
+// ---- Personal hidden-puzzle tracking (NEW feature — see TODO.md's Current Objective) ----
+//
+// `users/{uid}/hiddenLibraryPuzzles/{puzzleId}` — a puzzle a player has chosen to hide from
+// their own browse list, keyed exactly like solvedLibraryPuzzles/inProgressPuzzles above (same
+// uniform built-in-or-Firestore-id keying, same automatic cross-device-pairing coverage — see
+// those comments for the full reasoning, unchanged here). Hiding is personal only: it never
+// touches the shared `puzzles/{puzzleId}` doc, so no other player's view of the library is
+// affected by it either way.
+
+// Resolves a Set<puzzleId> of every library-list puzzle the current (or paired) user has
+// hidden. Throws on failure — the library modal falls back to treating nothing as hidden
+// (every puzzle shown) rather than guessing, same "fail soft, don't fake it" pattern as
+// fetchSolvedPuzzles/fetchInProgressPuzzles above.
+export async function fetchHiddenPuzzles() {
+  const user = await ensureSignedIn();
+  const { db, mod } = await getFirestoreClient();
+  const snap = await mod.getDocs(mod.collection(db, 'users', user.uid, 'hiddenLibraryPuzzles'));
+  const out = new Set();
+  snap.forEach((docSnap) => out.add(docSnap.id));
+  return out;
+}
+
+// Hides one puzzle from the current user's own browse list. Throws on failure — the library
+// row's Hide button shows the error rather than pretending it worked, same contract as
+// renamePuzzleInLibrary.
+export async function hidePuzzleInLibrary(puzzleId) {
+  const user = await ensureSignedIn();
+  const { db, mod } = await getFirestoreClient();
+  await mod.setDoc(mod.doc(db, 'users', user.uid, 'hiddenLibraryPuzzles', puzzleId), {
+    hiddenAt: mod.serverTimestamp(),
+  });
+}
+
+// Reverses hidePuzzleInLibrary — the "Show hidden puzzles" view's Unhide action.
+export async function unhidePuzzleInLibrary(puzzleId) {
+  const user = await ensureSignedIn();
+  const { db, mod } = await getFirestoreClient();
+  await mod.deleteDoc(mod.doc(db, 'users', user.uid, 'hiddenLibraryPuzzles', puzzleId));
+}
