@@ -695,13 +695,67 @@ Completed Tasks
   at whatever pace, and check the history log afterward for whether/when a crossing entry
   appears, rather than needing to catch it live with perfect manual timing.
 
+* **Toolbar follow-up round — done, preview-verified.** Direct project-owner feedback on the
+  toolbar cleanup above, addressed the same round:
+  - **Help button no longer pinned to the far right edge.** `.help-menu`'s `margin-left: auto`
+    (from the original UI-consolidation round) pushed Help to the far right edge of
+    `.board-panel` — which stretches to the page's full available width regardless of the
+    actual puzzle/toolbar's own size, since neither `.layout` nor `.board-panel` has a width
+    rule of its own. For any puzzle narrower than the page, that left a large dead gap between
+    Save and Help, worse once the toolbar wraps (the auto margin only pushes to the end of
+    whichever line Help itself lands on). Removed the auto margin entirely — Help now just
+    flows in sequence after Save with the same `.toolbar` `gap` as every other button pair.
+  - **Toolbar tightened for one-line fit**, explicitly requested so the toolbar doesn't cost
+    the puzzle grid a second row of vertical height by wrapping: `.toolbar`'s own `gap`
+    (0.9rem → 0.45rem), `.toolbar__gap`'s cluster-separator width (0.9rem → 0.6rem), and the
+    horizontal padding on `.btn` (0.9rem → 0.7rem), `.btn--icon` (0.7rem → 0.55rem), `.mode-btn`
+    (0.8rem → 0.6rem), `.mode-btn--icon` (0.6rem → 0.45rem), `.mute-toggle` (0.7rem → 0.55rem),
+    and `.help-menu__trigger` (0.75rem → 0.6rem) all trimmed. Measured directly in preview: the
+    toolbar's 8 controls now need ~508px of content width (was ~630px+ before), fitting on one
+    line at iPad-portrait width (768px, this project's real device) with real room to spare;
+    a very narrow phone portrait width can still wrap, which `flex-wrap` already handles
+    gracefully as a fallback, not a bug.
+  - **Vertical whitespace above the toolbar trimmed too** (same "space for puzzles" ask): `.page`
+    top padding (2.5rem → 1.25rem, mirrored on `.scan-screen` per its own "styled to match
+    .page" comment) and `.header`'s bottom margin (2rem → 0.85rem) — reclaims vertical room for
+    the puzzle grid without touching the title's own font size/visual weight.
+  - **Eraser icon redesigned — first SVG attempt (a bare rotated outline rectangle) confirmed
+    by the project owner as unrecognizable** ("That doesn't look like a pencil eraser at all
+    ... I would have no idea what that icon is"). Root problem: an outline-only rotated
+    rectangle has no cues distinguishing it from a pill, battery, or any other slanted capsule
+    shape — a rectangle alone isn't enough. Redesigned with the two elements that actually make
+    an eraser icon read as one (the same combination real icon sets use, e.g. Material Symbols'
+    "ink eraser"): a **filled** (not just outlined) two-tone block — `fill-opacity` tint plus a
+    divider line for the classic two-tone rubber/wrapper look — **and** a short wavy
+    pencil-mark scribble trailing out from underneath it, as if being wiped away mid-stroke.
+    Verified directly in browser preview at both actual toolbar size (18px, cloned into an
+    isolated high-contrast box) and a further zoomed-in view — reads clearly as an eraser
+    actively erasing a mark at both sizes, not an ambiguous shape. Still `currentColor`
+    throughout, so it still tracks `.mode-btn[aria-pressed="true"]`'s color swap for free.
+  - All 822 tests still pass (markup/CSS only). Not yet real-device-confirmed.
+
+* **"Scan a puzzle" and "Draw a puzzle" moved from the Help menu into the puzzle library
+  modal — done, preview-verified.** Per direct request: these are ways to get a puzzle to
+  play, the same conceptual category as browsing the library itself (the same reasoning that
+  already moved Library/Stats/Save out of Help in earlier rounds), not help actions. The two
+  `<li>` entries are gone from `#help-menu-list`; `#library-modal` now opens with a
+  "📷 Scan a puzzle" / "✏️ Draw a puzzle" button row (`.library-actions`, new) above the
+  existing filter/browse list, separated by a thin bottom border rather than a full divider
+  block. Clicking either hides the library modal first, then opens the respective wizard
+  (`els.libraryBtnScan`/`libraryBtnDraw` in `app.js`, replacing the old `els.menuScan`/
+  `menuDraw` Help-menu handlers) — same "only one full-screen view/modal up at a time" rule
+  every other modal-to-wizard handoff in this app already follows. Verified directly in
+  browser preview: clicking "Scan a puzzle" closes the library and opens the scan wizard;
+  clicking "Draw a puzzle" does the same for the draw wizard; the Help dropdown's item list no
+  longer contains either entry. All 822 tests still pass. Not yet real-device-confirmed.
+
 Current Objective (Focus Area)
 
-* **Both items from the last round are now done — see their Completed Tasks entries above.**
-  "Draw a puzzle" (preview-verified end-to-end against real Firebase) and the toolbar cleanup
-  (preview-verified: order, icon-only buttons, tooltips, mode-toggle wiring all confirmed) are
-  both implemented; neither is real-device-confirmed yet. The scroll bug's round-5 tooling
-  extension above is also done, per this round's explicit request.
+* **All requested work is now done — see the Completed Tasks entries above.** "Draw a puzzle,"
+  the toolbar cleanup, its direct follow-up (Help position, one-line tightening, page/header
+  padding, the redesigned eraser icon), moving Scan/Draw into the library modal, and the
+  scroll bug's round-5 tooling extension are all implemented and preview-verified; none is yet
+  real-device-confirmed.
 * **No new build task is queued right now.** The project owner is running real-device
   verification (toolbar cleanup, draw-a-puzzle, round 5's height fix via the new auto-logging,
   and anything else pending) in parallel — the scroll-bug section below remains reference-only

@@ -72,7 +72,10 @@ body {
 .page {
   max-width: 72rem;
   margin: 0 auto;
-  padding: 2.5rem 1.5rem 2rem;
+  /* Trimmed from 2.5rem (space-for-puzzles round — see TODO.md): the top padding plus the
+     header's own margin-bottom below were pure whitespace above the actual puzzle, at a
+     premium on any viewport short on vertical room. */
+  padding: 1.25rem 1.5rem 2rem;
   /* #page-root is the one scrolling region during normal play (see the html/body comment
      above) — fills body's now-fixed height exactly, and scrolls internally if its own content
      (rare — fitBoardToViewport already sizes the board to avoid this in the common case) ever
@@ -98,11 +101,13 @@ body {
 
 .header {
   text-align: center;
-  margin-bottom: 2rem;
+  /* Trimmed from 2rem (space-for-puzzles round — see TODO.md and .page's own padding-top
+     comment right above): the title doesn't need this much air above the toolbar/puzzle. */
+  margin-bottom: 0.85rem;
 }
 
 .header__title {
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.25rem;
   font-size: clamp(1.7rem, 4vw, 2.4rem);
   font-weight: 800;
   color: var(--gold);
@@ -137,7 +142,12 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.9rem;
+  /* Tightened from 0.9rem (space-for-puzzles round — see TODO.md): the project owner asked
+     for buttons tight enough to keep the whole toolbar on one line on most platforms, so it
+     doesn't cost the puzzle grid below a second row of height by wrapping. Every fixed
+     per-button padding value in this section was trimmed the same round, for the same
+     reason — see each rule's own comment below. */
+  gap: 0.45rem;
   margin-bottom: 1.25rem;
 }
 
@@ -145,9 +155,11 @@ body {
    cluster of frequently-used play controls (Library, mode toggle, Undo) from the second
    cluster of secondary/settings-ish controls (Stats, Mute, Save, Help) that follows it. Adds
    to (not replaces) `.toolbar`'s own `gap`, so the visual break reads as noticeably larger
-   than the ordinary spacing between any other two toolbar controls. */
+   than the ordinary spacing between any other two toolbar controls. Also tightened (was
+   0.9rem) in the same space-for-puzzles pass as `.toolbar`'s own gap above, just kept wider
+   than that gap so the cluster break still reads clearly at the new tighter scale. */
 .toolbar__gap {
-  width: 0.9rem;
+  width: 0.6rem;
 }
 
 .mode-toggle {
@@ -174,7 +186,7 @@ body {
   height: 100%;
   display: inline-flex;
   align-items: center;
-  padding: 0 0.8rem;
+  padding: 0 0.6rem; /* tightened from 0.8rem — space-for-puzzles round, see .toolbar's comment */
   cursor: pointer;
   touch-action: manipulation; /* same double-tap-zoom fix as .btn — see its own comment */
 }
@@ -195,7 +207,7 @@ body {
    .mode-btn[aria-pressed="true"]'s color swap above for free — no separate active-state rule
    needed here. */
 .mode-btn--icon {
-  padding: 0 0.6rem;
+  padding: 0 0.45rem; /* tightened from 0.6rem — space-for-puzzles round, see .toolbar's comment */
 }
 
 /* Persistent mute toggle (item 3) — its own control, separate from the Help dropdown, so
@@ -205,14 +217,21 @@ body {
   /* Only horizontal padding needed — see .btn's own comment: its fixed height + flex centering
      already handles vertical sizing, so this button's height stays in lockstep with every
      other .btn in the toolbar regardless of which glyph is in it. */
-  padding: 0 0.7rem;
+  padding: 0 0.55rem; /* tightened from 0.7rem — space-for-puzzles round, see .toolbar's comment */
 }
 
 /* Single "Help" dropdown (item: UI consolidation pass) — replaces the old always-visible
-   "Hints & help" / "Mistakes" button panels. */
+   "Hints & help" / "Mistakes" button panels.
+   Space-for-puzzles round (see TODO.md): dropped the `margin-left: auto` that used to pin
+   this to the far right edge of `.board-panel` — that edge sits well past the toolbar's own
+   content for any puzzle narrower than the page's max-width, so Help ended up stranded far
+   from Save with a large dead gap between them (worse once `.toolbar` wraps to a second line,
+   since the auto margin only pushes to the end of whichever line Help itself lands on, not
+   necessarily the same line as the buttons before it). Help now just flows in sequence like
+   every other toolbar button, immediately after Save with the same `.toolbar` `gap` as
+   everything else — no longer riding the panel's own width. */
 .help-menu {
   position: relative;
-  margin-left: auto;
 }
 
 /* UI/branding polish round (see TODO.md): trimmed from a text "Help ▾" button to a plain "?"
@@ -224,7 +243,7 @@ body {
   /* Only horizontal padding needed — see .btn's own comment: its fixed height + flex centering
      already handles vertical sizing, so this button's height stays in lockstep with every
      other .btn in the toolbar regardless of which glyph is in it. */
-  padding: 0 0.75rem;
+  padding: 0 0.6rem; /* tightened from 0.75rem — space-for-puzzles round, see .toolbar's comment */
 }
 
 .help-menu__list {
@@ -313,7 +332,7 @@ body {
   gap: 0.35rem;
   overflow: hidden;
   line-height: 1.2;
-  padding: 0 0.9rem;
+  padding: 0 0.7rem; /* tightened from 0.9rem — space-for-puzzles round, see .toolbar's comment */
   border-radius: 0.6rem;
   cursor: pointer;
   transition: transform 0.1s ease, border-color 0.1s ease;
@@ -358,7 +377,7 @@ body {
   /* Only horizontal padding needed now — .btn's fixed height + flex centering (see .btn's own
      comment) already handles vertical sizing/centering, so a vertical component here would
      just eat into that fixed box rather than changing anything visible. */
-  padding: 0 0.7rem;
+  padding: 0 0.55rem; /* tightened from 0.7rem — space-for-puzzles round, see .toolbar's comment */
 }
 
 .btn + .btn {
@@ -908,7 +927,10 @@ body {
 .scan-screen {
   max-width: 72rem;
   margin: 0 auto;
-  padding: 2.5rem 1.5rem 4rem;
+  /* Top padding trimmed to match .page's own reduction (space-for-puzzles round — see
+     TODO.md) — kept in sync since this rule's own comment above says it's styled to match
+     .page/.board-panel for visual consistency. */
+  padding: 1.25rem 1.5rem 4rem;
   /* Superseding this rule's own comment further down (kept on .scan-screen__body, updated to
      match): the scan wizard used to rely on native document/body scroll specifically to avoid
      an earlier, different iOS bug where a `.modal-overlay`-style fixed overlay's nested
@@ -1311,6 +1333,19 @@ body {
 
 /* ---- Puzzle library browse modal (library-consolidation round — see TODO.md; started
    as item 9's save-to-library slice) ---- */
+
+/* "Scan a puzzle" / "Draw a puzzle" — moved in from the Help menu (see index.html's comment
+   at both ends of the move) as another way to get a puzzle into play, not a help action. A
+   thin bottom border (not a full divider element) is enough to separate "add a puzzle" from
+   "browse existing puzzles" below it without adding a whole new visual block. */
+.library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(230, 183, 63, 0.2);
+}
 
 .library-filters {
   display: flex;

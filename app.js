@@ -77,8 +77,8 @@ const els = {
   menuHint: document.getElementById('menu-hint'),
   menuCheck: document.getElementById('menu-check'),
   menuRemoveBad: document.getElementById('menu-remove-bad'),
-  menuScan: document.getElementById('menu-scan'),
-  menuDraw: document.getElementById('menu-draw'),
+  libraryBtnScan: document.getElementById('library-btn-scan'),
+  libraryBtnDraw: document.getElementById('library-btn-draw'),
   menuRestart: document.getElementById('menu-restart'),
   menuAllGames: document.getElementById('menu-all-games'),
   explainBody: document.getElementById('explain-panel-body'),
@@ -1364,8 +1364,11 @@ const scanWizard = initScanWizard({
   onClose: fitBoardToViewport,
   onOpen: syncExplainPanelSpace,
 });
-els.menuScan.addEventListener('click', () => {
-  closeHelpMenu();
+// Moved in from the Help menu (see index.html's comment) into the library modal — closing the
+// library first, same as any other full-screen wizard being opened from it, so the two never
+// stack.
+els.libraryBtnScan.addEventListener('click', () => {
+  els.libraryModal.classList.add('hidden');
   scanWizard.open();
 });
 
@@ -1384,8 +1387,8 @@ const drawWizard = initDrawWizard({
   onClose: fitBoardToViewport,
   onOpen: syncExplainPanelSpace,
 });
-els.menuDraw.addEventListener('click', () => {
-  closeHelpMenu();
+els.libraryBtnDraw.addEventListener('click', () => {
+  els.libraryModal.classList.add('hidden');
   drawWizard.open();
 });
 

@@ -37,16 +37,22 @@
             <!-- Dedicated Eraser mode (see TODO.md), chosen over inferring "erase intent" from
                  what a drag happens to cross. Clears FILLED/EMPTY back to UNKNOWN; a click/drag
                  over an already-UNKNOWN cell is a no-op. Icon-only now too (was "🧹 Erase") — the
-                 🧹 broom emoji was always a placeholder, replaced here with an inline SVG
-                 pencil-eraser glyph (no single emoji reads as "eraser" across platforms) that
-                 inherits the button's own text color via currentColor, so it matches
-                 .mode-btn[aria-pressed="true"]'s color swap the same way the plain-text Fill/X
-                 buttons already do, with no separate active-state CSS needed. -->
+                 🧹 broom emoji was always a placeholder, replaced with an inline SVG (no single
+                 emoji reads as "eraser" across platforms). First SVG attempt (a bare rotated
+                 outline rectangle) read as an unidentifiable slanted pill/battery shape per
+                 direct feedback, not as an eraser at all — a rectangle alone isn't enough of a
+                 cue. This version adds the two things that actually make an eraser icon read as
+                 one: a filled (not just outlined) two-tone block, AND a short pencil-mark
+                 scribble trailing out from underneath it being wiped away — the same combination
+                 real icon sets (e.g. Material Symbols' "ink eraser") use, rather than the block
+                 shape alone. `currentColor` throughout, so it still tracks
+                 .mode-btn[aria-pressed="true"]'s color swap for free, same as before. -->
             <button id="mode-erase" class="mode-btn mode-btn--icon" type="button" aria-pressed="false" aria-label="Eraser" data-tooltip="Eraser">
               <svg class="icon-eraser" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-                <g transform="rotate(-40 12 12)">
-                  <rect x="5" y="7.5" width="14" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.7" />
-                  <line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="1.7" />
+                <path d="M3 19c1.2-2.3 2.6-2.3 3.6-1c1 1.3 2.4 1.3 3.4-0.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity="0.55" />
+                <g transform="rotate(-35 15 10.5)">
+                  <rect x="9" y="7" width="12" height="7" rx="1.8" fill="currentColor" fill-opacity="0.25" stroke="currentColor" stroke-width="1.6" />
+                  <line x1="9" y1="10.2" x2="21" y2="10.2" stroke="currentColor" stroke-width="1.3" />
                 </g>
               </svg>
             </button>
@@ -87,8 +93,9 @@
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-hint">Get a hint</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-check">Check my work</button></li>
               <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-remove-bad">Remove bad marks</button></li>
-              <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-scan">Scan a puzzle</button></li>
-              <li role="none"><button class="help-menu__item" role="menuitem" type="button" id="menu-draw">Draw a puzzle</button></li>
+              <!-- "Scan a puzzle" and "Draw a puzzle" moved into the puzzle library modal
+                   (see #library-modal below) — they're ways to get a puzzle to play, the same
+                   category as browsing the library itself, not a help action. -->
               <li role="none" class="help-menu__toggle-item">
                 <label class="help-menu__item help-menu__item--toggle">
                   <input type="checkbox" id="toggle-autocheck" />
@@ -388,6 +395,14 @@
     <div class="modal-card modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="library-title">
       <h2 id="library-title" class="modal-card__title">Puzzle library</h2>
       <div class="modal-card__body">
+        <!-- Moved in from the Help menu (see the comment left in its place there) — scanning or
+             drawing a puzzle is another way to get a puzzle to play, the same category as
+             browsing the list below, not a help action. Opening either closes this modal first
+             (src/app.js) since only one full-screen wizard/modal is ever meant to be up at once. -->
+        <div class="library-actions">
+          <button id="library-btn-scan" class="btn" type="button">📷 Scan a puzzle</button>
+          <button id="library-btn-draw" class="btn" type="button">✏️ Draw a puzzle</button>
+        </div>
         <div class="library-filters">
           <label class="library-filters__field">
             Show

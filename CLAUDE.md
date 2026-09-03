@@ -173,10 +173,10 @@
   Firestore project) — not yet real-device-confirmed.
 - **Toolbar cleanup — done, preview-verified.** Reordered to Library → mode toggle
   (Fill / X / Eraser) → Undo → a visual gap → Stats → Mute → Save → Help, replacing
-  the old `.library-entry-group` clustering. X and Eraser (new inline-SVG
-  pencil-eraser icon in `index.html`, `currentColor`-based so it tracks
-  `.mode-btn[aria-pressed="true"]`'s color swap for free) and Stats all went
-  icon-only. New shared module `src/tooltip.js` (`attachTooltip`/`initTooltips`) —
+  the old `.library-entry-group` clustering. X and Eraser (inline-SVG icon in
+  `index.html` — see the follow-up round below for its redesign, `currentColor`-based
+  so it tracks `.mode-btn[aria-pressed="true"]`'s color swap for free) and Stats all
+  went icon-only. New shared module `src/tooltip.js` (`attachTooltip`/`initTooltips`) —
   a single floating bubble, wired via `data-tooltip` — gives every icon-only button
   a hover/focus/touch-press caption instead of relying on native `title`, which
   this project's whole iOS-Safari history says not to trust. Round 4's
@@ -203,6 +203,36 @@
   standing instruction. `node --check` clean, all 822 tests pass (inert during
   `npm test`, gated behind the URL flag). Not real-device-testable from this
   environment, same as the rest of this diagnostic tool.
+- **Toolbar follow-up round — done, preview-verified.** Direct feedback on the
+  toolbar cleanup above: `.help-menu`'s `margin-left: auto` (pinning Help to the far
+  right edge of `.board-panel`, which stretches to the page's full width regardless
+  of the puzzle's own size) is gone — Help now flows in sequence after Save like
+  every other button. Every toolbar gap/padding value was trimmed (`.toolbar` gap
+  0.9rem→0.45rem, plus `.btn`/`.btn--icon`/`.mode-btn`/`.mode-btn--icon`/
+  `.mute-toggle`/`.help-menu__trigger` padding, each cut by 0.15–0.2rem) so the 8
+  toolbar controls now need ~508px (was ~630px+), fitting on one line at
+  iPad-portrait width (768px, this project's real device) with room to spare.
+  `.page`'s top padding (2.5rem→1.25rem, mirrored on `.scan-screen`) and
+  `.header`'s bottom margin (2rem→0.85rem) were trimmed too, reclaiming vertical
+  space for the puzzle without touching the title's font size. **The eraser icon
+  was redesigned** after the project owner confirmed the first SVG attempt (a bare
+  rotated outline rectangle) was unrecognizable as an eraser — replaced with a
+  filled two-tone block (fill-opacity tint + divider line) plus a short scribble
+  trailing out from underneath it being wiped away, the same combination real icon
+  sets use (e.g. Material Symbols' "ink eraser") rather than an outline shape
+  alone. Verified directly in preview at both actual toolbar size and zoomed in.
+  All 822 tests pass. Not yet real-device-confirmed. See `TODO.md`'s Completed
+  Tasks for the full writeup.
+- **"Scan a puzzle" / "Draw a puzzle" moved from the Help menu into the puzzle
+  library modal — done, preview-verified.** Per direct request — they're ways to
+  get a puzzle to play, the same category as browsing the library, not help
+  actions. `#library-modal` now has a "📷 Scan a puzzle" / "✏️ Draw a puzzle"
+  button row (`.library-actions`) above the browse list; clicking either closes
+  the library first, then opens the respective wizard (`els.libraryBtnScan`/
+  `libraryBtnDraw` in `app.js`, replacing the old Help-menu handlers). Verified
+  directly in preview: both buttons close the library and open their wizard; the
+  Help dropdown no longer lists either item. All 822 tests pass. Not yet
+  real-device-confirmed.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
