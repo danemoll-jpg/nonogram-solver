@@ -1966,20 +1966,30 @@ function correctResidualViewportPan() {
 // move scroll *position* — it was never capable of touching this variable, which is exactly why
 // five straight rounds of pan/trigger refinement made no visible difference on real hardware.
 //
-// Fix (real research, not guessed — see TODO.md for sources): once `window.innerHeight` has
-// recovered to its true value but `visualViewport.height` hasn't followed, WebKit needs to be
-// forced to recompute it. Toggling `display:none` -> a synchronous reflow -> `display:''` on the
-// whole page's root element is a documented workaround for exactly this WebKit bug class (a
-// PWA/Safari viewport-recompute nudge, not a nonogram-specific trick) — scrollTop is saved and
-// restored across the toggle since #page-root owns its own internal scroll region (see this
-// file's "background-scroll lock" comment), and fitBoardToViewport is re-run afterward since
-// board sizing itself reads visualViewport.height.
+// Round 4's fix (real-device DISPROVEN — see TODO.md for the full before/after capture):
+// toggling `display:none` -> reflow -> `display:''` on the page root was a documented
+// workaround for *some* WebKit stuck-viewport bugs, but a real on-device capture (pressing
+// the manual "Force heal viewport height now" debug button, before/immediately-after/150ms
+// readings) proved it only recomputes `window.innerHeight` — `visualViewport.height` itself
+// stayed frozen at the stuck value in both readings, 79px gap unchanged. A layout reflow
+// recomputes the LAYOUT viewport; `visualViewport` isn't part of the layout tree at all, so
+// there was never a mechanism by which that trick could have touched it.
 //
-// Trigger condition deliberately mirrors correctResidualViewportPan's own "nothing focused"
-// branch (never toggle display on the container of a field the player is actively using — that
-// would force-blur it) rather than tracking a separate "max height ever seen" baseline:
-// window.innerHeight is directly confirmed, by the real captures above, to be the reliable
-// "what the true full height actually is" reference once the bug has settled.
+// Round 5 (genuinely different technique, per the explicit instruction not to keep tweaking
+// round 4's): `visualViewport`'s dimensions are derived from the page's viewport meta-tag
+// CONSTRAINTS (width=device-width, initial-scale, etc.), recomputed by WebKit whenever it
+// re-parses that tag — not from anything in the DOM layout tree. Forcing a re-parse by
+// mutating the `<meta name="viewport">` element's `content` attribute and then restoring it
+// is a separately, widely documented workaround for this exact class of "visualViewport
+// dimensions stuck after the on-screen keyboard closes" WebKit bug (distinct from the
+// layout-reflow trick round 4 tried, and targeting the actual subsystem visualViewport comes
+// from instead of hoping a layout pass happens to touch it too). Appending a harmless extra
+// token (rather than writing the identical string back) is deliberate — WebKit's own
+// attribute-change detection can no-op a set-to-the-same-value write.
+//
+// Trigger condition and threshold are unchanged from round 4 (still correctly scoped: don't
+// touch this while a field is focused, still comparing against the confirmed-reliable
+// window.innerHeight reference) — only the actual recompute mechanism changed.
 const STUCK_HEIGHT_THRESHOLD_PX = 40; // comfortably below the confirmed real 79px gap, above ordinary desktop scrollbar/zoom noise
 function healStuckViewportHeight() {
   const vv = window.visualViewport;
@@ -1988,11 +1998,13 @@ function healStuckViewportHeight() {
   if (active && /^(input|textarea)$/i.test(active.tagName || '')) return; // don't blur a field the player is using
   const gap = window.innerHeight - vv.height;
   if (gap < STUCK_HEIGHT_THRESHOLD_PX) return;
-  const savedScrollTop = els.pageRoot.scrollTop;
-  els.pageRoot.style.display = 'none';
-  void els.pageRoot.offsetHeight; // force a synchronous reflow before restoring
-  els.pageRoot.style.display = '';
-  els.pageRoot.scrollTop = savedScrollTop;
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (meta) {
+    const original = meta.getAttribute('content');
+    meta.setAttribute('content', `${original}, minimum-scale=1`);
+    void document.documentElement.offsetHeight; // force WebKit to act on the change before restoring it
+    meta.setAttribute('content', original);
+  }
   fitBoardToViewport();
 }
 
@@ -2455,8 +2467,10 @@ function initScrollDiagnostics() {
     }, 150);
   });
   // Same before/immediately-after/150ms-later logging pattern as forceBtn, reading
-  // visualViewport.height instead of offsetTop — this is the number the display-toggle
-  // reflow trick (healStuckViewportHeight) targets, not the pan.
+  // visualViewport.height instead of offsetTop — this is the number the viewport-meta
+  // re-parse trick (healStuckViewportHeight, round 5 — see its own comment) targets, not
+  // the pan. This same button/logging is what caught round 4's technique not working in the
+  // first place — no new debug tooling needed to check round 5 the same way.
   forceHealBtn.addEventListener('click', () => {
     const vv = window.visualViewport;
     const before = vv?.height ?? '(unavailable)';

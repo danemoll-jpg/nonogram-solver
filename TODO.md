@@ -609,6 +609,30 @@ Current Objective (Focus Area)
     was still exactly 79px in this capture too — the visible symptom, unresolved
     regardless of screen/context.
 
+* **Round 5 — genuinely different technique implemented, NOT YET real-device-verified.**
+  Per the instruction above, this replaces (not tweaks) round 4's `display:none`→reflow
+  technique inside `healStuckViewportHeight` (`app.js`) rather than adjusting its
+  threshold/timing again. Reasoning: `visualViewport`'s dimensions are derived from the
+  page's `<meta name="viewport">` constraints, recomputed by WebKit when it re-parses
+  that tag — not from anything in the DOM layout tree, which is exactly why a layout
+  reflow (round 4) could move `window.innerHeight` but structurally could never touch
+  `visualViewport.height`. The new technique instead mutates the viewport meta tag's
+  `content` attribute (appends `, minimum-scale=1`, forces a layout read, then restores
+  the original string) to force a real re-parse. This is a separately, widely documented
+  workaround for this WebKit bug class, distinct in mechanism from round 4's trick — not
+  a variation of it.
+  - **Explicitly unverified**: I (Code) cannot test real iOS Safari from this
+    environment — this needs the same real-device check that caught round 4 failing,
+    via the existing "Force heal viewport height now" debug button (`?debug=scroll`),
+    which already logs `visualViewport.height` before/immediately-after/150ms-later —
+    no new debug tooling was needed to check this round the same way round 4 was
+    caught. Only smoke-tested on desktop Chromium (runs without throwing, viewport meta
+    content is correctly restored, page layout unaffected) — desktop can't reproduce
+    the actual bug, so this proves nothing about whether it works on-device.
+  - Given six straight failed rounds on this bug class, treat this as a candidate to
+    verify, not a confirmed fix, until the project owner reports back real before/after
+    numbers the same way round 4's failure was caught.
+
 Next Steps (Do Not Start Yet)
 
 * Item 8 — Photo → puzzle generation (arbitrary photo, thresholded/downsampled grid;

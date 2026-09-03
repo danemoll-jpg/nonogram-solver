@@ -42,6 +42,13 @@
   threshold/timing — research a genuinely different approach that specifically
   targets `visualViewport.height`.** See `TODO.md`'s Current Objective for the full
   data.
+- **Round 5 of the scroll fix: `healStuckViewportHeight` now mutates the `<meta
+  name="viewport">` tag's `content` attribute (forcing WebKit to re-parse it) instead of
+  round 4's disproven display-toggle reflow — genuinely different mechanism (viewport
+  meta re-parse vs. layout reflow), not a tweak. Explicitly NOT real-device-verified —
+  cannot be tested from this environment; needs the same on-device check (the existing
+  "Force heal viewport height now" debug button) that caught round 4 failing. Treat as
+  an unconfirmed candidate given six straight prior failures on this bug class.**
 - **Scanned puzzles now auto-publish to the library the moment they're played** (no more
   separate optional "Save to library" step) — this closed the original "Save progress
   does nothing for a scanned puzzle" gap by making a played scan a completely normal
@@ -165,9 +172,10 @@ and the Undo baseline-wipe bug (all above) are done. For history:
    round to fail on this bug class.** A real before/after capture (manually
    forcing the "heal" button) proved the technique only recomputes
    `window.innerHeight`, never `visualViewport.height` — the visible symptom
-   (EXCESS) was completely unchanged, 79px both before and after. Don't tweak
-   the existing technique further; research a genuinely different approach that
-   actually targets `visualViewport.height`. See `TODO.md` for the full data.
+   (EXCESS) was completely unchanged, 79px both before and after.
+3. **Round 5 (see above) is implemented but NOT real-device-verified** — needs a
+   real on-device check via the "Force heal viewport height now" debug button
+   before it can be trusted, same as every prior round.
 
 Item 8 (arbitrary-photo puzzle generation) remains deferred, explicitly deprioritized
 by the project owner. Item 9's remaining scope is now just richer browsing (search,
