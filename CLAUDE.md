@@ -314,22 +314,68 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
+**Current objective has four items**:
+
+1. **New real bug: a drag on the puzzle board occasionally causes the whole
+   page to scroll — a different, more standard issue from the visualViewport
+   saga elsewhere in this file, NOT a continuation of it.** Classic mobile-web
+   problem: a touch-drag gesture not being fully claimed by the app's own JS,
+   so the browser occasionally interprets it as native scroll/pan. Likely fix:
+   `touch-action: none` on the board/grid container specifically (stricter
+   than the `manipulation` value already used on toolbar buttons, which still
+   allows scrolling). Scope carefully to the board only — don't regress
+   scrolling elsewhere (library list, help text, etc.). See `TODO.md` for
+   full detail.
+2. **New: the previously-deferred GLOBAL fastest-time-across-all-users stat
+   per puzzle is being picked up now**, shown alongside the player's own
+   personal best in the library. Real constraint carried forward from when
+   this was first designed: must go through a callable Cloud Function (same
+   pattern as `createPairingCode`/`redeemPairingCode`) that validates and
+   writes server-side — never a plain client-writable Firestore field, which
+   would be trivially fakeable. New `fastestTimeMs` field on
+   `puzzles/{puzzleId}`, written only via the new callable. No backfill
+   needed for puzzles already solved before this ships — starts accumulating
+   from whenever it goes live. See `TODO.md` for full detail.
+3. **Real bug: starting a drag on an already-FILLED cell to continue filling
+   further blank cells doesn't work at all.** Likely cause: the first cell's
+   click-toggle (clears an already-filled cell) sets the whole stroke's
+   target state, and `dragStep` only paints cells that are already UNKNOWN —
+   so once the target becomes UNKNOWN from that first toggle, every later
+   cell in the drag is a no-op. Suggested fix, now that Eraser mode exists as
+   the dedicated clearing tool: a drag in Fill/Mark-empty mode should treat a
+   cell already in that mode's own target state as a harmless pass-through,
+   not a toggle that redefines the stroke's intent. Whether single-click
+   toggle-to-clear should also change is an open question to confirm, not
+   assumed. See `TODO.md` for full detail.
+4. **New feature: a sound effect for a clue number becoming anchored
+   (grayed out)**, distinct from the existing `lock` sound (which is per-line,
+   not per-number). Confirmed this doesn't currently exist. **Scope: Code
+   builds the plumbing only** — a new named sound slot, wired to the right
+   trigger moment, loading from the same-shaped path a real audio file will
+   be dropped into later. The project owner is sourcing the actual sound file
+   themselves ("a pleasant chime, like a ping," light/short, quieter than
+   `lock`) — don't pick or generate one. Needs a real before/after diff of
+   the anchored-number set per render to fire only at the actual transition
+   moment, and a design call on whether multiple numbers anchoring from one
+   move should each get their own sound or share
+   one. See `TODO.md` for full detail.
+
 **The rename-popup scroll-bug fix and the new hide-a-puzzle feature are DONE,
-deployed, and preview-verified end-to-end, shipped together this round per the
-standing deploy-batching note.** Rename now opens a top-pinned `#rename-modal`
-popup (`showRenameModal` in `app.js`, mirroring the existing `showConfirm`
-pattern) instead of editing the library row in place — the same avoid-the-trigger
-strategy as the scan-wizard restructure, targeting a second confirmed real-device
-scroll-bug trigger (a keyboard opening on a text input positioned near the bottom
-of the screen). Hide adds a small icon-only 🙈/👁️ toggle to every library row
-(built-in or community, unlike Rename — hiding is a personal preference, not an
-edit) plus a required "Show hidden puzzles" checkbox to reveal/unhide again,
-backed by a new `users/{uid}/hiddenLibraryPuzzles/{puzzleId}` collection synced
-across paired devices, same pattern as solved/in-progress tracking; its
-`firestore.rules` entry is deployed and live. Verified the full hide→show
-hidden→unhide round trip against the live Firebase project with no console
-errors. See `TODO.md`'s Completed Tasks for the full writeup. Not yet
-real-device-confirmed, same standing caveat as the rest of this arc.
+deployed, and now CONFIRMED on the real device by the project owner**, shipped
+together this round per the standing deploy-batching note. Rename now opens a
+top-pinned `#rename-modal` popup (`showRenameModal` in `app.js`, mirroring the
+existing `showConfirm` pattern) instead of editing the library row in place —
+the same avoid-the-trigger strategy as the scan-wizard restructure, targeting a
+second confirmed real-device scroll-bug trigger (a keyboard opening on a text
+input positioned near the bottom of the screen). Hide adds a small icon-only
+🙈/👁️ toggle to every library row (built-in or community, unlike Rename —
+hiding is a personal preference, not an edit) plus a required "Show hidden
+puzzles" checkbox to reveal/unhide again, backed by a new
+`users/{uid}/hiddenLibraryPuzzles/{puzzleId}` collection synced across paired
+devices, same pattern as solved/in-progress tracking; its `firestore.rules`
+entry is deployed and live. **This is the second confirmed instance of the
+same fix strategy working** — avoid the trigger, not the underlying WebKit
+mechanism. See `TODO.md`'s Completed Tasks for the full writeup.
 
 Everything else is done: the scan-a-puzzle size-first restructure and the three
 related library/draw-puzzle cleanup items (name drawn puzzles at save time, drop
@@ -363,14 +409,13 @@ bug's round-5 tooling extension (auto-logging the height-diverged state into
 `TODO.md`'s Completed Tasks section for the full writeup of each.
 
 The scroll bug's original scan-wizard trigger remains genuinely fixed and
-confirmed — the underlying `visualViewport` mechanism was never actually
-fixed, but that specific trigger is gone by design, confirmed on the real
-device. The library-rename trigger above is now also routed around by design
-(preview-verified; not yet real-device-confirmed). **The bug as a general
-class is still NOT fully closed** — a text input positioned near the bottom
-of the screen anywhere else in the app remains a theoretical risk (see
+confirmed, and the library-rename trigger is now ALSO confirmed on the real
+device — the underlying `visualViewport` mechanism was never actually fixed,
+but both specific triggers are gone by design, both confirmed. **The bug as a
+general class is still NOT fully closed** — a text input positioned near the
+bottom of the screen anywhere else in the app remains a theoretical risk (see
 `TODO.md`'s general-principle note on this) — but there is no further active
-work on it right now. The section below is kept purely for historical
+work on it right now, and no current objective is queued. The section below is kept purely for historical
 reference on the underlying mechanism itself:
 - The double-tap-zoom and fast-drag-cell-skipping fixes are CONFIRMED on the
   real device.

@@ -101,10 +101,9 @@ Completed Tasks
   `users/{uid}/solvedLibraryPuzzles/{puzzleId}` — keyed uniformly off a puzzle's own
   id, so cross-device pairing tracks it automatically. Solved/Unsolved and
   grid-size filters, and a light "Built-in"/"Community" badge. Firestore rules
-  deployed and confirmed live via a real solve-and-reopen round trip. **Not built
-  this round (deliberately deferred as a nice-to-have): the optional GLOBAL
-  fastest-time-across-all-users per puzzle** — would need a callable Cloud Function
-  to avoid a gameable client-writable public field.
+  deployed and confirmed live via a real solve-and-reopen round trip. **The
+  optional GLOBAL fastest-time-across-all-users per puzzle was deliberately
+  NOT built this round** (see Current Objective — it's now being picked up).
 * **Save-to-library feature — done, deployed, confirmed working (saving, browsing,
   and renaming all work end-to-end).** `src/puzzleLibrary.js`
   (savePuzzleToLibrary/fetchLibraryPuzzles/loadLibraryPuzzle/renamePuzzleInLibrary)
@@ -880,83 +879,183 @@ Completed Tasks
     solving it showed the completion modal with the real typed name "Verification
     Square" (not a placeholder) — proving the `p.name` patch works. No console errors.
     All 822 tests pass. Not yet real-device-confirmed.
-
-* **Rename-popup scroll-bug fix + hide-a-puzzle feature — shipped together this
-  round per the standing deploy-batching note, both preview-verified.**
-  1. **Rename now opens a top-pinned popup (`#rename-modal`, `showRenameModal`
-     in `app.js`) instead of editing the row in place**, avoiding the second
-     confirmed real-device scroll-bug trigger (a keyboard opening on a text
-     input positioned near the bottom of the screen — the library's OLD
-     inline rename, specifically on a row near the bottom of the list). Same
-     genuinely-different-mechanism strategy as the scan-wizard size-first
-     restructure: avoid the trigger, don't touch the underlying WebKit
-     `visualViewport` issue. `.modal-overlay--top` (styles.css) is a real
-     modifier on the shared `.modal-overlay` — `align-items: flex-start` +
-     a fixed top padding — used only by this modal; every other modal stays
-     vertically centered. The promise-based `showRenameModal`/`resolveRename`
-     pair mirrors the existing `showConfirm` pattern exactly (resolves the
-     trimmed new title, or `null` on Cancel); the actual Firestore write
-     stays in `renderLibraryList`'s click handler, same separation of
-     concerns as `showConfirm` not knowing what it's guarding. Deleted the
-     old inline `<input>`/Save/Cancel row-swap code entirely — no longer
-     reachable.
-  2. **New "Hide a puzzle" feature**: a small icon-only Hide/Unhide toggle
-     (🙈/👁️, `btn btn--icon` + `src/tooltip.js`, same pattern as
-     Rename/Undo/Stats/Eraser — explicitly NOT a text button, the old Rename
-     button's own mistake) on every library row, built-in or community alike
-     — unlike Rename, hiding isn't gated to the row's creator, since it's a
-     personal display preference, not an edit to the puzzle. Hiding excludes
-     that row from the player's own browse list; a new "Show hidden puzzles"
-     checkbox in `.library-filters` (unchecked by default) is the required
-     way back — checking it reveals hidden rows with a "🙈 Hidden" badge +
-     dimmed `.library-row--hidden` styling and swaps their button to Unhide,
-     rather than just removing the exclusion filter silently. Confirmed
-     per-account, synced across paired devices: new
-     `users/{uid}/hiddenLibraryPuzzles/{puzzleId}` collection
-     (`fetchHiddenPuzzles`/`hidePuzzleInLibrary`/`unhidePuzzleInLibrary` in
-     `src/puzzleLibrary.js`), same uniform id-keying and owning-uid-only
-     Firestore rule as `solvedLibraryPuzzles`/`inProgressPuzzles` — added to
-     `firestore.rules` (and its header comment) accordingly.
-  - **Verified in browser preview against the real Firebase project**:
-    library loads and renders correctly with the new checkbox and per-row
-    Hide button; clicking a row's Rename pencil (tested on a row near the
-    BOTTOM of the scrolled list, deliberately) opens the popup pinned near
-    the TOP of the screen, pre-filled, Cancel reverts with no change; the
-    Show hidden puzzles checkbox toggles cleanly with no console errors. All
-    822 tests pass; `node --check` clean on every edited file.
-  - **Firestore rules deployed and the full hide/unhide write verified.**
-    First preview attempt correctly surfaced "Couldn't hide — Missing or
-    insufficient permissions" and left the row untouched (right
-    failure-handling behavior, before `firestore.rules`' new
-    `hiddenLibraryPuzzles` rule was live). `firebase deploy --only
-    firestore:rules` was blocked once by this environment's own auto-mode
-    permission classifier as a production security-rules change; re-run
-    after the project owner's explicit go-ahead and succeeded. Re-verified
-    in preview against the live project afterward: hiding "Puzzle 3"
-    removed it from the default view with no error; checking "Show hidden
-    puzzles" revealed it again, dimmed, with a "🙈 Hidden" badge and its
-    button swapped to 👁️ Unhide; clicking Unhide restored it to a normal
-    row. No console errors at any step.
-  - Not yet real-device-confirmed (same standing caveat as every other item
-    in this arc).
-
-* **The scan wizard's own size-first restructure remains genuinely fixed and
-  confirmed on the real device** — unaffected by the rename-popup change
-  above, this was a different specific interaction and its own fix still
-  holds. See its own Completed Tasks entry above for the full writeup.
+* **The rename-popup scroll-bug fix and the new hide-a-puzzle feature — DONE,
+  deployed, and now CONFIRMED on the real device by the project owner, shipped
+  together this round per the standing deploy-batching note.** Rename now
+  opens a top-pinned `#rename-modal` popup (`showRenameModal` in `app.js`,
+  mirroring the existing `showConfirm` pattern) instead of editing the library
+  row in place — the same avoid-the-trigger strategy as the scan-wizard
+  restructure, targeting the second confirmed real-device scroll-bug trigger
+  (a keyboard opening on a text input positioned near the bottom of the
+  screen). Hide adds a small icon-only 🙈/👁️ toggle to every library row
+  (built-in or community, unlike Rename — hiding is a personal preference,
+  not an edit) plus a required "Show hidden puzzles" checkbox to reveal/unhide
+  again, backed by a new `users/{uid}/hiddenLibraryPuzzles/{puzzleId}`
+  collection synced across paired devices, same pattern as solved/in-progress
+  tracking; its `firestore.rules` entry is deployed and live. Verified the
+  full hide→show hidden→unhide round trip against the live Firebase project
+  with no console errors. **This is the second confirmed instance of the
+  same fix strategy working** — avoid the trigger (a text input near the
+  bottom of the screen) rather than fix the underlying WebKit mechanism.
 
 Current Objective (Focus Area)
 
-* **None queued right now.** The rename-popup fix and the hide-a-puzzle
-  feature (including its `firestore.rules` deploy) are fully done and
-  preview-verified end-to-end against the live project — see the Completed
-  Tasks entry above. See "Next Steps" below for what's deliberately deferred
-  (item 8, item 9's remaining scope).
+* **New real bug: a drag on the puzzle board occasionally causes the whole
+  page to scroll — a different, more standard issue from the visualViewport
+  saga elsewhere in this doc, NOT a continuation of it.** Direct report:
+  "occasionally a drag will cause the screen to scroll." This is the classic
+  mobile-web problem of a touch-drag gesture not being fully claimed by the
+  app's own JS, so the browser occasionally interprets it as its own native
+  scroll/pan instead of handing every event to the board's drag-fill logic.
+  The "occasionally" (not every drag) is a hint that whatever touch handling
+  exists on the board today isn't consistently/early-enough capturing the
+  gesture from the very first touch event.
+  - **Standard, well-understood fix — likely a small CSS change, not a deep
+    investigation**: set `touch-action: none` on the puzzle board/grid
+    container specifically (`board-root` or equivalent), so the browser never
+    attempts its own scroll/pan/zoom gesture handling within that element at
+    all — every touch interaction there becomes entirely the app's own to
+    interpret. This is different from the `touch-action: manipulation`
+    already applied to toolbar buttons (which still allows scrolling/panning,
+    just disables double-tap-zoom) — the board needs the stricter `none`
+    value since ANY native gesture handling within it is unwanted, not just
+    double-tap-zoom specifically.
+  - **Scope carefully**: this should apply to the board/grid area only, not
+    the whole page — don't let this regress normal page scrolling elsewhere
+    (the puzzle library list, help text, etc. all still need to scroll
+    normally). If `touch-action: none` alone doesn't fully resolve it,
+    explicit `event.preventDefault()` within the board's own
+    `pointerdown`/`pointermove` handlers is the fallback, but try the CSS
+    approach first since it's simpler and more reliable than JS-based
+    prevention.
+  - **Explicitly not the same bug as the visualViewport/keyboard scroll saga**
+    documented later in this file — that was about `visualViewport.height`/
+    `offsetTop` staying stuck after a keyboard interaction; this is about
+    native touch-scroll gesture handling during board drags, unrelated to any
+    keyboard or `visualViewport` state. Don't merge these into one
+    investigation or assume the same fix applies.
+
+* **New: finally picking up the deferred GLOBAL fastest-time-across-all-users
+  stat per puzzle, shown alongside the player's own personal best.** Deferred
+  since the original library-consolidation round as a nice-to-have — now
+  wanted. Real design constraint from back then, still correct and still
+  applies: **this cannot be a plain client-writable Firestore field** — a
+  client directly writing "I got the fastest time!" to a public document is
+  trivially fakeable (nothing stops a malicious client from writing an
+  instant/impossible time). Needs a callable Cloud Function (same pattern
+  already established for `createPairingCode`/`redeemPairingCode`) that
+  receives a completion server-side, validates it, and only updates the
+  puzzle's global `fastestTimeMs` if the new time genuinely beats the stored
+  one — the comparison and the write both need to happen server-side, not be
+  trusted from the client.
+  - **Where it's shown**: alongside the existing personal `timesSolved`/
+    `bestTimeMs` display in the library row (once the puzzle is solved and
+    its real name/stats are revealed) — Code's call on exact layout/wording,
+    but it should read clearly as a separate, global stat, not be confused
+    with the player's own personal best.
+  - **Schema addition**: a new field (e.g. `fastestTimeMs`, `fastestUid`
+    optional if attribution is wanted later) directly on the `puzzles/{puzzleId}`
+    document, updated only via the new callable — not writable by normal
+    client Firestore rules at all.
+  - **Scope question worth a quick decision, not a blocker**: does this apply
+    retroactively to puzzles already solved by people before this ships (no
+    global time recorded for those until someone solves it again after the
+    Cloud Function exists), or is that an acceptable gap? Reasonable default:
+    accept the gap — the global stat simply starts accumulating from
+    whenever this ships, no backfill needed.
+
+* **New real bug, found via real play: starting a drag on an already-FILLED
+  cell (intending to continue filling further blank cells in the same
+  stroke) doesn't work — the drag effectively does nothing.** Direct report:
+  "I want to start dragging with a fill-across something already filled in,
+  but it doesn't seem to register."
+  - **Likely root cause, worth confirming directly rather than assuming**: the
+    first cell of a drag (`pointerdown`, not `dragStep`) uses normal
+    click-toggle semantics — clicking an already-FILLED cell in Fill mode
+    toggles it to UNKNOWN (the existing "click a filled cell to clear it"
+    behavior). That toggle decision (`targetStateFor`) very likely then
+    determines the WHOLE stroke's target state for every subsequent
+    `dragStep` cell too. Since `dragStep` cells only ever get painted when
+    `current === UNKNOWN` (the existing "drag only paints blank cells" rule,
+    from the earlier fast-drag-overwrite fix), and the stroke's target got
+    set to UNKNOWN by that first toggle, every later cell in the drag is
+    already UNKNOWN and gets "painted" to UNKNOWN — a no-op. **This would
+    exactly match the reported symptom**: the starting cell silently clears
+    (probably unnoticed/unwanted), and nothing else in the drag visibly does
+    anything at all.
+  - **Suggested fix, now that a dedicated Eraser mode exists**: in Fill mode
+    (and Mark-empty mode, symmetrically), starting or passing over a cell
+    that's already in the mode's own target state (already FILLED in Fill
+    mode, already EMPTY in Mark-empty mode) should be a harmless pass-through
+    — leave it as-is and continue the stroke with the mode's normal target
+    state for the remaining UNKNOWN cells — rather than treating it as a
+    toggle-to-clear that redefines the whole stroke's intent. Clearing
+    already-marked cells has its own dedicated, unambiguous tool now
+    (Eraser mode), so Fill/Mark-empty's drag behavior no longer needs to
+    double as a clearing gesture too. **Single click/tap on an already-marked
+    cell (not a drag) can plausibly keep its existing toggle-to-clear
+    behavior** if that's still wanted for quick single-cell corrections —
+    this fix is specifically about drag strokes, not necessarily every click.
+    Confirm with the project owner whether single-click toggle-to-clear
+    should also change, or stay as-is now that Eraser exists.
+
+* **New feature: a sound effect for when an individual clue number becomes
+  anchored (grays out), distinct from the existing "lock" sound.** Direct
+  ask: "I just kept feeling like there should be a noise when a number was
+  anchored in on one side." **Confirmed this doesn't currently exist** — the
+  sound set is `lock`/`unlock` (a whole LINE becoming satisfied/reopening),
+  `error` (a mistake), `batchCompleteChime` (a hint/auto-X batch),
+  `completeFanfare` (puzzle solved) — nothing tied to a single clue number's
+  own anchored/grayed-out state (`anchoredClueNumbers`), which is a
+  per-number, not per-line, event.
+  - **Scope, clarified by the project owner: Code builds the plumbing only —
+    the project owner is supplying the actual audio file themselves,
+    separately.** Don't pick, generate, or source a sound file — add a new
+    named sound slot (e.g. `anchor`, matching the existing
+    `lock`/`unlock`/`error`/`batchCompleteChime`/`completeFanfare` naming
+    convention in `assets/sounds/` and wherever the sound-key list lives in
+    `src/sounds.js`), wire it to actually play at the right trigger moment
+    (see the implementation nuance below), and load it from the same-shaped
+    path a real audio file will later be dropped into. If no file exists yet
+    at that path, that's expected — Code shouldn't block on it or invent a
+    placeholder sound, just leave the slot correctly wired and silent/missing
+    until the real file shows up.
+  - **Sound character, for reference only (not Code's job to act on) — the
+    project owner described what they'll be sourcing**: "a pleasant chime,
+    like a ping or something," light and short, quieter/shorter than the
+    existing `lock` sound, since this can fire far more often than a line
+    locking.
+  - **Real implementation nuance worth flagging**: `anchoredClueNumbers`/
+    `applyAnchoredClasses` is currently a pure rendering concern, recomputed
+    on every board render — to play a sound only at the actual MOMENT a
+    number newly becomes anchored (not replay it on every subsequent render
+    while it stays anchored), this needs a before/after diff of the anchored-
+    number set per render, similar in spirit to however the existing `lock`
+    sound already avoids replaying itself continuously once a line is
+    satisfied.
+  - **Design detail worth Code's judgment**: a single move can anchor more
+    than one clue number at once (e.g. one fill action satisfying multiple
+    constraints across a row and column simultaneously) — should each newly-
+    anchored number play its own sound (risking several overlapping tiny
+    sounds from one move), or should the whole render's worth of newly-
+    anchored numbers share a single sound regardless of count? Either is
+    reasonable; not a strong preference stated, just worth a deliberate
+    choice rather than an accident of implementation order.
+
+* **The rename-popup fix and the hide-a-puzzle feature (bundled together per
+  the deploy-batching note) are both done, deployed, and CONFIRMED on the
+  real device by the project owner.** See Completed Tasks above for the full
+  writeup of both.
+
+* **The scan wizard's own size-first restructure remains genuinely fixed and
+  confirmed on the real device** — unaffected by anything since, this was a
+  different specific interaction and its own fix still holds. See its
+  Completed Tasks entry for the full writeup.
 
 Everything below this point is the scroll bug's own historical/mechanism
 reference material — not active work, kept for context on why direct fixes to
 the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
-(the same strategy now being applied to the rename popup above):
+(the same strategy now confirmed working twice — scan wizard, and now rename):
 
 * **Round 4's scroll fix (`healStuckViewportHeight`) has now been tested on the real
   device, including the manual "Force heal viewport height now" button — and the
@@ -1170,9 +1269,8 @@ Technical Notes / Blockers
 * No CI is configured — run `npm test` (or `node test/run.js`) locally before pushing.
 * Node.js 20→22 runtime bump — done and deployed.
 * Firestore security rules: in active use for `users/{uid}/stats/*`, `pairingCodes/*`,
-  `puzzles/{puzzleId}`, `users/{uid}/solvedLibraryPuzzles/{puzzleId}`,
-  `users/{uid}/inProgressPuzzles/{puzzleId}`, and (deployed this round, see Completed
-  Tasks) `users/{uid}/hiddenLibraryPuzzles/{puzzleId}`.
+  `puzzles/{puzzleId}`, `users/{uid}/solvedLibraryPuzzles/{puzzleId}`, and
+  `users/{uid}/inProgressPuzzles/{puzzleId}`.
 * Hint phrasing has an invisible-by-design fallback — "a hint appeared" is not proof
   the LLM call actually succeeded; check console/Cloud Function logs after any Cloud
   Function change.
@@ -1182,18 +1280,16 @@ Technical Notes / Blockers
 * **Item 10's grid/line detection, OCR, and fill-state detection were built and
   repeatedly fixed against real screenshots, not synthetic mockups alone** — prefer
   testing against a real image file over guessing at plausible synthetic pixel values.
-* **iOS scroll/touch bugs in this app have now failed real-device verification
-  across FIVE rounds** (the original scan-wizard-specific bug took four rounds
-  itself; this app-wide regression's rounds 1, 2, and now 3 have all failed
-  real-device testing despite passing every local/preview check — round 3's
-  periodic poll made literally no observable difference, which is new and
-  significant: it points at the corrective action itself possibly not working on
-  this device, not just a trigger-coverage gap). **Standing next diagnostic step,
-  waiting on the project owner (not this round's active work — see Current
-  Objective)**: a manual "force correct now" button already exists in
-  `?debug=scroll` from the previous round — the project owner still needs to run
-  it (reproduce the stuck-pan state, tap it, observe whether `offsetTop` actually
-  changes) before Code writes any more trigger/polling logic for the main bug.
+* **iOS scroll/touch bugs in this app went through six failed direct-fix rounds
+  before the winning strategy turned out to be avoiding the trigger entirely,
+  not fixing the underlying WebKit `visualViewport` mechanism.** Confirmed
+  working twice now on the real device: the scan wizard's size-first
+  restructure, and the library rename popup — both avoid a text input opening
+  a keyboard near the bottom of the screen, which is the real common trigger.
+  The underlying mechanism itself was never fixed and remains a theoretical
+  risk anywhere else a text input could render near the bottom of the screen
+  — see the historical section in Current Objective for the full failed-round
+  history if this needs revisiting.
 * **The toolbar-alignment bug took two misdiagnosed rounds (2-3, chasing size)
   before the project owner's direct correction led to the real cause
   (misalignment via a leaked `margin-top`) in round 4** — a reminder that a
