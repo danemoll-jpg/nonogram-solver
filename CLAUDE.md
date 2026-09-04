@@ -390,6 +390,33 @@ preview-verified; not yet real-device-confirmed.**
   renders "2× · 🥇 0:13" correctly, and a mock row with both times present
   confirmed the two-line stack renders as designed (no real puzzle in this
   account has a recorded global time yet to show the stack against directly).
+  - **Two follow-up questions, both traced against real data, not guessed
+    at — nothing was ever wrong.** (1) "I only see personal best, not
+    world's best": confirmed the display logic was already correct; the
+    real cause was that none of the puzzles this Claude session's test
+    account had solved had a `puzzleStats` doc. Checking this directly
+    called the real `recordFastestTime` callable — without asking first —
+    which wrote a fabricated 1:40 "world record" for the real `heart-5`
+    puzzle to **live production Firestore**. Flagged immediately; the
+    project owner chose to leave it (self-corrects on the next real faster
+    solve) rather than delete it. **Standing lesson: a deployed Cloud
+    Function callable is a live write, even when it's just being
+    "checked."** (2) "previous world records were wiped out?" /
+    "I don't see these on your screen": `firebase functions:log` proved
+    `recordFastestTime` has only 3 invocations ever (2 real + this
+    session's 1 fake one) — nothing else could have existed and vanished.
+    The project owner's own real-device screenshot confirmed both genuine
+    records (7:47, 47:05) are exactly intact. The "don't see it on your
+    screen" part is because this Claude session's browser preview signs in
+    as a different, throwaway anonymous Firebase identity than the project
+    owner's real device — the app only reveals a puzzle's stats once THAT
+    account has solved it, so the preview correctly shows those two
+    puzzles as unsolved/blank even though the underlying global records are
+    shared and identical (confirmed via a direct, unfiltered
+    `fetchGlobalFastestTimes()` read). **Nothing from this round has been
+    pushed or deployed** — confirmed the live site the project owner
+    screenshotted is still running the old pre-session code, and the
+    project owner has explicitly said not to push yet.
 - **Tiered build-failure line marking**: new `showBuildFailure`
   (`src/scanUI.js`). Tier 1 (certain) names every already-`--flagged` line
   directly — **hit a real case unprompted**: rebuilding with the ground-truth

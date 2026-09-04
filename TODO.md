@@ -1115,6 +1115,30 @@ Completed Tasks
        is a live production write — treat calling it directly as an
        outward-facing action requiring confirmation first, not a safe
        read-only diagnostic.**
+     - **Second follow-up ("previous world records were wiped out?" / "I
+       don't see these on your screen")**: also traced directly, not
+       guessed at — nothing was ever wiped. `firebase functions:log` for
+       `recordFastestTime` shows exactly 3 invocations, ever, since it was
+       deployed the day before (two real ones, matching the two genuine
+       `puzzleStats` docs exactly — `Xswb7IwlB90DW1nKj0jZ` = 7:47,
+       `Uby3Z1M1L9bmLT63Fkj3` = 47:05 — plus this Claude session's one fake
+       `heart-5` call); there's no delete path anywhere in the codebase that
+       touches `puzzleStats` either. The project owner's own real-device
+       screenshot of the LIVE site confirmed both genuine records are still
+       exactly intact and unchanged. The "I don't see these on your screen"
+       confusion was separately explained: this Claude session's own browser
+       preview signs in as a different, throwaway anonymous Firebase
+       identity than the project owner's real device — since the app only
+       reveals a puzzle's stats once THAT SPECIFIC account has solved it,
+       the preview's test account (which hasn't solved those two specific
+       puzzles) correctly shows them as blank/unsolved placeholders, even
+       though the underlying `puzzleStats` records are global/shared and
+       were confirmed identical via a direct, unfiltered
+       `fetchGlobalFastestTimes()` call from both sessions. **Nothing from
+       this round has been pushed or deployed** — the live site the project
+       owner screenshotted is still running the pre-this-session code (the
+       old single-line "· best 7:47 · 🌍 7:47" text format, confirming this
+       directly), and the project owner has explicitly said not to push yet.
   4. **Tiered build-failure line marking — built; tier 1 preview-verified against
      a REAL build failure on the ground-truth image, tier 2's solver-side data
      unit-tested, its UI branch verified by inspection only.** New
