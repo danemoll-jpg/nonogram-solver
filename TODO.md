@@ -999,8 +999,38 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **None queued right now.** The four items from last round (board-drag scroll bug, global
-  fastest-time stat, drag-on-already-filled-cell bug, anchored-number sound) are all fully
+* **New: flag OCR-read clue numbers that are structurally impossible given the
+  puzzle's own line length, during the scan wizard's existing correction step.**
+  Direct report from a real 30×30 scan: a line's clue showed a value like "1011"
+  — a single run can never be longer than the line itself (max 30 in this case),
+  so any parsed number exceeding the line's dimension is a near-certain sign OCR
+  merged two separate clue numbers together without catching the comma/space
+  between them (almost certainly "10, 11" read as "1011" here) — not a
+  legitimate value that happens to be large.
+  - **This reuses an existing pattern rather than introducing a new one**: the
+    scan correction step already has an amber "suspect" flag for the repeated-
+    digit consistency check (`findRepeatedDigitOutlier`) — extend that same
+    flagging mechanism to also catch "this number is larger than the line
+    length, essentially impossible as a single run" during review, rather than
+    letting an obviously-wrong merged value sit looking exactly as trustworthy
+    as every correctly-read number next to it.
+  - **Deliberately flag, don't auto-split.** Automatically guessing where to
+    break an anomalous merged number back into two (or more) real numbers is
+    genuinely ambiguous in general — "123" could plausibly be "1,23" or "12,3,"
+    and a wrong automatic guess would introduce a new, harder-to-notice error
+    in place of an obvious one. Flagging it clearly for the player to manually
+    fix (which they're already doing for every line in this step regardless)
+    is the safer fix.
+  - **Worth considering as a natural extension, not required for this to be
+    useful on its own**: beyond a single number exceeding the line length, the
+    SUM of all of a line's clue numbers plus the minimum required gaps between
+    them can also exceed the line length even when no single number does —
+    that combination is equally impossible and could be flagged the same way.
+    The single-number check alone already catches the reported case; the sum
+    check is a reasonable next step if useful, not a blocker.
+
+* **None queued right now, otherwise.** The four items from last round (board-drag scroll bug,
+  global fastest-time stat, drag-on-already-filled-cell bug, anchored-number sound) are all fully
   done and CONFIRMED on the real device, including the global fastest-time stat's Cloud
   Function + Firestore rule (`recordFastestTime(us-central1)` created; `puzzleStats` rule
   released). **Timeline clarified by the project owner**: the anchored-number sound's real
