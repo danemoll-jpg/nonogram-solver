@@ -1034,7 +1034,103 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **None queued right now.** The four items from last round (board-drag scroll bug,
+* **New: a real correctness bug — a just-scanned puzzle had its fills and X's
+  fully reversed, and the project owner has a sharp, checkable signature for
+  detecting exactly this failure mode automatically.** Direct report: "it
+  reversed the fills and the xs... literally every number is red, so it is
+  obviously backwards." This is `cellStateDetect.js`'s fill-state
+  classification systematically inverted across the whole grid, not a handful
+  of scattered per-cell misreads.
+  - **The proposed detection signature is sound and worth building, not just
+    noting**: a handful of scattered OCR/fill-read errors will only fail a FEW
+    lines' consistency checks; a puzzle where essentially ALL rows and columns
+    fail their own local check (`isLineConsistent`, the same one already
+    driving the existing red flag) at once is an extremely strong, specific
+    signal of one systematic error affecting the whole grid uniformly (a
+    fill/empty inversion being the obvious candidate), not independent random
+    noise. This is virtually never going to happen by chance on a real image.
+  - **Unlike the oversized-clue-merge case, this one has an unambiguous fix,
+    so a real one-click auto-fix is worth offering, not just a flag**: there's
+    only one way to "un-invert" a fill/empty swap (flip every detected cell's
+    state), no ambiguity about where/how to correct it the way there was for
+    guessing where a merged number should split. Surface this at the
+    fill-state review step (after `cellStateDetect.js`'s output is shown,
+    before the player finalizes): if the vast majority of lines fail their
+    local consistency check simultaneously, show a clear "this looks
+    inverted — flip fill/X?" prompt with a one-click fix, rather than making
+    the player notice and manually re-mark every cell themselves.
+  - **Exact threshold is Code's call, not necessarily literally 100%** — a
+    puzzle could have both a genuine inversion AND one unrelated ordinary OCR
+    misread layered on top, so requiring every single line to be red might be
+    too fragile; "the vast majority" (all but one or two lines) is a more
+    robust practical trigger than an exact 100% requirement.
+
+* **New: scanning should offer the same immediate naming-at-save prompt that
+  "draw a puzzle" already has, via a pop-up.** Direct ask: "give the chance to
+  name right away (with a pop-up box)." "Draw a puzzle" already prompts for a
+  required title at save/publish time (confirmed working, empty names
+  rejected) — the scan-auto-publish flow currently publishes without asking.
+  Apply the same required-title-prompt pattern to scan's "Play it"/publish
+  action too, reusing the same popup mechanism already built (the rename
+  modal, or the draw flow's own naming prompt) rather than inventing a new UI
+  for it.
+
+* **New: widen the library screen, and replace the text "best" time display
+  with a compact gold/copper medal or ribbon icon — the current text is
+  covering up the puzzle name again.** Direct report: "the name is being
+  covered up again" — the same recurring class of problem as the original
+  Rename-button-hiding-the-name issue, now happening with the personal-best
+  time display instead. Two changes:
+  1. **Widen the library modal/screen itself** — Code's call on exact sizing,
+     but meaningfully more horizontal room than today, especially given how
+     many icon-only controls (Rename, Hide, Play/Resume) and stats (personal
+     best, global fastest) now share each row.
+  2. **Replace the "best: X" text label with a compact medal/ribbon icon**:
+     **gold if the player's personal best time matches the global
+     fastest-time record for that puzzle, copper/bronze otherwise.** The
+     actual time value shouldn't disappear entirely — show it via the same
+     tap/hover tooltip mechanism already built for other icon-only controls
+     (`src/tooltip.js`), rather than spelling it out in the row itself.
+     **Edge case worth a default, not left ambiguous**: if no global
+     fastest-time has been recorded yet for a puzzle (nobody's completed it
+     since that feature shipped, or it predates it), reasonable default is
+     gold — the player's own time is, by definition, the only/first known
+     time, so treating it as the de facto record until a real comparison
+     exists seems more generous and sensible than defaulting to copper.
+
+* **When "Build puzzle" fails (the derived clues can't be solved), mark the
+  likely problem lines instead of just a generic failure message the player has
+  to hunt through every cell to diagnose.** Direct ask, following naturally from
+  the oversized-clue-number work just shipped: "I don't want to have to search
+  each cell." Genuinely a different, harder class of problem than that one,
+  though — worth scoping as two tiers, not one:
+  1. **Easy, certain tier — do this first**: some lines fail to solve entirely on
+     their own, independent of any other line (the same per-line check already
+     driving the existing red `--flagged` border during correction,
+     `isLineConsistent`). These lines are DEFINITELY wrong regardless of what
+     else is going on. When a build fails, check whether any line already fails
+     this local check and — instead of leaving the player to notice an existing
+     red flag on their own — surface those specific lines directly (e.g. scroll
+     to the first one, or list all of them) as the primary, certain suspects.
+  2. **Harder, best-effort tier**: a puzzle can also fail to solve even when
+     EVERY individual line passes its own local check — the lines are only
+     inconsistent with each other (e.g. a row's run count doesn't actually fit
+     what the intersecting columns require). There's no way to name a single
+     "guilty" line with certainty here — mathematically, several different
+     lines could each be "the" wrong one, and fixing any sufficiently plausible
+     one might resolve it. A reasonable best-effort heuristic: run the solver/
+     contradiction-search using all the clues together and surface whichever
+     lines were involved at the point it hit a genuine dead end, as likely
+     candidates — not certain, but a real lead instead of nothing. **This tier
+     is optional and more involved than tier 1** — worth doing tier 1 first as
+     a strong, quick win regardless of whether tier 2 gets picked up in the
+     same round.
+  - **Where this surfaces**: presumably the same correction screen the amber/red
+    flags already live on — Code's call on exact UI (an inline message pointing
+    at the flagged rows, auto-scrolling to the first one, a summary list) as
+    long as the player isn't left to manually scan every line themselves.
+
+* **None queued right now, otherwise.** The four items from last round (board-drag scroll bug,
   global fastest-time stat, drag-on-already-filled-cell bug, anchored-number sound) are all fully
   done and CONFIRMED on the real device, including the global fastest-time stat's Cloud
   Function + Firestore rule (`recordFastestTime(us-central1)` created; `puzzleStats` rule

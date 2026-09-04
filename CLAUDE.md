@@ -353,6 +353,41 @@ for the full writeup, including a natural (not required) extension: the sum of a
 line's clue numbers plus minimum gaps can also exceed the line length even when no
 single number does.
 
+**Current objective has four items**:
+
+1. **New real bug + a sound auto-detection idea: a scanned puzzle had fills/X's
+   fully reversed.** The project owner's proposed detection signature is sound:
+   a puzzle where essentially ALL lines fail their own local consistency check
+   simultaneously (not just a few) is a near-certain sign of one systematic
+   error (fill/empty inversion), not scattered random noise. Unlike the
+   oversized-clue case, this has an unambiguous fix (just flip every cell), so
+   a real one-click "this looks inverted — flip fill/X?" prompt is worth
+   building, not just a flag. Exact threshold (all lines vs. "vast majority")
+   is Code's call.
+2. **New: scanning should get the same immediate naming-at-save popup that
+   "draw a puzzle" already has** — currently scan auto-publishes without
+   asking. Reuse the same required-title-prompt mechanism already built for
+   drawing, applied to scan's publish action too.
+3. **New: widen the library screen, and replace the text "best" time with a
+   compact gold/copper medal icon — the puzzle name is getting covered up
+   again**, same recurring problem class as the original Rename-button issue.
+   Gold if the player's personal best matches the global record, copper
+   otherwise (default to gold if no global record exists yet for that
+   puzzle). Show the actual time via the existing tooltip mechanism rather
+   than as row text.
+4. **When "Build puzzle" fails, mark the likely problem lines instead of a
+   generic failure message.** Scoped as two tiers: (1) easy/
+   certain — surface any line that fails its own local consistency check
+   (`isLineConsistent`, the same one already driving the existing red flag) directly,
+   rather than leaving the player to notice it themselves; (2) harder/best-effort —
+   when every line passes locally but the whole set is still inconsistent, no single
+   line can be named with certainty, but running the solver/contradiction-search and
+   surfacing whichever lines were involved at the dead end is a reasonable heuristic
+   lead. Tier 1 is the strong, quick win — worth doing regardless of whether tier 2
+   gets picked up the same round.
+
+See `TODO.md` for full detail on all four.
+
 **The four items from last round's Current Objective are all done and CONFIRMED on
 the real device (items 2 and 4 specifically confirmed by the project owner; items 1
 and 3 confirmed via no issues experienced during real play) — no current objective
