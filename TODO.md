@@ -939,15 +939,15 @@ Completed Tasks
      `renderLibraryList` (a `· 🌍 0:32`-style display alongside the player's own personal
      best, shown only once the puzzle is solved/revealed — matching where the personal
      stat already shows).
-     **Deploy status: code is written and preview-verified against the LIVE Firebase
-     project's fail-soft path (the library loaded normally with no `🌍` values and no
-     thrown errors, exactly as expected since neither the `recordFastestTime` function nor
-     the `puzzleStats` rule are deployed yet — every fetch/submit call already treats that
-     as a normal "not deployed yet" case, the same contract every other Firestore call in
-     this module uses) — but `firebase deploy --only functions:recordFastestTime,
-     firestore:rules` itself has NOT been run.** Per this project's own established
-     pattern (see the hide-a-puzzle entry above), a live production Cloud Functions +
-     security-rules deploy needs the project owner's explicit go-ahead before Code runs it.
+     **Deployed and live**, with the project owner's explicit go-ahead: `firebase deploy
+     --only firestore:rules` and `firebase deploy --only functions:recordFastestTime`
+     both succeeded (`recordFastestTime(us-central1)` created; `puzzleStats` rule
+     released to `cloud.firestore`). Before that deploy, the code was already
+     preview-verified against the live Firebase project's fail-soft path (the library
+     loaded normally with no `🌍` values and no thrown errors, exactly as expected while
+     the function/rule didn't exist yet) — the actual end-to-end "does a real completion
+     write a real global time and does another player's library show it" round trip
+     hasn't been exercised yet, just the plumbing and the fail-soft path.
   3. **Drag-on-already-filled-cell bug, fixed in `app.js`.** Confirmed root cause exactly
      as suspected: `pointerdown` used `targetStateFor`'s click-toggle result (clear an
      already-marked cell) to set the WHOLE drag's `paintState`, so starting a Fill-mode
@@ -994,17 +994,14 @@ Completed Tasks
 Current Objective (Focus Area)
 
 * **None queued right now.** The four items from last round (board-drag scroll bug, global
-  fastest-time stat, drag-on-already-filled-cell bug, anchored-number sound plumbing) are
-  all done and preview-verified — see the Completed Tasks entry above for the full writeup
-  of each.
-  - **One piece is deliberately still pending, not forgotten**: the global fastest-time
-    stat's Cloud Function (`recordFastestTime`) and its `puzzleStats` Firestore rule are
-    written but NOT deployed — needs `firebase deploy --only
-    functions:recordFastestTime,firestore:rules` and the project owner's explicit
-    go-ahead first, same standing pattern as every other production Firebase deploy in
-    this doc (see the hide-a-puzzle entry's own deploy note above). Until then, the
-    feature fails soft exactly as designed (no global time shown, no errors) rather than
-    doing nothing silently forever — it just needs that one deploy step to go live.
+  fastest-time stat, drag-on-already-filled-cell bug, anchored-number sound) are all fully
+  done — see the Completed Tasks entry above for the full writeup of each, including the
+  global fastest-time stat's Cloud Function + Firestore rule, now deployed and live with
+  the project owner's explicit go-ahead (`recordFastestTime(us-central1)` created;
+  `puzzleStats` rule released), and the anchored-number sound's real audio file, now
+  dropped in at `assets/sounds/anchor.mp3` by the project owner (see
+  `assets/sounds/README.md`) — no code changes needed, since `src/sounds.js` already
+  pointed there.
   - The rename-popup fix and the hide-a-puzzle feature (bundled together per the
     deploy-batching note) remain done, deployed, and confirmed on the real device — see
     Completed Tasks above. The scan wizard's own size-first restructure remains genuinely

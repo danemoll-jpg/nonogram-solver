@@ -291,8 +291,8 @@
   `recordFastestTime` Cloud Function) rather than a field on `puzzles/{puzzleId}` as
   first sketched — a built-in puzzle has no doc in that collection at all, so a
   stats-only doc there would corrupt `fetchLibraryPuzzles`' community-puzzle scan.
-  **Deploy of the function + its Firestore rule is still pending explicit go-ahead** —
-  everything else about it is done and fails soft in the meantime. (3) The drag bug's
+  **The function and its Firestore rule are now deployed and live**, with the project
+  owner's explicit go-ahead. (3) The drag bug's
   real cause: the drag's paint target was taken from the pressed cell's own
   click-toggle result, so starting a drag on an already-marked cell silently turned the
   whole stroke into a no-op clear; fixed with a `modeTargetState()` used only for the
@@ -300,9 +300,10 @@
   to `src/sounds.js` (no audio file — the project owner is sourcing it) with a
   before/after-diff trigger in `app.js`, mirroring how `lock` already detects its own
   transition; skipped on a move that also played `lock`, and one shared sound per move
-  regardless of how many numbers anchor at once. See `TODO.md`'s Completed Tasks for
-  the full writeup, including preview-verification steps for each. All 822 tests pass;
-  not yet real-device-confirmed.
+  regardless of how many numbers anchor at once — the project owner's own real
+  `anchor.mp3` is now dropped in at that path too, no code changes needed. See
+  `TODO.md`'s Completed Tasks for the full writeup, including preview-verification steps
+  for each. All 822 tests pass; not yet real-device-confirmed.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -353,11 +354,11 @@ no current objective is queued right now.**
    built-in puzzle (e.g. `heart-5`) never has a doc there, so a stats-only doc under a
    built-in's id would corrupt `fetchLibraryPuzzles`' "every doc here is a full community
    puzzle" scan. New `recordFastestTime` callable (`functions/index.js`) is the only
-   writer. **Code + rules are written and preview-verified against the live Firebase
-   project's fail-soft path, but the actual `firebase deploy --only
-   functions:recordFastestTime,firestore:rules` has NOT been run yet** — needs the
-   project owner's explicit go-ahead first, same standing pattern as every other
-   production Firebase deploy in this project.
+   writer. **Deployed and live**, with the project owner's explicit go-ahead —
+   `recordFastestTime(us-central1)` created and the `puzzleStats` Firestore rule
+   released. The real end-to-end round trip (a genuine completion writing a real global
+   time, another player's library showing it) hasn't been exercised yet — only the
+   plumbing and its fail-soft path were verified before this deploy.
 3. **Drag-on-already-filled-cell bug — fixed and preview-verified both directions**
    (Fill and Mark-empty). Root cause was exactly as suspected: the drag's `paintState`
    was taken from the pressed cell's own click-toggle result, so starting a drag on an
