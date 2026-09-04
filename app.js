@@ -1568,13 +1568,93 @@ function populateLibrarySizeFilter(entries) {
   if (sizes.includes(prev)) els.libraryFilterSize.value = prev;
 }
 
+// One shared "⋮" overflow-menu popover for every library row (Rename/Hide) — same one-shared-
+// floating-element idea as src/tooltip.js's one shared bubble, and for the same reason: a
+// per-row popover positioned relative to its own row (position:absolute) got clipped by
+// `.modal-card__body`'s own overflow-y:auto scroll region the moment a row's trigger was near
+// that region's bottom edge (confirmed directly in testing — a real, not hypothetical, bug).
+// `position:fixed` + appending to `document.body` + JS-computed coordinates escapes that
+// clipping entirely, exactly like the tooltip bubble already does. Reused/repositioned per
+// open rather than rebuilt per row, so nothing is left behind across renderLibraryList's
+// repeated innerHTML rebuilds.
+let rowMenuPopover = null;
+let rowMenuOpenTrigger = null; // the trigger button the popover is currently showing for, or null
+
+function ensureRowMenuPopover() {
+  if (rowMenuPopover) return rowMenuPopover;
+  rowMenuPopover = document.createElement('ul');
+  rowMenuPopover.className = 'help-menu__list library-row__menu-popover hidden';
+  rowMenuPopover.setAttribute('role', 'menu');
+  document.body.appendChild(rowMenuPopover);
+  return rowMenuPopover;
+}
+
+function closeRowMenu() {
+  if (!rowMenuOpenTrigger) return;
+  ensureRowMenuPopover().classList.add('hidden');
+  rowMenuOpenTrigger.setAttribute('aria-expanded', 'false');
+  rowMenuOpenTrigger = null;
+}
+
+// `items`: [{ label, onClick }]. Rebuilds the shared popover's contents fresh each open (cheap
+// — at most two items) rather than trying to reuse/diff DOM across different rows' item sets.
+function openRowMenu(trigger, items) {
+  const popover = ensureRowMenuPopover();
+  popover.innerHTML = '';
+  for (const { label, onClick } of items) {
+    const li = document.createElement('li');
+    li.setAttribute('role', 'none');
+    const btn = document.createElement('button');
+    btn.className = 'help-menu__item';
+    btn.type = 'button';
+    btn.setAttribute('role', 'menuitem');
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      closeRowMenu();
+      onClick();
+    });
+    li.appendChild(btn);
+    popover.appendChild(li);
+  }
+  popover.classList.remove('hidden');
+  trigger.setAttribute('aria-expanded', 'true');
+  rowMenuOpenTrigger = trigger;
+
+  // Right-aligned under the trigger, flipped ABOVE it instead when there isn't room below —
+  // the same viewport-clamping idea as src/tooltip.js's positionBubble, needed here for the
+  // same underlying reason even though position:fixed already solves the ancestor-scroll-
+  // clipping problem: a row near the bottom of the actual VIEWPORT (not just the modal's own
+  // scroll region) still has nowhere to open downward into.
+  const rect = trigger.getBoundingClientRect();
+  popover.style.position = 'fixed';
+  popover.style.right = 'auto'; // clear .help-menu__list's own `right: 0`, which would fight the explicit `left` below
+  const pw = popover.offsetWidth;
+  const ph = popover.offsetHeight;
+  const left = Math.min(Math.max(8, rect.right - pw), window.innerWidth - pw - 8);
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const top = spaceBelow >= ph + 8 ? rect.bottom + 4 : rect.top - ph - 4;
+  popover.style.left = `${left}px`;
+  popover.style.top = `${Math.max(8, top)}px`;
+}
+
+document.addEventListener('click', (e) => {
+  if (!rowMenuOpenTrigger) return;
+  if (e.target === rowMenuOpenTrigger || ensureRowMenuPopover().contains(e.target)) return;
+  closeRowMenu();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeRowMenu();
+});
+
 // Renders one row per (already filtered) library entry. `myUid` decides whether that row's
 // rename affordance shows at all — the Firestore rule is what actually enforces who can
 // rename (see firestore.rules), this just avoids showing a control that would fail for
 // everyone but the creator; built-in entries never get one. `hiddenPuzzles` (hide-a-puzzle
 // item — see TODO.md) is unrelated to ownership — every row, built-in or not, gets a Hide/
 // Unhide toggle regardless of who created it, since hiding is a personal display preference,
-// not an edit to the puzzle itself.
+// not an edit to the puzzle itself. Both now live behind one "⋮" overflow menu per row (see
+// closeOpenRowMenu above) rather than as separate icon buttons.
 function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, hiddenPuzzles, myUid, globalFastestTimes) {
   els.libraryList.innerHTML = '';
   for (const entry of entries) {
@@ -1710,84 +1790,83 @@ function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, hiddenPuzz
     });
     li.appendChild(playBtn);
 
+    // Direct follow-up: even icon-only Rename + Hide buttons side by side were still too much
+    // row width. Both now live behind a single "⋮" overflow menu (openRowMenu/
+    // ensureRowMenuPopover above), same idea as a mobile app's per-row overflow menu. Rename
+    // only appears when allowed (own community puzzle), Hide/Unhide always does. Built as a
+    // plain { label, onClick } list rather than real DOM here — the shared popover builds its
+    // own `<li>`/`<button>` elements fresh per open (see openRowMenu).
+    const menuItems = [];
     if (!entry.builtin && entry.creatorUid === myUid) {
-      // Current Objective (see TODO.md): the persistent text "Rename" button used to eat so
-      // much row width that the puzzle's own name (the single most important thing in the
-      // row) got squeezed toward invisible — a real UX bug on a community puzzle with a long
-      // title, not just clutter. Icon-only + the shared tooltip mechanism (src/tooltip.js,
-      // same pattern the toolbar's Undo/Stats/Eraser buttons already use) reclaims that space
-      // without losing discoverability; attachTooltip has to be called here explicitly
-      // (rather than relying on the one-time initTooltips() boot call) since this button is
-      // created fresh on every render, long after boot.
-      const renameBtn = document.createElement('button');
-      renameBtn.className = 'btn btn--icon';
-      renameBtn.type = 'button';
-      renameBtn.setAttribute('aria-label', 'Rename');
-      renameBtn.setAttribute('data-tooltip', 'Rename');
-      renameBtn.textContent = '✏️';
-      attachTooltip(renameBtn);
-      // Opens #rename-modal (see showRenameModal above) instead of swapping this row into an
-      // inline edit state — the old behavior turned out to be a real scroll-bug trigger on a
-      // row near the bottom of the list (a keyboard opening on a text input positioned near
-      // the bottom of the screen — see TODO.md's Current Objective). Renaming still edits the
-      // always-real `entry.title`; whether it's currently DISPLAYED depends on solved status
-      // exactly like every other row, unaffected by this.
-      renameBtn.addEventListener('click', async () => {
-        const newTitle = await showRenameModal(entry.title);
-        if (newTitle == null || newTitle === entry.title) return;
-        renameBtn.disabled = true;
-        els.libraryStatus.textContent = '';
-        try {
-          await renamePuzzleInLibrary(entry.id, newTitle);
-          entry.title = newTitle;
-          // Simplest correct way back to a normal, up-to-date list: re-run the filters
-          // against the (now-updated) cache rather than hand-reassembling this one row.
-          applyLibraryFilters();
-        } catch (err) {
-          console.warn('renamePuzzleInLibrary failed:', err);
-          els.libraryStatus.textContent = `Couldn't rename — ${err?.message || 'try again.'}`;
-          renameBtn.disabled = false;
-        }
+      menuItems.push({
+        label: '✏️ Rename',
+        // Opens #rename-modal (see showRenameModal above) instead of swapping this row into an
+        // inline edit state — the old behavior turned out to be a real scroll-bug trigger on a
+        // row near the bottom of the list (a keyboard opening on a text input positioned near
+        // the bottom of the screen — see TODO.md's Current Objective). Renaming still edits the
+        // always-real `entry.title`; whether it's currently DISPLAYED depends on solved status
+        // exactly like every other row, unaffected by this.
+        onClick: async () => {
+          const newTitle = await showRenameModal(entry.title);
+          if (newTitle == null || newTitle === entry.title) return;
+          els.libraryStatus.textContent = '';
+          try {
+            await renamePuzzleInLibrary(entry.id, newTitle);
+            entry.title = newTitle;
+            // Simplest correct way back to a normal, up-to-date list: re-run the filters
+            // against the (now-updated) cache rather than hand-reassembling this one row.
+            applyLibraryFilters();
+          } catch (err) {
+            console.warn('renamePuzzleInLibrary failed:', err);
+            els.libraryStatus.textContent = `Couldn't rename — ${err?.message || 'try again.'}`;
+          }
+        },
       });
-      li.appendChild(renameBtn);
     }
 
-    // Hide-a-puzzle item (Current Objective — see TODO.md): a small icon-only toggle, not a
-    // text button — the same "Rename" text-button mistake (eating enough row width to squeeze
-    // out the puzzle's own name) called out directly in the project owner's own request, not
-    // to be repeated here. Personal to this player only — never touches the shared
-    // `puzzles/{puzzleId}` doc, so no other player's view of the library is affected either
-    // way (see src/puzzleLibrary.js's hidePuzzleInLibrary/unhidePuzzleInLibrary).
-    const hideBtn = document.createElement('button');
-    hideBtn.className = 'btn btn--icon';
-    hideBtn.type = 'button';
+    // Hide-a-puzzle item (see TODO.md): personal to this player only — never touches the
+    // shared `puzzles/{puzzleId}` doc, so no other player's view of the library is affected
+    // either way (see src/puzzleLibrary.js's hidePuzzleInLibrary/unhidePuzzleInLibrary).
     const hideLabel = hidden ? 'Unhide' : 'Hide';
-    hideBtn.setAttribute('aria-label', hideLabel);
-    hideBtn.setAttribute('data-tooltip', hideLabel);
-    hideBtn.textContent = hidden ? '👁️' : '🙈';
-    attachTooltip(hideBtn);
-    hideBtn.addEventListener('click', async () => {
-      hideBtn.disabled = true;
-      els.libraryStatus.textContent = '';
-      try {
-        if (hidden) {
-          await unhidePuzzleInLibrary(entry.id);
-          hiddenPuzzles.delete(entry.id);
-        } else {
-          await hidePuzzleInLibrary(entry.id);
-          hiddenPuzzles.add(entry.id);
+    menuItems.push({
+      label: hidden ? '👁️ Unhide' : '🙈 Hide',
+      onClick: async () => {
+        els.libraryStatus.textContent = '';
+        try {
+          if (hidden) {
+            await unhidePuzzleInLibrary(entry.id);
+            hiddenPuzzles.delete(entry.id);
+          } else {
+            await hidePuzzleInLibrary(entry.id);
+            hiddenPuzzles.add(entry.id);
+          }
+          // Same "re-run the filters" pattern as rename above — and the only way a hidden row
+          // actually disappears from view when "Show hidden puzzles" is off, since that
+          // exclusion happens in applyLibraryFilters, not here.
+          applyLibraryFilters();
+        } catch (err) {
+          console.warn(`${hidden ? 'unhidePuzzleInLibrary' : 'hidePuzzleInLibrary'} failed:`, err);
+          els.libraryStatus.textContent = `Couldn't ${hideLabel.toLowerCase()} — ${err?.message || 'try again.'}`;
         }
-        // Same "re-run the filters" pattern as rename above — and the only way a hidden row
-        // actually disappears from view when "Show hidden puzzles" is off, since that
-        // exclusion happens in applyLibraryFilters, not here.
-        applyLibraryFilters();
-      } catch (err) {
-        console.warn(`${hidden ? 'unhidePuzzleInLibrary' : 'hidePuzzleInLibrary'} failed:`, err);
-        els.libraryStatus.textContent = `Couldn't ${hideLabel.toLowerCase()} — ${err?.message || 'try again.'}`;
-        hideBtn.disabled = false;
-      }
+      },
     });
-    li.appendChild(hideBtn);
+
+    const menuTrigger = document.createElement('button');
+    menuTrigger.className = 'btn btn--icon library-row__menu-trigger';
+    menuTrigger.type = 'button';
+    menuTrigger.setAttribute('aria-haspopup', 'true');
+    menuTrigger.setAttribute('aria-expanded', 'false');
+    menuTrigger.setAttribute('aria-label', 'More actions');
+    menuTrigger.setAttribute('data-tooltip', 'More actions');
+    menuTrigger.textContent = '⋮';
+    attachTooltip(menuTrigger);
+    menuTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wasOpenForThis = rowMenuOpenTrigger === menuTrigger;
+      closeRowMenu();
+      if (!wasOpenForThis) openRowMenu(menuTrigger, menuItems);
+    });
+    li.appendChild(menuTrigger);
 
     els.libraryList.appendChild(li);
   }

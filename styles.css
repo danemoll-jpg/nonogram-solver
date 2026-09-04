@@ -1563,6 +1563,17 @@ body {
   font-size: 0.95rem;
 }
 
+/* Direct follow-up (see TODO.md): Rename + Hide, even icon-only, were still too much row
+   width — both now live behind one "⋮" overflow menu, built as a shared popover
+   (app.js's ensureRowMenuPopover/openRowMenu) rather than a per-row dropdown. It reuses
+   .help-menu__list's box styling but needs a z-index above .modal-overlay's own 100 — the
+   popover is appended straight to <body> (a stacking-context SIBLING of the library modal,
+   not a descendant of it), so without this override it would render fully behind the modal
+   card it's supposed to float on top of. */
+.library-row__menu-popover {
+  z-index: 150;
+}
+
 /* Scroll diagnostics (Current Objective — see TODO.md and app.js's initScrollDiagnostics
    comment): investigative instrumentation for the app-wide iOS scroll bug, not a player-facing
    feature — only created at all behind `?debug=scroll`. z-index deliberately higher than

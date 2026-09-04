@@ -443,6 +443,26 @@ width on a label. Verified directly: both badges show just their symbol, and
 dispatching `mouseenter` on each confirmed the tooltip still reads "Solved"/
 "In progress" correctly.
 
+**Second direct follow-up — done, preview-verified, one real bug found and
+fixed along the way.** Rename + Hide, even icon-only, still took too much row
+width — collapsed into a single "⋮" overflow menu per row (direct ask). Built
+as one shared popover (`app.js`'s `ensureRowMenuPopover`/`openRowMenu`, same
+one-shared-floating-element idea as `src/tooltip.js`'s bubble) rather than a
+per-row dropdown. **Real bug found in the first implementation**: a per-row
+dropdown positioned `position:absolute` relative to its own row got clipped
+by `.modal-card__body`'s own `overflow-y:auto` scroll region the moment a
+row's trigger was near that region's bottom edge — confirmed directly by
+opening the menu on a row near the bottom of a real scrolled list. Fixed by
+switching to `position:fixed` + appending to `document.body` (escapes any
+ancestor's scroll clipping, exactly like the tooltip bubble already does),
+with JS-computed placement that flips the menu above the trigger when there
+isn't room below, and a `z-index` above `.modal-overlay`'s own (the popover
+is a stacking-context sibling of the modal, not a descendant, so it would
+otherwise render behind it). Verified directly: the previously-clipped row's
+menu now renders fully on screen; toggling the same trigger twice opens then
+closes it; opening a different row's menu closes the first one; clicking
+away closes it. All 829 tests pass.
+
 **No current objective is queued right now.**
 
 1. **Board-drag scroll bug — fixed and CONFIRMED** via `touch-action: none` on

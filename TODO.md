@@ -1190,6 +1190,52 @@ Completed Tasks
   tooltip bubble still reads "Solved"/"In progress" correctly. All 829 tests
   pass.
 
+* **Second direct follow-up — done, preview-verified, one real bug found and
+  fixed along the way.** Direct ask: collapse the Rename + Hide icon buttons
+  (still too much row width) into a single "⋮" that reveals a menu with
+  Rename (if allowed) and Hide/Unhide. Implemented as one shared popover
+  (`app.js`'s `ensureRowMenuPopover`/`openRowMenu`/`closeRowMenu`) rather than
+  a separate dropdown per row — the same one-shared-floating-element pattern
+  `src/tooltip.js`'s bubble already established, reused here for a menu
+  instead of a caption.
+  - **Real bug found in the first implementation, before it ever shipped**:
+    building the dropdown as a normal per-row child (reusing the Help menu's
+    own `position:absolute` pattern, anchored to a `position:relative`
+    wrapper around the row's own trigger button) got clipped by
+    `.modal-card__body`'s `overflow-y:auto` scroll region the moment a row's
+    trigger was near that region's bottom edge — confirmed directly by
+    scrolling a real row (Puzzle 7) to the bottom of the visible list and
+    opening its menu, which rendered a bare 1px sliver instead of the full
+    dropdown.
+  - **Fixed** with the same technique `src/tooltip.js` already uses for the
+    identical underlying problem: `position:fixed` (not `absolute`) plus
+    appending the ONE shared popover element straight to `document.body`
+    escapes any ancestor's scroll clipping entirely, since a fixed-position
+    element isn't contained by an ancestor's `overflow:auto` the way an
+    absolutely-positioned one is. `openRowMenu` computes placement via
+    `getBoundingClientRect()` — right-aligned under the trigger by default,
+    flipped to open ABOVE it instead when there isn't room below in the
+    actual viewport (not just the modal's own scroll region) — the same
+    viewport-clamping idea `src/tooltip.js`'s `positionBubble` already uses.
+  - **A second, related issue caught before it shipped, not after**: the
+    popover is appended to `<body>`, making it a stacking-context SIBLING of
+    `#library-modal` (`z-index: 100`) rather than a descendant — without an
+    explicit higher `z-index` (150, given to `.library-row__menu-popover` in
+    `styles.css`) it would render fully BEHIND the modal card it's supposed
+    to float on top of. Caught by checking the computed z-index/position
+    directly in preview rather than only eyeballing a screenshot.
+  - Rename/Hide's own click handlers, error handling, and Firestore calls are
+    completely unchanged — only their presentation moved (from two `<button>`
+    elements built and appended per row, to a plain `{ label, onClick }`
+    array the shared popover renders into fresh `<li>`/`<button>` elements on
+    each open).
+  - Verified directly in preview: the previously-clipped row's menu now
+    renders fully on screen with the correct z-index/`position:fixed`;
+    clicking a trigger twice opens then closes it; opening a different row's
+    menu closes whichever was already open; a row with no owned puzzle shows
+    Hide only, an owned community puzzle shows Rename + Hide. All 829 tests
+    pass.
+
 Current Objective (Focus Area)
 
 * **None queued right now.** See the four-item writeup directly above (fill/X
