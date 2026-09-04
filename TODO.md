@@ -1179,6 +1179,17 @@ Completed Tasks
     real-device-confirmed (all four are preview/unit-verified only) — same
     standing caveat as most of this file's other recent rounds.
 
+* **Small direct follow-up — done, preview-verified.** Dropped the "Solved"/
+  "In progress" text from the library row badges (`.library-row__solved`/
+  `.library-row__in-progress`, `app.js`'s `renderLibraryList`) — direct ask:
+  "the symbols are enough." Each badge is now just its ✓/⏳ glyph, with
+  `aria-label` plus the existing shared tooltip mechanism (`src/tooltip.js`,
+  same pattern as Rename/Hide/the medal icon) covering discoverability
+  instead of a text label. Verified directly in preview: both badges render
+  as bare symbols, and dispatching a real `mouseenter` on each confirmed the
+  tooltip bubble still reads "Solved"/"In progress" correctly. All 829 tests
+  pass.
+
 Current Objective (Focus Area)
 
 * **None queued right now.** See the four-item writeup directly above (fill/X

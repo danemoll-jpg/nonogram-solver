@@ -435,6 +435,14 @@ preview-verified; not yet real-device-confirmed.**
   that this would have relied on).
 - All 829 tests pass. `node --check` clean.
 
+**Small direct follow-up — done, preview-verified.** Dropped the "Solved"/"In
+progress" text from library rows' ✓/⏳ badges — the symbols alone are enough,
+and the shared tooltip mechanism (`src/tooltip.js`, same as Rename/Hide/the
+medal) keeps the meaning discoverable via hover/tap/focus without spending row
+width on a label. Verified directly: both badges show just their symbol, and
+dispatching `mouseenter` on each confirmed the tooltip still reads "Solved"/
+"In progress" correctly.
+
 **No current objective is queued right now.**
 
 1. **Board-drag scroll bug — fixed and CONFIRMED** via `touch-action: none` on

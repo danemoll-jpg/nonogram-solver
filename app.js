@@ -1613,9 +1613,16 @@ function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, hiddenPuzz
     }
 
     if (solved) {
+      // Direct ask: drop the "Solved"/"In progress" text — the ✓/⏳ symbols already carry the
+      // meaning, and a hover/tap tooltip (the same shared mechanism Rename/Hide/the medal
+      // already use) keeps it discoverable without spending row width on a text label.
       const solvedBadge = document.createElement('span');
       solvedBadge.className = 'library-row__solved';
-      solvedBadge.textContent = '✓ Solved';
+      solvedBadge.textContent = '✓';
+      solvedBadge.setAttribute('tabindex', '0');
+      solvedBadge.setAttribute('aria-label', 'Solved');
+      solvedBadge.setAttribute('data-tooltip', 'Solved');
+      attachTooltip(solvedBadge);
 
       // Current Objective #3 (see TODO.md), corrected per direct follow-up feedback: the
       // first pass replaced the personal-best TIME with a medal and hid the number behind a
@@ -1657,7 +1664,11 @@ function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, hiddenPuzz
     } else if (inProgress) {
       const inProgressBadge = document.createElement('span');
       inProgressBadge.className = 'library-row__in-progress';
-      inProgressBadge.textContent = '⏳ In progress';
+      inProgressBadge.textContent = '⏳';
+      inProgressBadge.setAttribute('tabindex', '0');
+      inProgressBadge.setAttribute('aria-label', 'In progress');
+      inProgressBadge.setAttribute('data-tooltip', 'In progress');
+      attachTooltip(inProgressBadge);
       const statsSpan = document.createElement('span');
       statsSpan.className = 'library-row__personal-stats';
       statsSpan.textContent = `${formatDuration(inProgress.elapsedMs)} so far`;
