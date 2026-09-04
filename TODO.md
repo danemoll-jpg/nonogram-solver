@@ -1072,19 +1072,28 @@ Completed Tasks
      with a real Firestore-backed id, and showed up as an in-progress row in the
      library the moment the library was reopened (the existing
      open-library auto-save trigger, unaffected by this round).
-  3. **Library widen + medal icon — built and preview-verified.** New
-     `.modal-card--library` (46rem) widens only the library modal, applied
-     alongside `.modal-card--wide` in `index.html` rather than changing that
-     shared class itself (also used by How-to-play/Stats, neither of which has
-     this row-crowding problem). The old "· best 0:45" text in
-     `.library-row__personal-stats` is gone; a new `.library-row__medal` span
-     (🥇/🥉, chosen by `solved.bestTimeMs <= globalTimeMs`, defaulting gold when
-     no global record exists yet) carries the real time via
-     `src/tooltip.js`'s existing `data-tooltip` mechanism instead of row text.
-     Verified directly in preview against three real solved puzzles in the live
-     account: all three show 🥇 (no global record recorded yet for any of them,
-     the documented default), and dispatching a real `mouseenter` on one
-     confirmed the tooltip bubble shows "Your best: 0:13" correctly.
+  3. **Library widen + medal icon — built and preview-verified, corrected once
+     per direct follow-up feedback.** New `.modal-card--library` (46rem) widens
+     only the library modal, applied alongside `.modal-card--wide` in
+     `index.html` rather than changing that shared class itself (also used by
+     How-to-play/Stats, neither of which has this row-crowding problem).
+     **First pass (wrong): replaced the personal-best TIME with a
+     `.library-row__medal` span and hid the actual number behind a hover
+     tooltip.** Direct correction: the ask was to keep BOTH the world-record
+     time and the personal-best time visible as text — the medal is an extra
+     indicator alongside the best time, not a replacement for it. **Fixed**:
+     `.library-row__stats-stack` now stacks two lines — `{timesSolved}× · 🥇/🥉
+     {personalBest}` on one, `🌍 {globalRecord}` on the next (only when a
+     global record exists) — instead of one long concatenated line; gold/copper
+     is still `solved.bestTimeMs <= globalTimeMs`, defaulting gold when no
+     global record exists yet. Stacking (not just re-adding the text inline)
+     is what actually reclaims the horizontal room the title needs, which was
+     the original point of this item. Verified directly in preview: a real
+     solved puzzle renders "2× · 🥇 0:13" correctly (no puzzle in this account
+     has a recorded global time yet to exercise the second stacked line
+     directly, so that line was confirmed instead via a mock row built with
+     the exact same DOM structure/CSS classes, rendering as a correct
+     two-line right-aligned stack).
   4. **Tiered build-failure line marking — built; tier 1 preview-verified against
      a REAL build failure on the ground-truth image, tier 2's solver-side data
      unit-tested, its UI branch verified by inspection only.** New

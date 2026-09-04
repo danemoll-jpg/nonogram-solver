@@ -378,11 +378,18 @@ preview-verified; not yet real-device-confirmed.**
   ("Verification Dragon") published successfully with a real Firestore id.
 - **Library widen + medal icon**: new `.modal-card--library` (46rem) widens
   only the library modal (kept separate from the shared `.modal-card--wide`,
-  which also backs How-to-play/Stats). The old "· best 0:45" text is now a
-  `.library-row__medal` (🥇/🥉) using the existing tooltip mechanism for the
-  real time. Verified in preview against 3 real solved puzzles (all gold, no
-  global record yet recorded for any — the documented default) plus a direct
-  tooltip-bubble check.
+  which also backs How-to-play/Stats). **Corrected per direct follow-up
+  feedback**: the first pass replaced the personal-best TIME with a medal and
+  hid the number behind a hover tooltip — the actual ask was to keep BOTH the
+  world-record time and the personal-best time visible as text, with the
+  medal as an extra indicator alongside the best time, not a replacement for
+  it. Now a `.library-row__stats-stack` stacks two lines (times-solved + 🥇/🥉
+  + personal best on one line, 🌍 + the global record on the line below)
+  instead of cramming one long line — that's what actually reclaims the
+  horizontal room the title needs. Verified in preview: a real solved puzzle
+  renders "2× · 🥇 0:13" correctly, and a mock row with both times present
+  confirmed the two-line stack renders as designed (no real puzzle in this
+  account has a recorded global time yet to show the stack against directly).
 - **Tiered build-failure line marking**: new `showBuildFailure`
   (`src/scanUI.js`). Tier 1 (certain) names every already-`--flagged` line
   directly — **hit a real case unprompted**: rebuilding with the ground-truth

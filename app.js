@@ -1616,38 +1616,44 @@ function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, hiddenPuzz
       const solvedBadge = document.createElement('span');
       solvedBadge.className = 'library-row__solved';
       solvedBadge.textContent = '✓ Solved';
-      const statsSpan = document.createElement('span');
-      statsSpan.className = 'library-row__personal-stats';
-      const times = `${solved.timesSolved}×`;
-      // Global fastest-time-across-all-users item (Current Objective — see TODO.md): read
-      // alongside (not instead of) the player's own personal best below, absent until
-      // someone's completion has actually reported a time for this puzzle (see
-      // submitGlobalFastestTime) — no placeholder shown before then.
-      const globalTimeMs = globalFastestTimes.get(entry.id);
-      const global = globalTimeMs != null ? ` · 🌍 ${formatDuration(globalTimeMs)}` : '';
-      statsSpan.textContent = `${times}${global}`;
-      li.append(solvedBadge, statsSpan);
 
-      // Current Objective #3 (see TODO.md): replaces the old "· best 0:45" text — the puzzle's
-      // own name was getting covered up again, same recurring problem class as the original
-      // Rename-button issue. Gold if this player's own best matches (or beats — see the
-      // comparison below) the current global record, or if no global record has been recorded
-      // yet at all (their own time is, by definition, the only known one so far, which reads
-      // as more sensible than defaulting to copper); copper otherwise. The actual time moves
-      // into the shared tooltip mechanism (src/tooltip.js) rather than sitting in row text.
+      // Current Objective #3 (see TODO.md), corrected per direct follow-up feedback: the
+      // first pass replaced the personal-best TIME with a medal and hid the number behind a
+      // hover tooltip — but the ask was to keep both the world-record time and the personal-
+      // best time visible as text, with the medal as an extra visual indicator alongside the
+      // best time, not a replacement for it. Stacking the two lines (times-solved+best on one
+      // line, the global record on the line below) is what actually reclaims the horizontal
+      // room the puzzle's own name needs, rather than hiding either time.
+      const statsStack = document.createElement('span');
+      statsStack.className = 'library-row__stats-stack';
+
+      const globalTimeMs = globalFastestTimes.get(entry.id);
+      const personalLine = document.createElement('span');
+      personalLine.className = 'library-row__personal-stats';
+      const times = `${solved.timesSolved}×`;
       if (solved.bestTimeMs != null) {
+        // Gold if this player's own best matches (or beats) the current global record, or if
+        // no global record has been recorded yet at all (their own time is, by definition,
+        // the only known one so far — reads as more sensible than defaulting to copper);
+        // copper otherwise.
         const isGold = globalTimeMs == null || solved.bestTimeMs <= globalTimeMs;
-        const medal = document.createElement('span');
-        medal.className = 'library-row__medal';
-        medal.textContent = isGold ? '🥇' : '🥉';
-        medal.setAttribute('tabindex', '0');
-        medal.setAttribute('role', 'img');
-        const label = `Your best: ${formatDuration(solved.bestTimeMs)}`;
-        medal.setAttribute('aria-label', label);
-        medal.setAttribute('data-tooltip', label);
-        attachTooltip(medal);
-        li.appendChild(medal);
+        const medal = isGold ? '🥇' : '🥉';
+        personalLine.textContent = `${times} · ${medal} ${formatDuration(solved.bestTimeMs)}`;
+      } else {
+        personalLine.textContent = times;
       }
+      statsStack.appendChild(personalLine);
+
+      // Absent until someone's completion has actually reported a time for this puzzle (see
+      // submitGlobalFastestTime) — no placeholder shown before then.
+      if (globalTimeMs != null) {
+        const globalLine = document.createElement('span');
+        globalLine.className = 'library-row__personal-stats library-row__global-stats';
+        globalLine.textContent = `🌍 ${formatDuration(globalTimeMs)}`;
+        statsStack.appendChild(globalLine);
+      }
+
+      li.append(solvedBadge, statsStack);
     } else if (inProgress) {
       const inProgressBadge = document.createElement('span');
       inProgressBadge.className = 'library-row__in-progress';

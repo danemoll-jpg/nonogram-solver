@@ -1492,15 +1492,21 @@ body {
   white-space: nowrap;
 }
 
-/* Current Objective #3 (see TODO.md): replaces the old "· best 0:45" text in
-   .library-row__personal-stats — the actual time now lives in this icon's tooltip
-   (src/tooltip.js's data-tooltip mechanism, same as Rename/Hide below) instead of spelled out
-   in the row, which was crowding the puzzle's own title again. Gold/copper is purely a color
-   swap on the same emoji glyph; no separate icon asset needed. */
-.library-row__medal {
-  font-size: 0.95rem;
-  cursor: default;
+/* Current Objective #3 (see TODO.md), corrected per direct follow-up feedback: both the
+   personal-best time (with its 🥇/🥉 medal prefix) and the global-record time stay as visible
+   row text — an earlier pass hid the personal-best number behind a hover tooltip, which
+   wasn't the ask. Stacking the two lines vertically (rather than one long "2× · 🥇 0:13 · 🌍
+   0:15" line) is what actually reclaims the horizontal room the puzzle's own title needs. */
+.library-row__stats-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
   flex-shrink: 0;
+}
+
+.library-row__global-stats {
+  opacity: 0.85;
 }
 
 /* #rename-modal's input (Current Objective — see TODO.md and index.html's #rename-modal
