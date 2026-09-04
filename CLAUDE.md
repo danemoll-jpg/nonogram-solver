@@ -297,13 +297,13 @@
   click-toggle result, so starting a drag on an already-marked cell silently turned the
   whole stroke into a no-op clear; fixed with a `modeTargetState()` used only for the
   sweep, leaving single-click toggle-to-clear untouched. (4) `anchor` sound slot added
-  to `src/sounds.js` (no audio file — the project owner is sourcing it) with a
-  before/after-diff trigger in `app.js`, mirroring how `lock` already detects its own
-  transition; skipped on a move that also played `lock`, and one shared sound per move
-  regardless of how many numbers anchor at once — the project owner's own real
-  `anchor.mp3` is now dropped in at that path too, no code changes needed. See
-  `TODO.md`'s Completed Tasks for the full writeup, including preview-verification steps
-  for each. All 822 tests pass; not yet real-device-confirmed.
+  to `src/sounds.js` (no audio file at first — the project owner sourced it separately)
+  with a before/after-diff trigger in `app.js`, mirroring how `lock` already detects its
+  own transition; skipped on a move that also played `lock`, and one shared sound per
+  move regardless of how many numbers anchor at once — the project owner's own real
+  `anchor.mp3` was dropped in at that path BEFORE this round's deployment (not a later
+  step), no code changes needed. See `TODO.md`'s Completed Tasks for the full writeup.
+  All 822 tests pass; **CONFIRMED on the real device**.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -337,47 +337,55 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**The four items from last round's Current Objective are all done, preview-verified —
-no current objective is queued right now.**
+**The four items from last round's Current Objective are all done and CONFIRMED on
+the real device (items 2 and 4 specifically confirmed by the project owner; items 1
+and 3 confirmed via no issues experienced during real play) — no current objective
+is queued right now.**
 
-1. **Board-drag scroll bug — fixed** via `touch-action: none` on `.nono-grid` (not
-   `.board-root`, which keeps its `overflow: auto` fallback-scroll role for a puzzle
-   `fitBoardToViewport`'s sizing math didn't fully fit). Root cause: `.nono-cell` already
-   had `touch-action: none`, but the 1px inter-cell gaps, the grid's border/corner, and
-   every `.nono-clue` label didn't — a touch landing on one of those seams could still
-   start a native pan, matching the reported "occasionally."
-2. **The global fastest-time-across-all-users stat — built**, as a new
-   `puzzleStats/{puzzleId}` collection (public-read, no client write — same "must go
-   through a validating callable" constraint as originally designed) rather than a field
-   on `puzzles/{puzzleId}` as first sketched — a real design snag found while
-   implementing: `puzzles/{puzzleId}` is the public puzzle-DEFINITION collection, and a
-   built-in puzzle (e.g. `heart-5`) never has a doc there, so a stats-only doc under a
-   built-in's id would corrupt `fetchLibraryPuzzles`' "every doc here is a full community
-   puzzle" scan. New `recordFastestTime` callable (`functions/index.js`) is the only
-   writer. **Deployed and live**, with the project owner's explicit go-ahead —
+1. **Board-drag scroll bug — fixed and CONFIRMED** via `touch-action: none` on
+   `.nono-grid` (not `.board-root`, which keeps its `overflow: auto` fallback-scroll
+   role for a puzzle `fitBoardToViewport`'s sizing math didn't fully fit). Root
+   cause: `.nono-cell` already had `touch-action: none`, but the 1px inter-cell
+   gaps, the grid's border/corner, and every `.nono-clue` label didn't — a touch
+   landing on one of those seams could still start a native pan, matching the
+   reported "occasionally."
+2. **The global fastest-time-across-all-users stat — built, deployed, and
+   CONFIRMED**, as a new `puzzleStats/{puzzleId}` collection (public-read, no
+   client write — same "must go through a validating callable" constraint as
+   originally designed) rather than a field on `puzzles/{puzzleId}` as first
+   sketched — a real design snag found while implementing: `puzzles/{puzzleId}` is
+   the public puzzle-DEFINITION collection, and a built-in puzzle (e.g. `heart-5`)
+   never has a doc there, so a stats-only doc under a built-in's id would corrupt
+   `fetchLibraryPuzzles`' "every doc here is a full community puzzle" scan. New
+   `recordFastestTime` callable (`functions/index.js`) is the only writer —
    `recordFastestTime(us-central1)` created and the `puzzleStats` Firestore rule
-   released. The real end-to-end round trip (a genuine completion writing a real global
-   time, another player's library showing it) hasn't been exercised yet — only the
-   plumbing and its fail-soft path were verified before this deploy.
-3. **Drag-on-already-filled-cell bug — fixed and preview-verified both directions**
-   (Fill and Mark-empty). Root cause was exactly as suspected: the drag's `paintState`
-   was taken from the pressed cell's own click-toggle result, so starting a drag on an
-   already-marked cell silently redefined the whole stroke's target to "clear," making
-   every later cell in the drag a no-op. Fixed with a `modeTargetState()` used only for
-   the drag-sweep target, leaving the pressed cell's own click-toggle-to-clear behavior
-   unchanged.
-4. **The anchored-clue-number sound — plumbing built, per the project owner's explicit
-   scope (no audio file added — they're sourcing it themselves).** New `anchor` slot in
-   `src/sounds.js`; trigger logic is a before/after-the-move diff of which clue numbers
-   are anchored (mirroring how `lock` already detects its own line-level transition),
-   wired only into the forward-move path (not unfill, mirroring `lock`/`unlock`'s own
-   asymmetry). Two open design questions resolved: one shared sound per move regardless
-   of how many numbers anchor at once, and skipped entirely on a move that already played
-   `lock` (redundant otherwise). Preview-confirmed the trigger genuinely fires (a real
-   `anchor.mp3` 404 in the network log, not a thrown exception).
+   released. **CONFIRMED**: the project owner solved a puzzle for real and saw
+   their own completion correctly write and display a global time. Cross-player
+   visibility (does another account's library also show it) wasn't separately
+   tested — decided to treat as complete rather than block on it, since it's the
+   same read path every other stat already uses correctly; revisit only if it
+   turns out broken later.
+3. **Drag-on-already-filled-cell bug — fixed and CONFIRMED, both directions**
+   (Fill and Mark-empty). Root cause was exactly as suspected: the drag's
+   `paintState` was taken from the pressed cell's own click-toggle result, so
+   starting a drag on an already-marked cell silently redefined the whole stroke's
+   target to "clear," making every later cell in the drag a no-op. Fixed with a
+   `modeTargetState()` used only for the drag-sweep target, leaving the pressed
+   cell's own click-toggle-to-clear behavior unchanged.
+4. **The anchored-clue-number sound — plumbing built and CONFIRMED firing; real
+   audio file was already dropped in by the project owner at `assets/sounds/anchor.mp3`
+   BEFORE this round's deployment**, not as a later separate step — that's why the
+   real-device confirmation validated it immediately (see `assets/sounds/README.md`).
+   No code changes were needed either way, `src/sounds.js`
+   already pointed there. New `anchor` slot in `src/sounds.js`; trigger logic is a
+   before/after-the-move diff of which clue numbers are anchored (mirroring how
+   `lock` already detects its own line-level transition), wired only into the
+   forward-move path (not unfill, mirroring `lock`/`unlock`'s own asymmetry). Two
+   open design questions resolved: one shared sound per move regardless of how
+   many numbers anchor at once, and skipped entirely on a move that already played
+   `lock` (redundant otherwise).
 
-See `TODO.md`'s Completed Tasks for the full writeup of all four, including exact
-preview-verification steps.
+See `TODO.md`'s Completed Tasks for the full writeup of all four.
 
 **The rename-popup scroll-bug fix and the new hide-a-puzzle feature are DONE,
 deployed, and now CONFIRMED on the real device by the project owner**, shipped

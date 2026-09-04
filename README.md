@@ -1,38 +1,65 @@
-# Nonogram
+# Nonogram Pro
 
 A browser-based nonogram (picross) app with a solver that doesn't just check answers —
-it explains the reasoning behind the next logical move. Plain HTML/CSS/JS, no build step
-(matches the [game-hub](../game-hub) project's pattern), deployable to Netlify as-is.
+it explains the reasoning behind the next logical move. Play built-in and community
+puzzles, scan an existing puzzle from any image (a photo of a paper puzzle, a screenshot
+from another app — anything with a visible grid and clues), or draw your own picture and
+let the app turn it into a playable puzzle. Plain HTML/CSS/JS, no build step (matches the
+[game-hub](../game-hub) project's pattern), deployed on Netlify.
 
-## Status vs. the design spec
+Live at **https://nonogrampro.netlify.app/**, listed in the
+[game hub](https://dansgamehub.netlify.app/).
 
-Build order from the design spec, and what's done:
+## Deployment
+
+Hosted on Netlify, auto-deploying from this repo's `main` branch — **any push to `main`
+goes live immediately**, no manual deploy step. There's no staging environment; treat a
+push to `main` as a real deploy to the live URL above.
+
+## Status vs. the original design spec
+
+The original build order, and what happened with each item:
 
 | # | Item | Status |
 |---|------|--------|
 | 1 | Data model | ✅ [src/model.js](src/model.js) |
-| 2 | Solver engine (4 line techniques + cross-line propagation) | ✅ [src/lineSolver.js](src/lineSolver.js), [src/solver.js](src/solver.js) |
-| 3 | Dev/test harness | ✅ folded into the full UI below — every hint highlights and explains itself, so there's no separate bare-bones view to maintain |
-| 4 | Hint phrasing layer | ✅ [src/hintPhrasing.js](src/hintPhrasing.js) — LLM-backed via a Cloud Function, template fallback (see below) |
+| 2 | Solver engine (line techniques + cross-line propagation + contradiction search) | ✅ [src/lineSolver.js](src/lineSolver.js), [src/solver.js](src/solver.js), [src/contradiction.js](src/contradiction.js) |
+| 3 | Dev/test harness | ✅ folded into the full UI — every hint highlights and explains itself |
+| 4 | Hint phrasing layer | ✅ [src/hintPhrasing.js](src/hintPhrasing.js) — LLM-backed via a deployed Cloud Function, template fallback if that call fails |
 | 5 | Mistake handling (auto-check, on-demand check, remove-bad-marks) | ✅ [src/mistakes.js](src/mistakes.js) |
 | 6 | Contradiction search (on-demand only) | ✅ [src/contradiction.js](src/contradiction.js) |
-| 7 | Full puzzle UI + refinement pass | ✅ [index.html](index.html) / [app.js](app.js) / [styles.css](styles.css) — mode toggle, 5×5 chunking, auto-X, mistake pop-up, complete-stats modal, real LLM hint phrasing (**Cloud Function written, not yet deployed** — see [functions/README.md](functions/README.md)) |
-| 8 | Photo → puzzle generation | ⬜ not started (needs its own design pass — grid-size/threshold controls, uniqueness-checking) |
-| 9 | Firestore schema + shared library | ⬜ not started (needs schema + sharing-model design) |
-| 10 | Scan-existing-puzzle flow | ⬜ not started (builds on #8 + OCR) |
+| 7 | Full puzzle UI + refinement pass | ✅ [index.html](index.html) / [app.js](app.js) / [styles.css](styles.css) |
+| 8 | Photo → puzzle generation | ❌ **DECIDED: won't be built.** Turning an arbitrary photo into a recognizable ~15–30-cell binary grid is a genuinely hard, open-ended image problem with no reliable general solution — and even done well, it'd realistically see occasional novelty use, not regular play. Closed deliberately, not just deferred. |
+| 9 | Firestore schema + shared library | ✅ Full public puzzle library — built-in and community puzzles in one browsable list, personal + global stats, save/resume in-progress puzzles, hide/rename, cross-device sync |
+| 10 | Scan-existing-puzzle flow | ✅ Full OCR pipeline (grid detection, clue-strip OCR, fill-state capture) turning an image of an existing puzzle — a paper puzzle photo, a screenshot from another app — into a playable one |
 
-Items 1–7 — the fully-designed subsystem plus a genuinely playable UI — are done and
-tested. Items 8–10 need their own design pass before building, per the original spec.
+Beyond the original ten items, quite a bit more got built along the way:
+
+- **Draw-a-puzzle**: design your own picture on a blank grid; the app derives the clues,
+  verifies the result has a genuinely unique solution (rejecting ambiguous drawings), and
+  publishes it to the shared library.
+- **Undo**, a dedicated **Eraser mode** (alongside Fill/Mark-empty), and a live cell-count
+  badge while drag-painting.
+- **Cross-device stats + puzzle pairing**, no accounts or passwords — Anonymous Auth plus
+  a short pairing code.
+- **A public shared library**: browse, filter (solved/unsolved/incomplete/hidden), rename,
+  hide, and see both your own best time and the global fastest time for any puzzle.
+- Sound effects for line-locking, mistakes, hints, puzzle completion, and a clue number
+  becoming logically anchored.
 
 ## Try it
 
-No install needed — it's static files. Either open `index.html` directly, or serve it:
+Easiest: just play it live at **https://nonogrampro.netlify.app/** — no setup needed.
+
+To run it locally instead, no install needed either — it's static files. Either open
+`index.html` directly, or serve it:
 
 ```bash
 npx serve .
 ```
 
-Run the solver test suite (plain Node, no test framework installed):
+Run the test suite (plain Node, no test framework installed — 822 tests as of this
+writing):
 
 ```bash
 node test/run.js
@@ -42,38 +69,61 @@ node test/run.js
 
 ```
 src/
-  model.js         Board (mutable play state + move history), Puzzle, cell states,
-                    clue derivation from a solution grid.
-  lineSolver.js     The three line-solving techniques (overlap, edge/completion,
-                    general/gap-forcing), each operating on one row or column at a time.
-  solver.js         Turns line-solving into structured "deduction" objects, one hint at a
-                    time (getNextHint), and the cross-line propagation loop used
-                    internally for full-solving (solveToFixpoint).
-  contradiction.js  On-demand hypothesize-and-propagate search for when no line technique
-                    finds a forced move.
-  mistakes.js       auto-check / on-demand check / remove-bad-marks — three independent
-                    tools, not one setting.
-  hintPhrasing.js   Turns a deduction into player-facing text. See "Hint phrasing" below.
-  firebase.js       Lazy Firebase client (CDN ESM import) for Cloud Functions, Anonymous
-                    Auth, and Firestore — never touches the network at import time, so it's
-                    inert during tests.
-  sounds.js         Sound-effect playback + the persistent mute toggle. Built against
-                    placeholder/silent audio (assets/sounds/) — see that dir's README.
-  stats.js          Cross-device stats + pairing (Anonymous Auth + Firestore + two Cloud
-                    Functions) — bucketed by grid size, no accounts/passwords.
-  fullSolve.js      Solves a whole puzzle (line techniques + contradiction fallback) —
-                    used by tests, and later useful for uniqueness-checking generated
-                    puzzles and technique-based difficulty rating.
-  puzzles.js        A handful of hand-authored sample puzzles standing in for the shared
-                    library (item 9).
-functions/          Firebase Cloud Functions: `phraseHint` (LLM hint phrasing, keeping the
-                    API key out of client code) and `createPairingCode`/`redeemPairingCode`
-                    (cross-device stats pairing) — see functions/README.md for deploy steps.
-firestore.rules     Security rules for the stats/pairing Firestore usage above.
-assets/sounds/      Placeholder (silent) sound effects — see that dir's README.
-test/               Zero-dependency test suite, incl. a brute-force differential test that
-                    checks the line solver's DP against exhaustive enumeration.
-index.html / app.js / styles.css   The playable UI.
+  model.js           Board (mutable play state + move history, with baseline support for
+                      resumed/scanned/drawn puzzles), Puzzle, cell states, clue derivation.
+  lineSolver.js       The line-solving techniques (overlap, edge/completion, general
+                      gap-forcing via automaton match), each operating on one row/column,
+                      plus anchoredClueNumbers (per-number gray-out).
+  solver.js           Turns line-solving into structured "deduction" objects, one hint at
+                      a time (getNextHint), and cross-line propagation (solveToFixpoint).
+  contradiction.js    On-demand hypothesize-and-propagate search for genuinely stuck states.
+  mistakes.js         auto-check / on-demand check / remove-bad-marks.
+  hintPhrasing.js     Turns a deduction into player-facing text (LLM-backed, template
+                      fallback — see "Hint phrasing" below).
+  firebase.js         Lazy Firebase client (CDN ESM import, timeout-wrapped against
+                      blocked/stalled requests) for Cloud Functions, Anonymous Auth, and
+                      Firestore — never touches the network at import time.
+  sounds.js           Sound-effect playback + persistent mute toggle. Real audio files in
+                      assets/sounds/ (see that dir's README) — only per-cell click/drag
+                      sounds were deliberately removed as too noisy; line-lock, mistake,
+                      hint-batch, and puzzle-complete sounds remain.
+  stats.js            Cross-device stats + pairing (Anonymous Auth + Firestore + Cloud
+                      Functions) — bucketed by grid size, no accounts/passwords.
+  fullSolve.js        Solves a whole puzzle (line techniques + contradiction fallback);
+                      also the basis for the draw-a-puzzle uniqueness check — every
+                      technique it uses is sound, so reaching a full solve is itself a
+                      proof the clues have exactly one solution.
+  puzzles.js          The four hand-authored built-in sample puzzles — now shown in the
+                      same library list as every community/scanned/drawn puzzle, not a
+                      stand-in for it.
+  puzzleLibrary.js    All Firestore-backed puzzle-library operations: save/fetch/load/
+                      rename puzzles, save/load/delete in-progress puzzle state, and the
+                      personal + global fastest-time stat reads/writes.
+  gridDetect.js       Scan flow: auto-detects a puzzle's grid box in a photo.
+  ocr.js / ocrSegment.js   Scan flow: Tesseract.js-based clue-number OCR with
+                      glyph-geometry segmentation for reliable multi-digit reads.
+  cellStateDetect.js  Scan flow: classifies each detected cell as filled/empty/unknown.
+  scanPuzzle.js       Scan flow: turns detected clues + grid into a solved, playable
+                      puzzle (also reused by the draw-a-puzzle wizard's own screen flow).
+  scanUI.js           The scan-a-puzzle wizard UI — dimension entry on its own screen
+                      shown first (matching draw-a-puzzle's pattern, which avoids a real
+                      iOS scroll bug — see Technical notes below), then photo → detected
+                      grid → clue correction → fill-state review → play.
+  tooltip.js          Custom tap/hover tooltips for icon-only toolbar buttons (native
+                      `title` tooltips are unreliable on iOS Safari).
+functions/            Firebase Cloud Functions: phraseHint (LLM hint phrasing),
+                      createPairingCode/redeemPairingCode (cross-device pairing), and
+                      recordFastestTime (validates and writes the global fastest-time
+                      stat server-side — never a plain client-writable field).
+firestore.rules       Security rules for stats/pairing, the puzzle library
+                      (puzzles/{puzzleId}), per-user solved/in-progress/hidden tracking,
+                      and puzzleStats/{puzzleId} (public-read, callable-only write).
+assets/sounds/        Real audio files for every effect, including `anchor.mp3` (a clue
+                      number becoming logically anchored) — see that dir's README.
+test/                 Zero-dependency test suite (822 tests), incl. a brute-force
+                      differential test of the line solver.
+index.html / app.js / styles.css   The playable UI, toolbar, library modal, scan/draw
+                      wizards, and all client-side wiring.
 ```
 
 The solver never produces player-facing text — only structured facts:
@@ -116,28 +166,38 @@ doesn't matter at nonogram sizes.
 `phraseDeduction(deduction)` calls the `phraseHint` Firebase Cloud Function
 (`functions/index.js`) through `src/firebase.js`, sending it the structured deduction; the
 function calls the LLM API server-side (API key never touches client code) and returns
-phrased text. If that call fails for any reason — offline, the function isn't deployed yet,
-a transient error — `phraseDeduction` falls back to the original deterministic template
-renderer, so a hint is never silently missing. `setPhraser()` still lets tests or dev swap in
-a different implementation without editing this module.
+phrased text. If that call fails for any reason — offline, a transient error — `phraseDeduction`
+falls back to the original deterministic template renderer, so a hint is never silently
+missing. **The function is deployed and live.** `setPhraser()` still lets tests or dev swap
+in a different implementation without editing this module.
 
-**The function is written but not deployed** — see [functions/README.md](functions/README.md)
-for the one-time `firebase login` / secret-setup / `firebase deploy` steps. Until deployed,
-the app plays exactly as before, using the template phrasings.
+## Notes on some harder-won design decisions
 
-## Open questions carried forward from the design spec
-
-- **Puzzle uniqueness at generation time** (item 8): a derived puzzle might not have a
-  unique solution. `fullSolve.js`'s `solvePuzzleFully` can already check solvability against
-  a *known* solution; a uniqueness checker (solve from clues alone with no target, then see
-  if more than one solution exists) is a natural extension once generation exists.
-  Deferred per the spec.
-- **Firestore schema + sharing model** (item 9): fields, indexing, and friends/share-by-code
-  are undesigned. Deferred per the spec.
-- **Photo→grid threshold/grid-size controls** (item 8): needs its own design pass.
+- **Puzzle uniqueness is enforced, not assumed.** Both the draw-a-puzzle flow and (had it
+  been built) item 8 needed a way to reject a puzzle whose clues don't uniquely determine
+  one solution — this app's completion/mistake-checking compares against one specific
+  stored solution grid, so a non-unique puzzle would produce false "mistakes" for a player
+  who found a different, equally valid solution. `fullSolve.js`'s solver is sound (every
+  technique it uses only fixes a cell when every valid completion agrees), so reaching a
+  full solve from the clues alone is itself a proof of uniqueness — no separate checker
+  was needed.
+- **A real, hard-won iOS Safari scroll bug** turned out to need six failed rounds of
+  attempting to fix the underlying `visualViewport` mechanism directly before the actual
+  fix was found: don't fix it, avoid triggering it. The bug's real trigger turned out to be
+  a text input's on-screen keyboard opening near the *bottom* of the screen — both the
+  scan wizard's dimension entry (moved to its own screen shown first) and the puzzle
+  library's rename control (moved to a top-pinned popup instead of editing in place) were
+  restructured around this, and both are confirmed fixed on a real device. The underlying
+  WebKit behavior itself was never fixed — if a future feature puts a text input near the
+  bottom of the screen, the same risk applies.
+- **The global fastest-time stat lives in its own `puzzleStats` collection**, not a field on
+  `puzzles/{puzzleId}` — built-in puzzles have no document in that collection at all, so a
+  stats-only field there would have corrupted the library's "every doc here is a full
+  community puzzle" read logic. It's written only through a validating Cloud Function,
+  never directly by a client, so a stored time can't be faked.
 
 ## Sample puzzles
 
-`src/puzzles.js` has four small hand-authored puzzles (a heart, an arrow, a plus, and a
-boat) so the app is playable today. They stand in for the shared library until item 9 is
-built.
+`src/puzzles.js` has four hand-authored puzzles (a heart, an arrow, a plus, and a boat) —
+they now appear in the same browsable library as every scanned, drawn, and community
+puzzle, distinguished only by a light "Built-in" badge.

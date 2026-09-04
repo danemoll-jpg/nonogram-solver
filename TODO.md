@@ -942,12 +942,16 @@ Completed Tasks
      **Deployed and live**, with the project owner's explicit go-ahead: `firebase deploy
      --only firestore:rules` and `firebase deploy --only functions:recordFastestTime`
      both succeeded (`recordFastestTime(us-central1)` created; `puzzleStats` rule
-     released to `cloud.firestore`). Before that deploy, the code was already
-     preview-verified against the live Firebase project's fail-soft path (the library
-     loaded normally with no `🌍` values and no thrown errors, exactly as expected while
-     the function/rule didn't exist yet) — the actual end-to-end "does a real completion
-     write a real global time and does another player's library show it" round trip
-     hasn't been exercised yet, just the plumbing and the fail-soft path.
+     released to `cloud.firestore`). **CONFIRMED: the project owner solved a puzzle
+     for real and saw their own completion correctly write and display a global
+     time in their own library.** The one remaining gap — whether a DIFFERENT
+     player's library also shows that same global time — was never separately
+     tested (would need a second account/device), but the project owner has
+     decided to treat this as complete rather than block on arranging that: the
+     read path is the same `fetchLibraryPuzzles`/display logic every other
+     stat already uses correctly for any viewer, so there's good reason to
+     expect it behaves the same way here. **If this turns out to be broken for
+     other players later, revisit then — not treated as an open item right now.**
   3. **Drag-on-already-filled-cell bug, fixed in `app.js`.** Confirmed root cause exactly
      as suspected: `pointerdown` used `targetStateFor`'s click-toggle result (clear an
      already-marked cell) to set the WHOLE drag's `paintState`, so starting a Fill-mode
@@ -988,20 +992,23 @@ Completed Tasks
   - `node --check` clean on every edited file; all 822 tests pass (unchanged — none of
     these four are covered by the existing pure-module test harness; app.js's pointer/sound
     logic isn't unit-tested today, consistent with this project's "preview-verify app.js,
-    unit-test src/ pure modules" pattern elsewhere). Not real-device-confirmed (same
-    standing caveat as most of this doc's recent rounds).
+    unit-test src/ pure modules" pattern elsewhere). **CONFIRMED on the real device by the
+    project owner** — items 2 and 4 (global fastest-time, anchored-number sound)
+    specifically confirmed; items 1 and 3 (board-drag scroll, drag-on-filled-cell)
+    confirmed via no issues experienced during real play.
 
 Current Objective (Focus Area)
 
 * **None queued right now.** The four items from last round (board-drag scroll bug, global
   fastest-time stat, drag-on-already-filled-cell bug, anchored-number sound) are all fully
-  done — see the Completed Tasks entry above for the full writeup of each, including the
-  global fastest-time stat's Cloud Function + Firestore rule, now deployed and live with
-  the project owner's explicit go-ahead (`recordFastestTime(us-central1)` created;
-  `puzzleStats` rule released), and the anchored-number sound's real audio file, now
-  dropped in at `assets/sounds/anchor.mp3` by the project owner (see
-  `assets/sounds/README.md`) — no code changes needed, since `src/sounds.js` already
-  pointed there.
+  done and CONFIRMED on the real device, including the global fastest-time stat's Cloud
+  Function + Firestore rule (`recordFastestTime(us-central1)` created; `puzzleStats` rule
+  released). **Timeline clarified by the project owner**: the anchored-number sound's real
+  audio file was already dropped in at `assets/sounds/anchor.mp3` (see
+  `assets/sounds/README.md`) BEFORE this round's deployment, not as a separate step
+  afterward — that's specifically why the real-device confirmation validated it working
+  immediately rather than needing a follow-up check. No code changes were needed either
+  way, since `src/sounds.js` already pointed there.
   - The rename-popup fix and the hide-a-puzzle feature (bundled together per the
     deploy-batching note) remain done, deployed, and confirmed on the real device — see
     Completed Tasks above. The scan wizard's own size-first restructure remains genuinely
