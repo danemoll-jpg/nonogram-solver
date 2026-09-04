@@ -10,8 +10,9 @@
 // manual drag-to-select only when auto-detection isn't confident — see gridDetect.js's
 // findGridCandidates/detectBestGrid) -> OCR every row's and column's clue strip -> a
 // correction pass (editable text next to a thumbnail of what was actually cropped) -> solve
-// the confirmed clues into a real solution and hand the finished puzzle back to app.js via the
-// onPuzzleReady callback.
+// the confirmed clues into a real solution -> confirm/correct the detected fill/X state ->
+// name the puzzle and "Play it" publishes to the public shared library (Current Objective #2
+// — see TODO.md) and hands the finished puzzle back to app.js via the onPuzzleReady callback.
 //
 // The grid step always has one clear, visible, enabled-when-ready button to move forward
 // ("Looks good") regardless of whether the rectangle came from auto-detection or a manual
@@ -152,8 +153,11 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     els.scanRowClueList.innerHTML = '';
     els.scanColClueList.innerHTML = '';
     els.scanRecheckWarning.classList.add('hidden');
+    els.scanInvertSuspect.classList.add('hidden');
     els.scanBuildError.classList.add('hidden');
     els.scanFillstateGrid.innerHTML = '';
+    els.scanNameInput.value = '';
+    els.scanNameError.classList.add('hidden');
     showStep('size');
   }
 
@@ -524,7 +528,11 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
         `Row ${i + 1}`,
         canvas,
         parseClueText(text).join(', '),
-        state.fillMarks[i]
+        // A live getter, not a snapshot array — Current Objective #1's flip-fill-state fix
+        // mutates state.fillMarks in place after these rows already exist, so refreshFlag
+        // needs to re-read the CURRENT marks each time it runs, not whatever was true when
+        // this row was first built.
+        () => state.fillMarks[i]
       );
       state.rowClueInputs.push(input);
     }
@@ -533,8 +541,13 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
       const text = await recognizeStripSegmented(canvas);
       done++;
       els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
-      const colFillLine = state.fillMarks.map((row) => row[i]);
-      const input = buildClueRow(els.scanColClueList, `Col ${i + 1}`, canvas, parseClueText(text).join(', '), colFillLine);
+      const input = buildClueRow(
+        els.scanColClueList,
+        `Col ${i + 1}`,
+        canvas,
+        parseClueText(text).join(', '),
+        () => state.fillMarks.map((row) => row[i])
+      );
       state.colClueInputs.push(input);
     }
 
@@ -885,14 +898,47 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   // directly and points back at the step that actually needs revisiting.
   const RECHECK_WARN_FRACTION = 0.3;
 
-  function updateRecheckWarning() {
-    const flaggedFraction = (container) => {
-      const rows = [...container.querySelectorAll('.scan-clue-row')];
-      if (rows.length === 0) return 0;
-      return rows.filter((r) => r.classList.contains('scan-clue-row--flagged')).length / rows.length;
-    };
-    const rowFrac = flaggedFraction(els.scanRowClueList);
-    const colFrac = flaggedFraction(els.scanColClueList);
+  // New: the inversion-detection signature (Current Objective #1 — see TODO.md). Deliberately
+  // much higher than RECHECK_WARN_FRACTION above and checked across BOTH axes COMBINED (a
+  // wrong row/column count only ever skews one axis's slicing, but a fill/X inversion affects
+  // every line on both axes uniformly) — "the vast majority, not literally every line" per the
+  // project owner's own framing, since a genuine inversion could still have one ordinary,
+  // unrelated OCR misread layered on top.
+  const INVERSION_SUSPECT_FRACTION = 0.9;
+
+  function flaggedCount(container) {
+    return [...container.querySelectorAll('.scan-clue-row--flagged')].length;
+  }
+
+  function lineCount(container) {
+    return container.querySelectorAll('.scan-clue-row').length;
+  }
+
+  // Recomputes both line-health warnings from the --flagged classes refreshFlag already
+  // maintains live. Renamed from the original updateRecheckWarning now that it drives two
+  // distinct signals, not one — see each warning's own comment below for why they're mutually
+  // exclusive rather than ever shown together.
+  function updateLineHealthWarnings() {
+    const rowFlagged = flaggedCount(els.scanRowClueList);
+    const colFlagged = flaggedCount(els.scanColClueList);
+    const rowTotal = lineCount(els.scanRowClueList);
+    const colTotal = lineCount(els.scanColClueList);
+    const totalFlagged = rowFlagged + colFlagged;
+    const totalLines = rowTotal + colTotal;
+    const looksInverted = totalLines > 0 && totalFlagged / totalLines >= INVERSION_SUSPECT_FRACTION;
+    els.scanInvertSuspect.classList.toggle('hidden', !looksInverted);
+
+    // The inversion diagnosis is strictly more specific/confident than the plain miscount
+    // warning below (and would satisfy that warning's own lower threshold too, at this
+    // fraction) — showing both would bury the more useful, actionable one, so it wins outright
+    // rather than stacking.
+    if (looksInverted) {
+      els.scanRecheckWarning.classList.add('hidden');
+      return;
+    }
+
+    const rowFrac = rowTotal > 0 ? rowFlagged / rowTotal : 0;
+    const colFrac = colTotal > 0 ? colFlagged / colTotal : 0;
     if (rowFrac >= RECHECK_WARN_FRACTION || colFrac >= RECHECK_WARN_FRACTION) {
       const which = rowFrac >= RECHECK_WARN_FRACTION && colFrac >= RECHECK_WARN_FRACTION
         ? 'Rows and columns'
@@ -908,7 +954,23 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     }
   }
 
-  function buildClueRow(container, labelText, canvas, prefillText, fillLine) {
+  // New (Current Objective #1): the one-click fix once an inversion is suspected — there's
+  // only one way to "un-invert" a fill/empty swap, unlike the oversized-clue-merge case, which
+  // had no similarly unambiguous auto-fix. Flips every detected cell in place (UNKNOWN cells
+  // are left alone — they were never part of the swap) and re-checks every line, which will
+  // naturally clear scanInvertSuspect again once the flip actually fixes it (or leave it
+  // showing, if something else is also wrong — no need to force-hide it here).
+  els.scanBtnFlipFillstate.addEventListener('click', () => {
+    for (let r = 0; r < state.rows; r++) {
+      for (let c = 0; c < state.cols; c++) {
+        const s = state.fillMarks[r][c];
+        state.fillMarks[r][c] = s === FILLED ? EMPTY : s === EMPTY ? FILLED : UNKNOWN;
+      }
+    }
+    for (const input of [...state.rowClueInputs, ...state.colClueInputs]) input.refreshFlag();
+  });
+
+  function buildClueRow(container, labelText, canvas, prefillText, getFillLine) {
     const row = document.createElement('div');
     row.className = 'scan-clue-row';
     const label = document.createElement('span');
@@ -941,6 +1003,12 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     // clear the flag immediately (the same feedback loop the flag exists to speed up),
     // without waiting for a later re-render of the whole correction step.
     function refreshFlag() {
+      // Read fresh every call, not captured once at build time — Current Objective #1's
+      // flip-fill-state fix mutates state.fillMarks well after this row exists, and this needs
+      // to see that change the next time it's asked to recheck (see els.scanBtnFlipFillstate's
+      // handler, the only caller that invokes this externally via input.refreshFlag rather
+      // than the 'input' listener below).
+      const fillLine = getFillLine();
       const clue = parseClueText(input.value);
       row.classList.toggle('scan-clue-row--flagged', lineLooksWrong(clue, fillLine));
       const oversized = oversizedClueSuspect(clue, fillLine.length);
@@ -951,10 +1019,13 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
         : repeated
           ? `This might have a misread digit: most numbers here read ${repeated.expectedValue}, but one reads ${repeated.suspectedValue}.`
           : '';
-      updateRecheckWarning();
+      updateLineHealthWarnings();
     }
     input.addEventListener('input', refreshFlag);
     refreshFlag();
+    // Exposed so code outside this closure (the flip-fill-state fix above) can force a recheck
+    // without faking an 'input' event.
+    input.refreshFlag = refreshFlag;
 
     return input;
   }
@@ -1054,6 +1125,71 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
 
   // ---- step 5: correct + build ----
 
+  // Current Objective #4 (see TODO.md): when "Build puzzle" fails, name the likely problem
+  // line(s) instead of a generic message the player has to hunt through every cell to
+  // diagnose — direct ask: "I don't want to have to search each cell." Two tiers:
+  //   1. Certain — any line already failing its own detected-fill-vs-clue check (the same
+  //      isLineConsistent-backed --flagged border the correction step already shows live).
+  //      These are DEFINITELY wrong regardless of anything else going on, so they're named
+  //      directly and scrolled to rather than left for the player to spot on their own.
+  //   2. Best-effort — reached only when every line passes that check individually but the
+  //      whole set is still unsolvable: no single line can be named with certainty here
+  //      (several different lines could each be "the" wrong one), but solvePuzzleFully's own
+  //      contradiction search already found where cross-line propagation hit a genuine dead
+  //      end (see fullSolve.js/scanPuzzle.js's contradictionLine) — a real, if not certain,
+  //      lead, surfaced with --build-suspect's distinct amber styling and phrased as a guess.
+  // Falls through to the original generic message only when neither tier has anything to show
+  // (a plain stall with no localized lead at all).
+  function showBuildFailure(result) {
+    const flaggedRows = state.rowClueInputs
+      .map((el, i) => ({ i, row: el.closest('.scan-clue-row') }))
+      .filter(({ row }) => row.classList.contains('scan-clue-row--flagged'));
+    const flaggedCols = state.colClueInputs
+      .map((el, i) => ({ i, row: el.closest('.scan-clue-row') }))
+      .filter(({ row }) => row.classList.contains('scan-clue-row--flagged'));
+
+    if (flaggedRows.length > 0 || flaggedCols.length > 0) {
+      const labels = [
+        ...flaggedRows.map(({ i }) => `Row ${i + 1}`),
+        ...flaggedCols.map(({ i }) => `Column ${i + 1}`),
+      ];
+      const single = labels.length === 1;
+      els.scanBuildError.textContent =
+        `${labels.join(', ')} ${single ? "doesn't" : "don't"} match ${single ? 'its' : 'their'} ` +
+        "own detected fill pattern in the photo (outlined in red above) — fix " +
+        `${single ? 'it' : 'those'} first, ${single ? "it's" : "they're"} almost certainly the cause.`;
+      els.scanBuildError.classList.remove('hidden');
+      // Instant, not smooth: confirmed directly (see TODO.md) that a smooth scrollIntoView on
+      // this nested overflow:auto list (.scan-clue-list, inside .scan-screen__body's own outer
+      // scroll region) can silently stop partway rather than completing — an animated scroll
+      // is a nice-to-have, reliably landing on the actual problem line is the whole point.
+      (flaggedRows[0] || flaggedCols[0]).row.scrollIntoView({ block: 'center' });
+      return;
+    }
+
+    if (result.contradictionLine) {
+      const { type, index } = result.contradictionLine;
+      const list = type === 'row' ? state.rowClueInputs : state.colClueInputs;
+      const label = type === 'row' ? `Row ${index + 1}` : `Column ${index + 1}`;
+      const row = list[index]?.closest('.scan-clue-row');
+      if (row) {
+        row.classList.add('scan-clue-row--build-suspect');
+        row.scrollIntoView({ block: 'center' }); // instant — see the tier-1 branch's own comment above
+      }
+      els.scanBuildError.textContent =
+        `No single line looks wrong on its own, but solving hit a dead end at ${label} (outlined ` +
+        'in amber above) once the other clues were worked out — worth checking first, though ' +
+        "it's a best-effort guess here, not a certainty.";
+      els.scanBuildError.classList.remove('hidden');
+      return;
+    }
+
+    els.scanBuildError.textContent =
+      "Couldn't find a valid solution from these clues — double-check the numbers above " +
+      '(a common cause is one clue number misread) and try again.';
+    els.scanBuildError.classList.remove('hidden');
+  }
+
   els.scanBtnBuild.addEventListener('click', () => {
     const rowClues = state.rowClueInputs.map((el) => parseClueText(el.value));
     const colClues = state.colClueInputs.map((el) => parseClueText(el.value));
@@ -1066,11 +1202,13 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
       rowClues,
       colClues,
     });
+    // Clear any tier-2 mark left over from a previous failed attempt before evaluating this
+    // one — tier 1's --flagged marks don't need this, refreshFlag already keeps those current.
+    for (const el of [...state.rowClueInputs, ...state.colClueInputs]) {
+      el.closest('.scan-clue-row').classList.remove('scan-clue-row--build-suspect');
+    }
     if (!result.solved) {
-      els.scanBuildError.textContent =
-        "Couldn't find a valid solution from these clues — double-check the numbers above " +
-        '(a common cause is one clue number misread) and try again.';
-      els.scanBuildError.classList.remove('hidden');
+      showBuildFailure(result);
       return;
     }
     els.scanBuildError.classList.add('hidden');
@@ -1096,11 +1234,17 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   // "Save to library" step used to make optional (savePuzzleToLibrary, unchanged) — then
   // plays as a completely normal authored/library puzzle from that point on: real move
   // history, the repeatable Undo button, Save progress, and stats all "just work" with no
-  // scan-specific gating left anywhere in app.js. The blank grid + clues are what's published
-  // (never state.fillMarks — same "always a blank-puzzle snapshot of the definition" rule the
-  // old manual save used), with a generic placeholder title — every library puzzle's real
-  // name stays hidden until solved anyway (see app.js's renderLibraryList), and the creator
-  // can rename it afterward via the library's existing rename affordance.
+  // scan-specific gating left anywhere in app.js. The creator can rename it afterward via the
+  // library's existing rename affordance regardless of what's entered here.
+  //
+  // Current Objective #2 (see TODO.md): this now asks for a real name before publishing,
+  // reusing the exact same required-title-prompt pattern drawUI.js's own "Play it" handler
+  // already established, rather than the old silent auto-publish under a generic "Scanned
+  // puzzle" placeholder. The blank grid + clues are still what's published (never
+  // state.fillMarks — same "always a blank-puzzle snapshot of the definition" rule the old
+  // manual save used); every library puzzle's real name stays hidden until solved anyway (see
+  // app.js's renderLibraryList), so this name is really only for the creator's own later
+  // browsing/searching, same reasoning drawUI.js's own comment gives.
   //
   // If the publish fails (offline, not deployed yet), the player can still play — falls back
   // to the original ephemeral scan-<timestamp> id / source:'scan' behavior, which still gets
@@ -1110,6 +1254,13 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   els.scanBtnPlay.addEventListener('click', async () => {
     const p = state.pendingPuzzle;
     if (!p) return;
+    const title = els.scanNameInput.value.trim();
+    if (!title) {
+      els.scanNameError.textContent = 'Give this puzzle a name before playing it.';
+      els.scanNameError.classList.remove('hidden');
+      return;
+    }
+    els.scanNameError.classList.add('hidden');
     els.scanBtnPlay.disabled = true;
     els.scanPlayStatus.textContent = 'Adding to the puzzle library…';
     try {
@@ -1123,10 +1274,15 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
         cols: p.cols,
         rowClues: p.rowClues,
         colClues: p.colClues,
-        title: 'Scanned puzzle',
+        title,
       });
       p.id = libraryId;
       p.source = 'authored';
+      // buildScannedPuzzle (see els.scanBtnBuild above) stamped a placeholder `name` before
+      // the player had chosen a real title — without this, the completion modal on THIS very
+      // play-through would reveal the placeholder instead of what was just entered (same fix,
+      // same reasoning as drawUI.js's own drawBtnPlay handler).
+      p.name = title;
     } catch (err) {
       console.warn('savePuzzleToLibrary failed — playing locally without save/stats support', err);
     }

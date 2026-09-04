@@ -353,45 +353,55 @@ for the full writeup, including a natural (not required) extension: the sum of a
 line's clue numbers plus minimum gaps can also exceed the line length even when no
 single number does.
 
-**Current objective has four items**:
+**Four items — fill/X inversion detection, scan naming popup, library
+widen/medal icon, tiered build-failure line marking — done, mostly
+preview-verified; not yet real-device-confirmed.**
+- **Fill/X inversion detection**: `updateLineHealthWarnings` (`src/scanUI.js`)
+  adds a much higher, both-axes-combined threshold (0.9) on top of the existing
+  per-axis 0.3 miscount check, reusing the same `--flagged` classes
+  `isLineConsistent` already maintains live rather than a new detector. A
+  one-click "Flip fill/X and recheck" inverts `state.fillMarks` in place.
+  Found and fixed a real bug along the way: the column check used to snapshot
+  its fill line once at build time (`state.fillMarks.map(...)`, a fresh array,
+  not a live reference), so the flip button would have had no visible effect
+  on any column — fixed by switching every row/col check to a `getFillLine()`
+  closure re-read on demand. Verified directly in preview: forcing ~100%
+  flagged shows the new banner (and correctly suppresses the lower-priority
+  miscount warning); flipping repeatedly confirmed 3 real columns' flagged
+  state genuinely toggles, proving the fix (a stale snapshot could never
+  change). The real ground-truth image's own genuine OCR noise (10%) stayed
+  well under both thresholds, correctly triggering neither.
+- **Scan naming popup**: `#scan-step-done` now has the same required-title
+  field `draw-step-done` already had; `scanBtnPlay` validates it the same way
+  `drawBtnPlay` does before publishing. **Verified end-to-end against the live
+  Firestore project**: an empty name was rejected inline; a real name
+  ("Verification Dragon") published successfully with a real Firestore id.
+- **Library widen + medal icon**: new `.modal-card--library` (46rem) widens
+  only the library modal (kept separate from the shared `.modal-card--wide`,
+  which also backs How-to-play/Stats). The old "· best 0:45" text is now a
+  `.library-row__medal` (🥇/🥉) using the existing tooltip mechanism for the
+  real time. Verified in preview against 3 real solved puzzles (all gold, no
+  global record yet recorded for any — the documented default) plus a direct
+  tooltip-bubble check.
+- **Tiered build-failure line marking**: new `showBuildFailure`
+  (`src/scanUI.js`). Tier 1 (certain) names every already-`--flagged` line
+  directly — **hit a real case unprompted**: rebuilding with the ground-truth
+  image's own genuine uncorrected OCR text failed to solve and correctly named
+  the 5 actually-wrong lines. Tier 2 (best-effort) required forwarding
+  `solveToFixpoint`'s `contradictionLine` through `solvePuzzleFully`
+  (`src/fullSolve.js`) and `buildScannedPuzzle` (`src/scanPuzzle.js`), unit-
+  tested (`scanPuzzle.test.js`); its UI branch could not be triggered through a
+  real scenario in the time available (every attempt also tripped tier 1's own
+  higher-priority check first) and is unverified beyond code inspection — real
+  but structurally low-risk. **A real bug was found and fixed during
+  verification**: the scroll-to-the-flagged-line call used `behavior: 'smooth'`,
+  which measurably failed to complete in browser-preview testing
+  (`scrollTop` stuck at 137px of a needed ~1200px); switched to instant, which
+  landed correctly (confirmed no page CSS opts into `scroll-behavior: smooth`
+  that this would have relied on).
+- All 829 tests pass. `node --check` clean.
 
-1. **New real bug + a sound auto-detection idea: a scanned puzzle had fills/X's
-   fully reversed.** The project owner's proposed detection signature is sound:
-   a puzzle where essentially ALL lines fail their own local consistency check
-   simultaneously (not just a few) is a near-certain sign of one systematic
-   error (fill/empty inversion), not scattered random noise. Unlike the
-   oversized-clue case, this has an unambiguous fix (just flip every cell), so
-   a real one-click "this looks inverted — flip fill/X?" prompt is worth
-   building, not just a flag. Exact threshold (all lines vs. "vast majority")
-   is Code's call.
-2. **New: scanning should get the same immediate naming-at-save popup that
-   "draw a puzzle" already has** — currently scan auto-publishes without
-   asking. Reuse the same required-title-prompt mechanism already built for
-   drawing, applied to scan's publish action too.
-3. **New: widen the library screen, and replace the text "best" time with a
-   compact gold/copper medal icon — the puzzle name is getting covered up
-   again**, same recurring problem class as the original Rename-button issue.
-   Gold if the player's personal best matches the global record, copper
-   otherwise (default to gold if no global record exists yet for that
-   puzzle). Show the actual time via the existing tooltip mechanism rather
-   than as row text.
-4. **When "Build puzzle" fails, mark the likely problem lines instead of a
-   generic failure message.** Scoped as two tiers: (1) easy/
-   certain — surface any line that fails its own local consistency check
-   (`isLineConsistent`, the same one already driving the existing red flag) directly,
-   rather than leaving the player to notice it themselves; (2) harder/best-effort —
-   when every line passes locally but the whole set is still inconsistent, no single
-   line can be named with certainty, but running the solver/contradiction-search and
-   surfacing whichever lines were involved at the dead end is a reasonable heuristic
-   lead. Tier 1 is the strong, quick win — worth doing regardless of whether tier 2
-   gets picked up the same round.
-
-See `TODO.md` for full detail on all four.
-
-**The four items from last round's Current Objective are all done and CONFIRMED on
-the real device (items 2 and 4 specifically confirmed by the project owner; items 1
-and 3 confirmed via no issues experienced during real play) — no current objective
-is queued right now.**
+**No current objective is queued right now.**
 
 1. **Board-drag scroll bug — fixed and CONFIRMED** via `touch-action: none` on
    `.nono-grid` (not `.board-root`, which keeps its `overflow: auto` fallback-scroll

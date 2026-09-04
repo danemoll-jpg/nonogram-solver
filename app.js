@@ -134,10 +134,14 @@ const els = {
   scanRowClueList: document.getElementById('scan-row-clue-list'),
   scanColClueList: document.getElementById('scan-col-clue-list'),
   scanRecheckWarning: document.getElementById('scan-recheck-warning'),
+  scanInvertSuspect: document.getElementById('scan-invert-suspect'),
+  scanBtnFlipFillstate: document.getElementById('scan-btn-flip-fillstate'),
   scanBuildError: document.getElementById('scan-build-error'),
   scanBtnBuild: document.getElementById('scan-btn-build'),
   scanFillstateGrid: document.getElementById('scan-fillstate-grid'),
   scanBtnConfirmState: document.getElementById('scan-btn-confirm-state'),
+  scanNameInput: document.getElementById('scan-name-input'),
+  scanNameError: document.getElementById('scan-name-error'),
   scanBtnPlay: document.getElementById('scan-btn-play'),
   scanPlayStatus: document.getElementById('scan-play-status'),
   scanBtnCancel: document.getElementById('scan-btn-cancel'),
@@ -1615,17 +1619,35 @@ function renderLibraryList(entries, solvedPuzzles, inProgressPuzzles, hiddenPuzz
       const statsSpan = document.createElement('span');
       statsSpan.className = 'library-row__personal-stats';
       const times = `${solved.timesSolved}×`;
-      const best = solved.bestTimeMs != null ? ` · best ${formatDuration(solved.bestTimeMs)}` : '';
-      // Global fastest-time-across-all-users item (Current Objective — see TODO.md): shown
-      // only once the puzzle is solved/revealed, alongside (not instead of) the player's own
-      // personal best above — a separate 🌍-prefixed value so it reads as a distinct, global
-      // stat rather than a second personal one. Absent until someone's completion has
-      // actually reported a time for this puzzle (see submitGlobalFastestTime) — no
-      // placeholder shown before then.
+      // Global fastest-time-across-all-users item (Current Objective — see TODO.md): read
+      // alongside (not instead of) the player's own personal best below, absent until
+      // someone's completion has actually reported a time for this puzzle (see
+      // submitGlobalFastestTime) — no placeholder shown before then.
       const globalTimeMs = globalFastestTimes.get(entry.id);
       const global = globalTimeMs != null ? ` · 🌍 ${formatDuration(globalTimeMs)}` : '';
-      statsSpan.textContent = `${times}${best}${global}`;
+      statsSpan.textContent = `${times}${global}`;
       li.append(solvedBadge, statsSpan);
+
+      // Current Objective #3 (see TODO.md): replaces the old "· best 0:45" text — the puzzle's
+      // own name was getting covered up again, same recurring problem class as the original
+      // Rename-button issue. Gold if this player's own best matches (or beats — see the
+      // comparison below) the current global record, or if no global record has been recorded
+      // yet at all (their own time is, by definition, the only known one so far, which reads
+      // as more sensible than defaulting to copper); copper otherwise. The actual time moves
+      // into the shared tooltip mechanism (src/tooltip.js) rather than sitting in row text.
+      if (solved.bestTimeMs != null) {
+        const isGold = globalTimeMs == null || solved.bestTimeMs <= globalTimeMs;
+        const medal = document.createElement('span');
+        medal.className = 'library-row__medal';
+        medal.textContent = isGold ? '🥇' : '🥉';
+        medal.setAttribute('tabindex', '0');
+        medal.setAttribute('role', 'img');
+        const label = `Your best: ${formatDuration(solved.bestTimeMs)}`;
+        medal.setAttribute('aria-label', label);
+        medal.setAttribute('data-tooltip', label);
+        attachTooltip(medal);
+        li.appendChild(medal);
+      }
     } else if (inProgress) {
       const inProgressBadge = document.createElement('span');
       inProgressBadge.className = 'library-row__in-progress';

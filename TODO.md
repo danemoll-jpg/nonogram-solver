@@ -1032,105 +1032,111 @@ Completed Tasks
     line length even when no single number does — that combination is equally
     impossible and could be flagged the same way. Deferred, not blocking.
 
+* **Four items — done, three preview-verified end-to-end against the real 25x25
+  ground-truth image and the live Firestore project; the fourth's data layer is
+  unit-tested, its UI branch verified by code/structure only.**
+  1. **Fill/X inversion detection — built and preview-verified.** New
+     `updateLineHealthWarnings` (`src/scanUI.js`, replacing `updateRecheckWarning`)
+     adds a second, much higher threshold (`INVERSION_SUSPECT_FRACTION = 0.9`,
+     checked across BOTH axes combined, vs. the existing 0.3-per-axis miscount
+     warning) reusing the exact same `--flagged` classes `isLineConsistent`
+     already maintains live — no new detection system. When tripped, a new
+     `#scan-invert-suspect` banner (styled more assertively than the plain
+     miscount warning, since this is a near-certain single-cause diagnosis, not a
+     fuzzy pattern read) offers a one-click "Flip fill/X and recheck" fix that
+     inverts every FILLED/EMPTY cell in `state.fillMarks` in place (UNKNOWN
+     untouched) and re-runs every row/col's check. **Required a real fix along
+     the way**: `buildClueRow`'s column check used to capture a one-time snapshot
+     of its fill line (`state.fillMarks.map(row => row[i])`, a fresh array, not a
+     live reference) — the flip button would have silently had no effect on any
+     column's flag state. Fixed by switching every row/col to a `getFillLine()`
+     closure re-read on every check, with `input.refreshFlag` exposed so the flip
+     handler can force a recheck externally. **Verified directly in browser
+     preview**: forcing ~100% of lines flagged (via deliberately-impossible clue
+     text) showed the banner and suppressed the lower-priority miscount warning;
+     flipping and un-flipping a specific column's clue-vs-fill check 25 times
+     (one per column) confirmed 3 columns' flagged state genuinely toggled on
+     the flip — proof the getter-based fix works, since a stale snapshot could
+     never change no matter how many times the underlying marks are flipped. The
+     real ground-truth image's own genuine OCR noise (5 of 50 lines, 10%) stayed
+     well under both thresholds, correctly not triggering either warning.
+  2. **Scan wizard naming popup — built and verified end-to-end against the live
+     Firestore project.** `#scan-step-done` now has the same required-title field
+     `draw-step-done` already had (`scan-name-input`/`scan-name-error`);
+     `scanBtnPlay` validates it exactly like `drawBtnPlay` before publishing,
+     passing the real title to `savePuzzleToLibrary` instead of the old hardcoded
+     "Scanned puzzle," and patches `p.name` for this session's own completion
+     modal the same way draw's handler already does. Verified live: an empty
+     name was rejected with an inline error and did not publish; a real typed
+     name ("Verification Dragon") published successfully, started the puzzle
+     with a real Firestore-backed id, and showed up as an in-progress row in the
+     library the moment the library was reopened (the existing
+     open-library auto-save trigger, unaffected by this round).
+  3. **Library widen + medal icon — built and preview-verified.** New
+     `.modal-card--library` (46rem) widens only the library modal, applied
+     alongside `.modal-card--wide` in `index.html` rather than changing that
+     shared class itself (also used by How-to-play/Stats, neither of which has
+     this row-crowding problem). The old "· best 0:45" text in
+     `.library-row__personal-stats` is gone; a new `.library-row__medal` span
+     (🥇/🥉, chosen by `solved.bestTimeMs <= globalTimeMs`, defaulting gold when
+     no global record exists yet) carries the real time via
+     `src/tooltip.js`'s existing `data-tooltip` mechanism instead of row text.
+     Verified directly in preview against three real solved puzzles in the live
+     account: all three show 🥇 (no global record recorded yet for any of them,
+     the documented default), and dispatching a real `mouseenter` on one
+     confirmed the tooltip bubble shows "Your best: 0:13" correctly.
+  4. **Tiered build-failure line marking — built; tier 1 preview-verified against
+     a REAL build failure on the ground-truth image, tier 2's solver-side data
+     unit-tested, its UI branch verified by inspection only.** New
+     `showBuildFailure` (`src/scanUI.js`) replaces the old generic "couldn't find
+     a solution" message. Tier 1 reads the already-live `--flagged` classes
+     (no recomputation needed) and names every flagged row/column directly,
+     e.g. "Row 15, Row 20, Row 23... don't match their own detected fill pattern
+     ... fix those first." Tier 2 needed a real solver change: `contradictionLine`
+     (already computed by `solveToFixpoint`, previously discarded) is now
+     forwarded through `solvePuzzleFully` (`src/fullSolve.js`) and
+     `buildScannedPuzzle` (`src/scanPuzzle.js`) so a genuine cross-line dead-end
+     names a specific best-effort line, marked with a new amber
+     `.scan-clue-row--build-suspect` class (kept separate from the existing
+     `--suspect` class so `refreshFlag`'s live re-check on an unrelated edit
+     can't silently clear it). New `scanPuzzle.test.js` case confirms
+     `reason:'contradiction'` always comes with a `contradictionLine`. **Tier 1
+     hit a REAL case unprompted**: rebuilding with the ground-truth image's own
+     genuine (uncorrected) OCR text — not a synthetic test — failed to solve and
+     correctly named the 5 actually-wrong lines (Row 15/20/23/24/25), scrolling
+     to the first one. **A real bug was found and fixed during this
+     verification**: the scroll-to-the-flagged-line call used
+     `behavior: 'smooth'`, which measurably failed to complete in this preview
+     browser (`scrollTop` stuck at 137px of a needed ~1200px) while
+     `behavior: 'instant'` landed correctly — switched both tier's scroll calls
+     to instant (no CSS on this page opts into `scroll-behavior: smooth`
+     anyway, confirmed by grep), prioritizing reliably landing on the actual
+     problem line over an animation. Tier 2's own branch (naming a
+     `contradictionLine`-derived line when zero lines are individually flagged)
+     could not be triggered through the real UI in the time available — every
+     attempt to force it via corrupted clue text also tripped tier 1's own
+     (correct, higher-priority) flagged-line check first, since a clue bad
+     enough to be globally unsolvable is normally also locally inconsistent with
+     its own detected fill line. Left as a real, structurally-simple, but
+     not end-to-end-confirmed branch — same "not yet real-device/scenario-
+     verified" honesty this file already uses elsewhere.
+  - All 829 tests pass (828 pre-existing + 1 new `scanPuzzle.test.js` case for
+    `contradictionLine`). `node --check` clean on every touched file. Not
+    real-device-confirmed (all four are preview/unit-verified only) — same
+    standing caveat as most of this file's other recent rounds.
+
 Current Objective (Focus Area)
 
-* **New: a real correctness bug — a just-scanned puzzle had its fills and X's
-  fully reversed, and the project owner has a sharp, checkable signature for
-  detecting exactly this failure mode automatically.** Direct report: "it
-  reversed the fills and the xs... literally every number is red, so it is
-  obviously backwards." This is `cellStateDetect.js`'s fill-state
-  classification systematically inverted across the whole grid, not a handful
-  of scattered per-cell misreads.
-  - **The proposed detection signature is sound and worth building, not just
-    noting**: a handful of scattered OCR/fill-read errors will only fail a FEW
-    lines' consistency checks; a puzzle where essentially ALL rows and columns
-    fail their own local check (`isLineConsistent`, the same one already
-    driving the existing red flag) at once is an extremely strong, specific
-    signal of one systematic error affecting the whole grid uniformly (a
-    fill/empty inversion being the obvious candidate), not independent random
-    noise. This is virtually never going to happen by chance on a real image.
-  - **Unlike the oversized-clue-merge case, this one has an unambiguous fix,
-    so a real one-click auto-fix is worth offering, not just a flag**: there's
-    only one way to "un-invert" a fill/empty swap (flip every detected cell's
-    state), no ambiguity about where/how to correct it the way there was for
-    guessing where a merged number should split. Surface this at the
-    fill-state review step (after `cellStateDetect.js`'s output is shown,
-    before the player finalizes): if the vast majority of lines fail their
-    local consistency check simultaneously, show a clear "this looks
-    inverted — flip fill/X?" prompt with a one-click fix, rather than making
-    the player notice and manually re-mark every cell themselves.
-  - **Exact threshold is Code's call, not necessarily literally 100%** — a
-    puzzle could have both a genuine inversion AND one unrelated ordinary OCR
-    misread layered on top, so requiring every single line to be red might be
-    too fragile; "the vast majority" (all but one or two lines) is a more
-    robust practical trigger than an exact 100% requirement.
-
-* **New: scanning should offer the same immediate naming-at-save prompt that
-  "draw a puzzle" already has, via a pop-up.** Direct ask: "give the chance to
-  name right away (with a pop-up box)." "Draw a puzzle" already prompts for a
-  required title at save/publish time (confirmed working, empty names
-  rejected) — the scan-auto-publish flow currently publishes without asking.
-  Apply the same required-title-prompt pattern to scan's "Play it"/publish
-  action too, reusing the same popup mechanism already built (the rename
-  modal, or the draw flow's own naming prompt) rather than inventing a new UI
-  for it.
-
-* **New: widen the library screen, and replace the text "best" time display
-  with a compact gold/copper medal or ribbon icon — the current text is
-  covering up the puzzle name again.** Direct report: "the name is being
-  covered up again" — the same recurring class of problem as the original
-  Rename-button-hiding-the-name issue, now happening with the personal-best
-  time display instead. Two changes:
-  1. **Widen the library modal/screen itself** — Code's call on exact sizing,
-     but meaningfully more horizontal room than today, especially given how
-     many icon-only controls (Rename, Hide, Play/Resume) and stats (personal
-     best, global fastest) now share each row.
-  2. **Replace the "best: X" text label with a compact medal/ribbon icon**:
-     **gold if the player's personal best time matches the global
-     fastest-time record for that puzzle, copper/bronze otherwise.** The
-     actual time value shouldn't disappear entirely — show it via the same
-     tap/hover tooltip mechanism already built for other icon-only controls
-     (`src/tooltip.js`), rather than spelling it out in the row itself.
-     **Edge case worth a default, not left ambiguous**: if no global
-     fastest-time has been recorded yet for a puzzle (nobody's completed it
-     since that feature shipped, or it predates it), reasonable default is
-     gold — the player's own time is, by definition, the only/first known
-     time, so treating it as the de facto record until a real comparison
-     exists seems more generous and sensible than defaulting to copper.
-
-* **When "Build puzzle" fails (the derived clues can't be solved), mark the
-  likely problem lines instead of just a generic failure message the player has
-  to hunt through every cell to diagnose.** Direct ask, following naturally from
-  the oversized-clue-number work just shipped: "I don't want to have to search
-  each cell." Genuinely a different, harder class of problem than that one,
-  though — worth scoping as two tiers, not one:
-  1. **Easy, certain tier — do this first**: some lines fail to solve entirely on
-     their own, independent of any other line (the same per-line check already
-     driving the existing red `--flagged` border during correction,
-     `isLineConsistent`). These lines are DEFINITELY wrong regardless of what
-     else is going on. When a build fails, check whether any line already fails
-     this local check and — instead of leaving the player to notice an existing
-     red flag on their own — surface those specific lines directly (e.g. scroll
-     to the first one, or list all of them) as the primary, certain suspects.
-  2. **Harder, best-effort tier**: a puzzle can also fail to solve even when
-     EVERY individual line passes its own local check — the lines are only
-     inconsistent with each other (e.g. a row's run count doesn't actually fit
-     what the intersecting columns require). There's no way to name a single
-     "guilty" line with certainty here — mathematically, several different
-     lines could each be "the" wrong one, and fixing any sufficiently plausible
-     one might resolve it. A reasonable best-effort heuristic: run the solver/
-     contradiction-search using all the clues together and surface whichever
-     lines were involved at the point it hit a genuine dead end, as likely
-     candidates — not certain, but a real lead instead of nothing. **This tier
-     is optional and more involved than tier 1** — worth doing tier 1 first as
-     a strong, quick win regardless of whether tier 2 gets picked up in the
-     same round.
-  - **Where this surfaces**: presumably the same correction screen the amber/red
-    flags already live on — Code's call on exact UI (an inline message pointing
-    at the flagged rows, auto-scrolling to the first one, a summary list) as
-    long as the player isn't left to manually scan every line themselves.
-
-* **None queued right now, otherwise.** The four items from last round (board-drag scroll bug,
+* **None queued right now.** See the four-item writeup directly above (fill/X
+  inversion detection, scan naming popup, library widen/medal icon, tiered
+  build-failure line marking) for what this round covered — all preview/unit-
+  verified, none yet real-device-confirmed. Tier 2 of the build-failure item
+  (naming a solver-derived line when no single line is individually flagged) is
+  real and unit-tested at the data layer but its UI branch has not been
+  triggered through a real end-to-end scenario yet — worth a real-device or a
+  more deliberately-constructed repro if it's ever picked back up, though it's
+  low-risk, structurally identical to the already-verified tier 1 branch. The
+  items from the round before that (board-drag scroll bug,
   global fastest-time stat, drag-on-already-filled-cell bug, anchored-number sound) are all fully
   done and CONFIRMED on the real device, including the global fastest-time stat's Cloud
   Function + Firestore rule (`recordFastestTime(us-central1)` created; `puzzleStats` rule

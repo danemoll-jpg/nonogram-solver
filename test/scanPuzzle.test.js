@@ -80,4 +80,18 @@ describe('buildScannedPuzzle', () => {
     assertEqual(result.solved, false);
     assert(result.reason === 'contradiction' || result.reason === 'stalled', `unexpected reason: ${result.reason}`);
   });
+
+  test('reason:\'contradiction\' comes with a contradictionLine naming the line that broke ' +
+    '(Current Objective #4\'s tier-2 build-failure lead) — reason:\'stalled\' has none', () => {
+    const result = buildScannedPuzzle({
+      id: 'scan-bad-2',
+      name: 'Scan bad 2',
+      rows: 3,
+      cols: 3,
+      rowClues: [[5], [1], [1]], // [5] can't fit a 3-wide row — an immediate line-local contradiction
+      colClues: [[1], [1], [1]],
+    });
+    assertEqual(result.reason, 'contradiction');
+    assertEqual(result.contradictionLine, { type: 'row', index: 0 });
+  });
 });

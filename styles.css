@@ -719,6 +719,14 @@ body {
   text-align: center;
 }
 
+/* Current Objective #3 (see TODO.md): widens just the library modal beyond .modal-card--wide's
+   own shared cap — see index.html's #library-modal comment for why this is a separate class
+   rather than a change to .modal-card--wide itself (which also backs How-to-play/Stats, neither
+   of which has this row-crowding problem). */
+.modal-card--library {
+  max-width: 46rem;
+}
+
 .modal-card__body {
   max-height: min(28rem, 60vh);
   /* See body's min-height comment (styles.css top) — same keyboard-resize reasoning. */
@@ -1146,6 +1154,36 @@ body {
   margin: 0 0 1rem;
 }
 
+/* New: fill/X inversion detection (Current Objective #1 — see TODO.md and
+   scanUI.js's updateLineHealthWarnings). A near-certain, single-cause diagnosis (unlike the
+   miscount warning above, which is a plausible-but-fuzzy pattern read) with an unambiguous
+   one-click fix, so this gets its own more assertive treatment — a real action button, not
+   just a paragraph — and takes priority over the miscount warning when both would apply. */
+.scan-invert-suspect {
+  color: var(--danger);
+  background: rgba(224, 101, 79, 0.12);
+  border: 1px solid var(--danger);
+  border-radius: 0.4rem;
+  padding: 0.6rem 0.8rem;
+  margin: 0 0 1rem;
+}
+
+.scan-invert-suspect p {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+}
+
+/* Current Objective #4's tier-2 "best-effort" build-failure lead (see scanUI.js's
+   showBuildFailure): a line the cross-line solver hit a genuine dead end at, once every line
+   already passed its own individual isLineConsistent check — a real, solver-derived lead, but
+   not a certainty the way --flagged above is, so it gets --suspect's existing amber "plausible
+   guess" treatment under its own class name rather than reusing --suspect itself (which
+   refreshFlag's live re-check would otherwise clear on the next unrelated edit to this line). */
+.scan-clue-row--build-suspect {
+  border-color: var(--warn);
+  background: rgba(217, 154, 60, 0.12);
+}
+
 .scan-clue-row__label {
   grid-area: label;
   font-size: 0.78rem;
@@ -1452,6 +1490,17 @@ body {
   font-size: 0.75rem;
   color: var(--text-dim);
   white-space: nowrap;
+}
+
+/* Current Objective #3 (see TODO.md): replaces the old "· best 0:45" text in
+   .library-row__personal-stats — the actual time now lives in this icon's tooltip
+   (src/tooltip.js's data-tooltip mechanism, same as Rename/Hide below) instead of spelled out
+   in the row, which was crowding the puzzle's own title again. Gold/copper is purely a color
+   swap on the same emoji glyph; no separate icon asset needed. */
+.library-row__medal {
+  font-size: 0.95rem;
+  cursor: default;
+  flex-shrink: 0;
 }
 
 /* #rename-modal's input (Current Objective — see TODO.md and index.html's #rename-modal

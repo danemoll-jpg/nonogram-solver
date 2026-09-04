@@ -40,7 +40,11 @@ export function buildScannedPuzzle({ id, name, rows, cols, rowClues, colClues })
   const draft = makePuzzle({ id, name, rows, cols, rowClues, colClues, solution: null, source: 'scan' });
   const result = solvePuzzleFully(draft);
   if (!result.solved) {
-    return { solved: false, reason: result.contradiction ? 'contradiction' : 'stalled' };
+    // contradictionLine (see fullSolve.js/solver.js) is only ever present alongside
+    // reason:'contradiction' — a genuine solver dead-end, not just a stall — and is what
+    // powers the scan wizard's tier-2 "best-effort" build-failure lead (Current Objective #4,
+    // see src/scanUI.js's showBuildFailure).
+    return { solved: false, reason: result.contradiction ? 'contradiction' : 'stalled', contradictionLine: result.contradictionLine ?? null };
   }
   const solution = result.board.grid.map((row) => row.map((cell) => cell === FILLED));
   return { solved: true, puzzle: { ...draft, solution } };

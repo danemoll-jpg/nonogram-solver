@@ -297,6 +297,18 @@
           outlined in red doesn't match the fill pattern already detected in the photo for
           that line — check those first.</p>
         <p id="scan-recheck-warning" class="scan-recheck-warning hidden"></p>
+        <!-- Current Objective #1 (see TODO.md): essentially every line failing its own
+             detected-fill-vs-clue check at once is a much stronger, more specific signal than
+             the plain miscount warning above — it's the signature of the fill/X detection
+             being fully reversed for this whole scan, which (unlike a misread clue number) has
+             one unambiguous one-click fix: flip every detected cell back. See scanUI.js's
+             updateLineHealthWarnings/scanBtnFlipFillstate. -->
+        <div id="scan-invert-suspect" class="scan-invert-suspect hidden">
+          <p>Every line here fails to match its own detected fill pattern — not just a few. That
+            usually means the fills and X's were detected backwards for this whole photo, not
+            that this many numbers were individually misread.</p>
+          <button id="scan-btn-flip-fillstate" class="btn btn--primary" type="button">Flip fill/X and recheck</button>
+        </div>
         <div class="scan-correct-columns">
           <div>
             <h3>Row clues</h3>
@@ -325,6 +337,10 @@
           it plays normally: full undo, save progress, and stats. Its name stays hidden — same
           as every library puzzle — until you solve it, and you can rename it from the library
           afterward.</p>
+        <label class="draw-name-field">Name this puzzle
+          <input id="scan-name-input" type="text" maxlength="80" placeholder="e.g. Sailboat" />
+        </label>
+        <p id="scan-name-error" class="scan-build-error hidden"></p>
         <button id="scan-btn-play" class="btn btn--primary" type="button">Play it</button>
         <p id="scan-play-status" class="stats-status" aria-live="polite"></p>
       </div>
@@ -408,9 +424,13 @@
        global/other-player-visible change — via src/puzzleLibrary.js's hidePuzzleInLibrary/
        fetchHiddenPuzzles; the "Show hidden puzzles" checkbox below is the required way back,
        revealing hidden rows (marked, with an Unhide button in place of Hide) instead of
-       excluding them. -->
+       excluding them. `modal-card--library` (Current Objective #3 — see TODO.md) widens just
+       this modal beyond `.modal-card--wide`'s own shared 34rem cap, which the How-to-play and
+       Stats modals also use and don't need widened — a library row now carries a title, a
+       size, a medal icon, and up to two icon buttons all in one line, and the extra width is
+       what keeps the puzzle's own name from getting squeezed toward invisible again. -->
   <div id="library-modal" class="modal-overlay hidden">
-    <div class="modal-card modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="library-title">
+    <div class="modal-card modal-card--wide modal-card--library" role="dialog" aria-modal="true" aria-labelledby="library-title">
       <h2 id="library-title" class="modal-card__title">Library</h2>
       <div class="modal-card__body">
         <!-- Moved in from the Help menu (see the comment left in its place there) — scanning or

@@ -11,13 +11,12 @@
 // model.js's cluesFromLine — no solving logic involved yet) -> "Done drawing" derives clues
 // and validates they have exactly one solution (src/drawPuzzle.js's buildDrawnPuzzle); if not,
 // an inline message explains why and the player keeps editing -> name the puzzle and "Play it"
-// publishes to the public shared library (the same auto-publish pipeline the scan wizard's
-// "Play it" already uses — see src/scanUI.js's scanBtnPlay handler, minus the naming step:
-// a scan recreates someone else's already-existing puzzle under a generic placeholder title,
-// but a drawing is the player's own original creation, so this wizard asks for a real name at
-// save time instead) and hands the puzzle back to app.js via onPuzzleReady, starting BLANK
-// (unlike a scan's initialMarks, which seeds the board with already-observed progress) — the
-// whole point is that solving it from scratch is what reveals the picture just drawn.
+// publishes to the public shared library (the same auto-publish-plus-name pipeline the scan
+// wizard's "Play it" now also uses — see src/scanUI.js's scanBtnPlay handler, added there per
+// Current Objective #2 once this wizard's own naming prompt proved out the pattern) and hands
+// the puzzle back to app.js via onPuzzleReady, starting BLANK (unlike a scan's initialMarks,
+// which seeds the board with already-observed progress) — the whole point is that solving it
+// from scratch is what reveals the picture just drawn.
 
 import { buildDrawnPuzzle } from './drawPuzzle.js';
 import { savePuzzleToLibrary } from './puzzleLibrary.js';
@@ -255,12 +254,12 @@ export function initDrawWizard({ els, onPuzzleReady, onClose, onOpen }) {
 
   // ---- step 3: name + publish + play ----
 
-  // Current Objective (see TODO.md): unlike a scan (which auto-publishes under a generic
-  // placeholder title — it's recreating someone else's already-existing puzzle, so naming it
-  // doesn't carry much meaning), a drawn puzzle is the player's own original creation, and the
-  // project owner asked specifically for a name prompt here at save time. The library's
-  // browse-list placeholder ("Puzzle N — RxC") still hides it from OTHER players until solved,
-  // same as every library puzzle — this name is just chosen by the creator up front instead of
+  // Current Objective (see TODO.md): a drawn puzzle is the player's own original creation, and
+  // the project owner asked specifically for a name prompt here at save time — the scan
+  // wizard's own "Play it" step later grew the identical prompt for the same reason (Current
+  // Objective #2), once this wizard's version proved out the pattern. The library's browse-
+  // list placeholder ("Puzzle N — RxC") still hides it from OTHER players until solved, same
+  // as every library puzzle — this name is just chosen by the creator up front instead of
   // being a generic "Drawn puzzle" string with no real content.
   //
   // If the publish fails (offline, not deployed yet), the player can still play — falls back to
