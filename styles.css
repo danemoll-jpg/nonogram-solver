@@ -1112,12 +1112,14 @@ body {
   background: rgba(224, 101, 79, 0.12);
 }
 
-/* Current Objective #3: the repeated-digit consistency check (scanUI.js's
-   repeatedDigitSuspect / ocrSegment.js's findRepeatedDigitOutlier) — a plausibility GUESS
-   ("this might be a misread"), not a proof of contradiction the way --flagged above is.
-   Styled in --warn (amber), not --danger (red), so the two read as different confidence
-   levels rather than the same "this is wrong" alarm — see the row's own `title` for the
-   specific reason, set alongside this class in scanUI.js. */
+/* Two signals share this class (see scanUI.js's refreshFlag): the repeated-digit consistency
+   check (repeatedDigitSuspect / ocrSegment.js's findRepeatedDigitOutlier) — a plausibility GUESS
+   ("this might be a misread") — and the newer oversized-clue-number check (oversizedClueSuspect
+   / ocrSegment.js's findOversizedClue), which is actually a structural CERTAINTY (a run can
+   never be longer than its own line) but is deliberately styled the same amber, not --danger
+   red, since --flagged below already covers "provably wrong" for both cases — this class exists
+   to add a specific, targeted diagnosis, not a stronger alarm level. See the row's own `title`
+   for which one applies, set alongside this class in scanUI.js. */
 .scan-clue-row--suspect {
   border-color: var(--warn);
   background: rgba(217, 154, 60, 0.12);

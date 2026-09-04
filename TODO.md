@@ -996,40 +996,45 @@ Completed Tasks
     project owner** — items 2 and 4 (global fastest-time, anchored-number sound)
     specifically confirmed; items 1 and 3 (board-drag scroll, drag-on-filled-cell)
     confirmed via no issues experienced during real play.
+* **Oversized-clue-number check — done, preview-verified.** Direct report from a real
+  30×30 scan: a line's clue showed a value like "1011" — a single run can never be
+  longer than the line itself (max 30 here), so any parsed number exceeding the
+  line's dimension is a near-certain sign OCR merged two separate clue numbers
+  together without catching the comma/space between them (almost certainly "10, 11"
+  read as "1011"). New pure function `findOversizedClue(clue, lineLength)`
+  (`src/ocrSegment.js`) flags the first clue number exceeding the line's length;
+  wired into the scan correction step's existing amber "suspect" flag (`scanUI.js`'s
+  `refreshFlag`) alongside the repeated-digit check, checked first since it's a
+  certainty rather than a plausibility guess — reuses the established flagging
+  pattern rather than a new one, per the standing direction. **Deliberately flags,
+  does not auto-split**: guessing where to break a merged number back apart is
+  genuinely ambiguous in general ("123" could be "1,23" or "12,3"), and a wrong
+  automatic guess would trade an obvious error for a harder-to-notice one — the
+  player, already reviewing every line in this step, fixes it by hand. Note: this
+  case is technically ALSO already caught by the existing red `--flagged`
+  contradiction check (`isLineConsistent` can never place a run longer than the
+  line, regardless of fill state) — the new amber check exists to name the specific
+  impossible number rather than just generically highlighting the row red, per
+  explicit direction to reuse the amber mechanism rather than rely on the red one's
+  generic signal. 6 new unit tests added (`test/ocrSegment.test.js`), including the
+  exact "1011"/30 real-world case and a clean pass over the real 25×25 ground-truth
+  puzzle's clues at length 25 (all well under, none flagged). **Verified end-to-end
+  in browser preview against the real 30×30 ground-truth image**
+  (`scratch-images/scratch-images-reference-30x30-legible.png`): ran the actual scan
+  wizard through OCR to the correction step, typed "1011" into a row field, confirmed
+  both the red and amber borders applied with the exact expected tooltip text, then
+  corrected it to "10, 11" and confirmed both flags cleared immediately. All 828
+  tests pass. Not yet real-device-confirmed. The sum-of-clues-plus-min-gaps
+  extension noted below remains a reasonable next step, not required for this to be
+  useful on its own:
+  - beyond a single number exceeding the line length, the SUM of all of a line's
+    clue numbers plus the minimum required gaps between them can also exceed the
+    line length even when no single number does — that combination is equally
+    impossible and could be flagged the same way. Deferred, not blocking.
 
 Current Objective (Focus Area)
 
-* **New: flag OCR-read clue numbers that are structurally impossible given the
-  puzzle's own line length, during the scan wizard's existing correction step.**
-  Direct report from a real 30×30 scan: a line's clue showed a value like "1011"
-  — a single run can never be longer than the line itself (max 30 in this case),
-  so any parsed number exceeding the line's dimension is a near-certain sign OCR
-  merged two separate clue numbers together without catching the comma/space
-  between them (almost certainly "10, 11" read as "1011" here) — not a
-  legitimate value that happens to be large.
-  - **This reuses an existing pattern rather than introducing a new one**: the
-    scan correction step already has an amber "suspect" flag for the repeated-
-    digit consistency check (`findRepeatedDigitOutlier`) — extend that same
-    flagging mechanism to also catch "this number is larger than the line
-    length, essentially impossible as a single run" during review, rather than
-    letting an obviously-wrong merged value sit looking exactly as trustworthy
-    as every correctly-read number next to it.
-  - **Deliberately flag, don't auto-split.** Automatically guessing where to
-    break an anomalous merged number back into two (or more) real numbers is
-    genuinely ambiguous in general — "123" could plausibly be "1,23" or "12,3,"
-    and a wrong automatic guess would introduce a new, harder-to-notice error
-    in place of an obvious one. Flagging it clearly for the player to manually
-    fix (which they're already doing for every line in this step regardless)
-    is the safer fix.
-  - **Worth considering as a natural extension, not required for this to be
-    useful on its own**: beyond a single number exceeding the line length, the
-    SUM of all of a line's clue numbers plus the minimum required gaps between
-    them can also exceed the line length even when no single number does —
-    that combination is equally impossible and could be flagged the same way.
-    The single-number check alone already catches the reported case; the sum
-    check is a reasonable next step if useful, not a blocker.
-
-* **None queued right now, otherwise.** The four items from last round (board-drag scroll bug,
+* **None queued right now.** The four items from last round (board-drag scroll bug,
   global fastest-time stat, drag-on-already-filled-cell bug, anchored-number sound) are all fully
   done and CONFIRMED on the real device, including the global fastest-time stat's Cloud
   Function + Firestore rule (`recordFastestTime(us-central1)` created; `puzzleStats` rule

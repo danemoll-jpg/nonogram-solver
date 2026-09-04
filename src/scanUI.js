@@ -43,7 +43,7 @@ import {
 import { parseClueText, buildScannedPuzzle } from './scanPuzzle.js';
 import { savePuzzleToLibrary } from './puzzleLibrary.js';
 import { recognizeClueStrip, terminateOcr } from './ocr.js';
-import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines, findRepeatedDigitOutlier } from './ocrSegment.js';
+import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines, findRepeatedDigitOutlier, findOversizedClue } from './ocrSegment.js';
 import { classifyGridCells } from './cellStateDetect.js';
 import { isLineConsistent } from './lineSolver.js';
 import { FILLED, EMPTY, UNKNOWN } from './model.js';
@@ -865,6 +865,16 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     return findRepeatedDigitOutlier(clue);
   }
 
+  // New: the oversized-clue-number check (see ocrSegment.js's findOversizedClue for why a
+  // structural certainty is deliberately surfaced through this same amber mechanism instead of
+  // the red one — isLineConsistent below already flags the line red on its own, this exists to
+  // name the specific impossible number). Checked ahead of the repeated-digit guess in
+  // refreshFlag below: when both could apply, the certain diagnosis is the more useful one to
+  // show.
+  function oversizedClueSuspect(clue, lineLength) {
+    return findOversizedClue(clue, lineLength);
+  }
+
   // A LOT of flagged lines (rather than one or two) is a different situation from a handful
   // of independent OCR misreads — it's the signature of a wrong row/column COUNT confirmed a
   // step earlier (every line downstream of the miscount ends up sliced against the wrong cell
@@ -933,11 +943,14 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     function refreshFlag() {
       const clue = parseClueText(input.value);
       row.classList.toggle('scan-clue-row--flagged', lineLooksWrong(clue, fillLine));
-      const suspect = repeatedDigitSuspect(clue);
-      row.classList.toggle('scan-clue-row--suspect', suspect !== null);
-      row.title = suspect
-        ? `This might have a misread digit: most numbers here read ${suspect.expectedValue}, but one reads ${suspect.suspectedValue}.`
-        : '';
+      const oversized = oversizedClueSuspect(clue, fillLine.length);
+      const repeated = oversized ? null : repeatedDigitSuspect(clue);
+      row.classList.toggle('scan-clue-row--suspect', oversized !== null || repeated !== null);
+      row.title = oversized
+        ? `"${oversized.value}" is larger than this line itself (${oversized.lineLength} cells) — a single run can never be longer than its own line, so this is almost certainly two numbers merged together (e.g. "10, 11" misread as "1011"). Split it back into two numbers.`
+        : repeated
+          ? `This might have a misread digit: most numbers here read ${repeated.expectedValue}, but one reads ${repeated.suspectedValue}.`
+          : '';
       updateRecheckWarning();
     }
     input.addEventListener('input', refreshFlag);

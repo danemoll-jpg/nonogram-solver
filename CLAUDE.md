@@ -337,17 +337,21 @@ public library visibility is confirmed as the right model. General OCR digit-lev
 noise (as opposed to the geometry bug above) has been explicitly accepted as "good
 enough for now." See `TODO.md`'s Completed Tasks for the full history.
 
-**Current objective, new item: flag OCR-read clue numbers that are structurally
-impossible given the line length (e.g. "1011" in a 30-cell line — a run can never
-exceed the line's own dimension), during the scan wizard's existing correction
-step.** Real report from a real 30×30 scan. Extend the existing amber "suspect"
-flag mechanism (already used for the repeated-digit consistency check) rather
-than building something new — flag it for the player to manually fix, don't
-attempt to auto-split the merged number back apart (genuinely ambiguous in
-general, risks introducing a new, harder-to-spot error). See `TODO.md` for full
-detail, including a natural (not required) extension: the sum of a line's clue
-numbers plus minimum gaps can also exceed the line length even when no single
-number does.
+**Oversized-clue-number check — done, preview-verified.** Flags an OCR-read clue
+number that's structurally impossible given the line's own length (e.g. "1011" in
+a 30-cell line — a run can never exceed the line's own dimension), during the scan
+wizard's existing correction step. Real report from a real 30×30 scan (almost
+certainly "10, 11" merged into "1011"). New `findOversizedClue` (`src/ocrSegment.js`)
+extends the existing amber "suspect" flag mechanism (already used for the
+repeated-digit consistency check) rather than building something new; deliberately
+flags for the player to fix manually rather than attempting to auto-split the
+merged number back apart (genuinely ambiguous in general, risks introducing a new,
+harder-to-spot error). Verified end-to-end in browser preview against the real
+30×30 ground-truth scan image, all the way through the scan wizard to the
+correction step. Not yet real-device-confirmed. See `TODO.md`'s Completed Tasks
+for the full writeup, including a natural (not required) extension: the sum of a
+line's clue numbers plus minimum gaps can also exceed the line length even when no
+single number does.
 
 **The four items from last round's Current Objective are all done and CONFIRMED on
 the real device (items 2 and 4 specifically confirmed by the project owner; items 1

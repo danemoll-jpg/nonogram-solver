@@ -174,3 +174,32 @@ export function findRepeatedDigitOutlier(clue, { minRunLength = DEFAULT_MIN_RUN_
 
   return { index: others[0], suspectedValue: clue[others[0]], expectedValue: dominant };
 }
+
+// ---- oversized-clue-number check (Current Objective — see TODO.md) -------------------
+
+// Flags an OCR'd clue NUMBER larger than the line's own length. A single run can never be
+// longer than the line it lives in, so any parsed value exceeding `lineLength` isn't a
+// legitimate (if unusually large) clue — it's a near-certain sign OCR merged two separate
+// numbers together without catching the comma/space between them. Motivated by a real report:
+// a 30-cell line's clue read "1011", almost certainly "10, 11" read as one run.
+//
+// Unlike findRepeatedDigitOutlier above (a plausibility GUESS), this is a structural certainty:
+// no arrangement of a run this long ever fits in a shorter line, period — isLineConsistent
+// (lineSolver.js, used by scanUI.js's lineLooksWrong) already treats such a line as infeasible
+// regardless of fill state, so this doesn't need to exist just to catch the line at all. It
+// exists to give a far more SPECIFIC diagnosis than that generic red "provably wrong" highlight
+// — naming exactly which number is impossible and why — so per the project owner's explicit
+// direction it's surfaced through the same amber "suspect" mechanism as the check above rather
+// than a new visual signal.
+//
+// Deliberately does not attempt to guess where to split the oversized number back apart: which
+// digits belong to which of the merged numbers is genuinely ambiguous in general (see this
+// feature's own TODO.md writeup), and a wrong automatic guess would swap one obvious error for
+// a harder-to-notice one. Flagging it for the player — who is already reviewing every line in
+// this step regardless — is the safer fix.
+export function findOversizedClue(clue, lineLength) {
+  for (let i = 0; i < clue.length; i++) {
+    if (clue[i] > lineLength) return { index: i, value: clue[i], lineLength };
+  }
+  return null;
+}

@@ -1,5 +1,5 @@
 import { describe, test, assert, assertEqual } from './harness.js';
-import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines, findRepeatedDigitOutlier } from '../src/ocrSegment.js';
+import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines, findRepeatedDigitOutlier, findOversizedClue } from '../src/ocrSegment.js';
 
 describe('findRuns', () => {
   test('finds contiguous true runs as inclusive [start,end] bands', () => {
@@ -172,6 +172,48 @@ describe('findRepeatedDigitOutlier', () => {
     ];
     for (const [i, clue] of [...rows, ...cols].entries()) {
       assertEqual(findRepeatedDigitOutlier(clue), null, `line ${i} (${JSON.stringify(clue)}) should not be flagged`);
+    }
+  });
+});
+
+describe('findOversizedClue', () => {
+  test('flags a clue number larger than the line length (the motivating real-world case: "1011" in a 30-cell line)', () => {
+    assertEqual(findOversizedClue([1011], 30), { index: 0, value: 1011, lineLength: 30 });
+  });
+
+  test('flags an oversized number sitting among otherwise-legitimate numbers, by its own index', () => {
+    assertEqual(findOversizedClue([4, 1011, 2], 30), { index: 1, value: 1011, lineLength: 30 });
+  });
+
+  test('does not flag a number exactly equal to the line length — a single full-line run is legitimate', () => {
+    assertEqual(findOversizedClue([30], 30), null);
+  });
+
+  test('does not flag a genuinely large but still-possible clue', () => {
+    assertEqual(findOversizedClue([15, 10], 30), null);
+  });
+
+  test('an empty clue is never flagged', () => {
+    assertEqual(findOversizedClue([], 30), null);
+  });
+
+  test('every row and column clue in the real 25x25 ground-truth test puzzle passes clean (see TODO.md)', () => {
+    const rows = [
+      [2, 5], [1, 4], [1, 1, 4, 4], [3, 1, 1, 3], [2, 7, 2],
+      [1, 1, 8], [2, 1, 1, 2], [2, 1, 7], [1, 1, 1, 1], [2, 1, 6],
+      [3, 1, 1, 1], [5, 2, 4], [2, 2], [2, 2], [3, 5],
+      [3, 6], [4, 1, 8], [6, 15], [4, 7, 8], [4, 1, 8],
+      [5, 6, 9], [5, 10], [6, 12], [4, 2, 4, 10], [3, 1, 2, 10],
+    ];
+    const cols = [
+      [11], [11], [12], [2, 8], [2, 1, 3],
+      [1, 1, 1, 2], [2, 1, 1, 1, 2], [1, 2, 2, 2, 1], [2, 2, 2, 1], [1, 5, 2, 2, 1, 1],
+      [1, 4, 3, 1, 2], [2, 2, 1, 3], [12, 2, 2], [2, 1, 2, 2, 2], [1, 2, 2, 9],
+      [1, 1, 12], [1, 1, 11], [1, 4, 11], [1, 2, 2, 11], [1, 1, 1, 1, 11],
+      [1, 1, 1, 1, 10], [4, 1, 3, 8], [1, 4, 1, 1, 5], [1, 5, 1, 2], [1, 1, 3],
+    ];
+    for (const [i, clue] of [...rows, ...cols].entries()) {
+      assertEqual(findOversizedClue(clue, 25), null, `line ${i} (${JSON.stringify(clue)}) should not be flagged`);
     }
   });
 });
