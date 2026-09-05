@@ -158,6 +158,93 @@ describe('Board.fromGrid baseline survives undo (real bug, found via a drag-plac
   });
 });
 
+describe('Board redo (Current Objective — see TODO.md): standard redo-stack semantics', () => {
+  test('undoLast pushes the undone move onto redoStack, redo() reapplies it', () => {
+    const board = new Board(1, 1);
+    board.set(0, 0, FILLED);
+    board.undoLast();
+    assertEqual(board.get(0, 0), UNKNOWN);
+    assertEqual(board.redoStack.length, 1);
+
+    const redone = board.redo();
+    assertEqual(board.get(0, 0), FILLED);
+    assertEqual(board.history.length, 1);
+    assertEqual(board.redoStack.length, 0);
+    assertEqual(redone.cells[0].next, FILLED);
+  });
+
+  test('redo() reapplies a whole batched move at once, same as undoToMove removes it', () => {
+    const board = new Board(1, 3);
+    board.setBatch([
+      { row: 0, col: 0, state: FILLED },
+      { row: 0, col: 1, state: EMPTY },
+    ]);
+    board.undoLast();
+    assertEqual(board.get(0, 0), UNKNOWN);
+    assertEqual(board.get(0, 1), UNKNOWN);
+
+    board.redo();
+    assertEqual(board.get(0, 0), FILLED);
+    assertEqual(board.get(0, 1), EMPTY);
+    assertEqual(board.history[0].cells.length, 2);
+  });
+
+  test('a new move after an undo clears the redo stack (branching off invalidates it)', () => {
+    const board = new Board(1, 1);
+    board.set(0, 0, FILLED);
+    board.undoLast();
+    assertEqual(board.redoStack.length, 1);
+
+    board.set(0, 0, EMPTY); // a genuinely new move, not a redo
+    assertEqual(board.redoStack.length, 0);
+    assertEqual(board.redo(), null); // nothing left to redo
+    assertEqual(board.get(0, 0), EMPTY); // the new move stands, untouched by the failed redo
+  });
+
+  test('redo() on an empty stack is a no-op, not a throw', () => {
+    const board = new Board(1, 1);
+    assertEqual(board.redo(), null);
+    assertEqual(board.get(0, 0), UNKNOWN);
+  });
+
+  test('undoToMove removing several moves at once pushes them all, redoable one at a time ' +
+    'in their original order', () => {
+    const board = new Board(1, 3);
+    board.set(0, 0, FILLED); // move 0
+    board.set(0, 1, FILLED); // move 1
+    board.set(0, 2, FILLED); // move 2
+    board.undoToMove(0); // removes moves 0, 1, 2 all at once
+    assertEqual(board.redoStack.length, 3);
+
+    board.redo();
+    assertEqual(board.get(0, 0), FILLED);
+    assertEqual(board.get(0, 1), UNKNOWN);
+    board.redo();
+    assertEqual(board.get(0, 1), FILLED);
+    assertEqual(board.get(0, 2), UNKNOWN);
+    board.redo();
+    assertEqual(board.get(0, 2), FILLED);
+  });
+
+  test('redo() carries the move\'s original source tag through (hint vs. player)', () => {
+    const board = new Board(1, 1);
+    board.set(0, 0, FILLED, { source: 'hint' });
+    board.undoLast();
+    board.redo();
+    assertEqual(board.history[0].source, 'hint');
+  });
+
+  test('clone() carries the redo stack through too, not just history', () => {
+    const board = new Board(1, 1);
+    board.set(0, 0, FILLED);
+    board.undoLast();
+    const copy = board.clone();
+    copy.redo();
+    assertEqual(copy.get(0, 0), FILLED);
+    assertEqual(board.get(0, 0), UNKNOWN); // the original is untouched by the copy's redo
+  });
+});
+
 describe('hasUnstableId', () => {
   test('true for an unpublished scan or drawn puzzle (no stable library id yet)', () => {
     assertEqual(hasUnstableId({ source: 'scan' }), true);

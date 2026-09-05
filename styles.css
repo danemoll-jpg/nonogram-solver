@@ -295,6 +295,27 @@ body {
   cursor: pointer;
 }
 
+/* New: the autosave-cadence preset picker (see TODO.md) — same row-with-a-control shape as
+   the toggle above, just space-between instead of left-aligned since a <select> already
+   carries its own visual weight the checkbox doesn't. */
+.help-menu__item--select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  cursor: default;
+}
+
+.help-menu__item--select select {
+  font: inherit;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--panel-bg);
+  border: 1px solid rgba(230, 183, 63, 0.35);
+  border-radius: 0.35rem;
+  padding: 0.2rem 0.35rem;
+}
+
 .help-menu__divider {
   height: 1px;
   margin: 0.35rem 0.2rem;

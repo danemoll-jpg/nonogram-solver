@@ -558,6 +558,37 @@ bug's round-5 tooling extension (auto-logging the height-diverged state into
 `?debug=scroll`'s history log) is also done, per its own explicit ask. See
 `TODO.md`'s Completed Tasks section for the full writeup of each.
 
+**Redo, opposite-mark tap-to-erase, and periodic autosave — done,
+unit/preview-verified, none yet real-device-confirmed.** All three were the
+Current Objective; see `TODO.md`'s Completed Tasks for the full writeup.
+- **Redo**: standard redo-stack semantics, implemented entirely in `Board`
+  (`src/model.js`) rather than app.js — `undoToMove`/`undoLast` push whatever
+  they remove onto a new `redoStack`, `Board.redo()` pops and reapplies one,
+  and every OTHER `set`/`setBatch` call clears the stack by default (a new
+  `clearRedo:false` option is what stops redo's own reapply from clearing
+  it) — so "any new move after an undo invalidates redo" falls out of the
+  existing mutation methods for free rather than needing separate tracking
+  in app.js. 7 new unit tests in `test/model.test.js`.
+- **Opposite-mark tap erases**: `targetStateFor` (app.js) simplified from
+  three special-cased branches down to one rule — any single tap on a
+  non-UNKNOWN cell clears it, only a tap on a blank cell applies the active
+  mode's mark — which is a generalization of the pre-existing same-mode
+  toggle-to-clear, not a new parallel branch, so it's less code, not more.
+  Drags are provably unaffected (they use the separate `modeTargetState()`).
+  The locked-line bypass in `paintCell` generalized the same way, so the new
+  erase case gets the same auto-X-revert handling a same-mode clear already
+  had rather than being silently blocked on a locked line.
+- **Periodic autosave**: a `setInterval` reusing `saveProgressIfApplicable`
+  unchanged, restarted on every `startPuzzle`. Cadence is a new Help-menu
+  preset `<select>` (30s/1min/2min/5min/off, DECIDED 2-minute default),
+  local-only via `localStorage` — same pattern as the mute toggle
+  (`src/sounds.js`), per the "no reason for a device/UI preference to follow
+  the player across devices" default. A supplementary, explicitly
+  best-effort `visibilitychange`/`pagehide` handler was also added, per the
+  explicit instruction that this must not repeat the original
+  beforeunload-alone reliability mistake — the timer is what actually
+  carries the feature.
+
 The scroll bug's original scan-wizard trigger remains genuinely fixed and
 confirmed, and the library-rename trigger is now ALSO confirmed on the real
 device — the underlying `visualViewport` mechanism was never actually fixed,

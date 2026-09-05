@@ -1236,12 +1236,73 @@ Completed Tasks
     Hide only, an owned community puzzle shows Rename + Hide. All 829 tests
     pass.
 
+* **Redo, opposite-mark tap-to-erase, and periodic autosave — all three done,
+  unit/preview-verified, none yet real-device-confirmed.**
+  - **Redo**: entirely implemented in `Board` itself (`src/model.js`), not
+    app.js — `undoToMove`/`undoLast` now push whatever move(s) they remove
+    onto a new `board.redoStack` (most-recently-undone last, so it pops back
+    off in the right order even for a multi-move "back up to move #N" jump),
+    and a new `Board.redo()` pops and reapplies one via the existing
+    `setBatch` (a new `clearRedo:false` option on `set`/`setBatch` stops that
+    reapply from wiping the rest of the stack — every OTHER call to
+    `set`/`setBatch` still clears it by default, which is what gives "any new
+    move after an undo invalidates redo" for free). app.js's `runRedo`
+    mirrors `runUndo` exactly; the button is disabled/enabled from the one
+    central `syncAllCellVisuals` sync point alongside Undo, so every mutation
+    path (a click, a drag, a hint, Remove bad marks, the mistake-driven
+    "back up to move #N") keeps it correct without its own explicit call.
+    7 new unit tests (`test/model.test.js`) cover single- and multi-move
+    redo, source-tag preservation, the new-move-clears-the-stack rule, an
+    empty-stack redo being a no-op, and `clone()` carrying the stack through.
+  - **Opposite-mark tap erases**: `targetStateFor` (app.js) simplified from
+    three special-cased branches to one rule — any single tap/click on a cell
+    that isn't already UNKNOWN clears it to UNKNOWN, and only a tap on a
+    genuinely blank cell applies the active mode's own mark. This is a
+    generalization of the pre-existing same-mode toggle-to-clear, not a
+    separate new branch, so it covers the desired matrix exactly (including
+    leaving it unchanged) with less code, not more. Drags are provably
+    unaffected — they use the separate `modeTargetState()`, untouched by this
+    change. The paired locked-line gate (`paintCell`'s `isUnfill` check) also
+    simplified the same way, from a FILLED-only special case to "clearing any
+    existing mark," so the new opposite-mark erase gets the same
+    line-unlock/auto-X-revert handling and locked-line bypass a same-mode
+    clear already had, rather than being silently blocked on a locked line.
+    Verified directly in browser preview: an X'd cell in Fill mode and a
+    filled cell in Mark-empty mode both clear to UNKNOWN on the first tap and
+    accept the new mark on the second; a drag sweeping across an
+    already-marked cell still leaves it untouched exactly as before.
+  - **Periodic autosave**: a new `restartAutosaveTimer` (app.js) reuses
+    `saveProgressIfApplicable` unchanged as a `setInterval` tick (fire-and-
+    forget, same contract as every other call site) — called once at
+    startup and again on every `startPuzzle` (a fresh puzzle gets a full
+    cadence window, not whatever was left over). Cadence is a new Help-menu
+    preset `<select>` (30s / 1min / 2min / 5min / off; DECIDED 2-minute
+    default), stored local-only via `localStorage`
+    (`nonogram:autosaveCadenceMs`) — same local-not-synced reasoning and
+    load/save-with-safe-fallback shape as the existing mute toggle
+    (`src/sounds.js`), per the standing "no reason for a device/UI preference
+    to follow the player across devices" default. A supplementary, explicitly
+    best-effort `visibilitychange`/`pagehide` handler was also added
+    (fire-and-forget, never awaited) — real extra coverage for the common
+    case, but the timer above is what actually carries the feature, per the
+    explicit instruction not to repeat the original beforeunload-alone
+    mistake. Verified directly in preview: the select defaults to "Every
+    2 min," changing it persists across a reload and doesn't close the Help
+    menu (matching Auto-check's own non-closing behavior), and no console
+    errors appear at any point. All 836 tests pass (829 + 7 new); `node
+    --check` clean on every edited file.
+
 Current Objective (Focus Area)
 
-* **None queued right now.** See the four-item writeup directly above (fill/X
-  inversion detection, scan naming popup, library widen/medal icon, tiered
-  build-failure line marking) for what this round covered — all preview/unit-
-  verified, none yet real-device-confirmed. Tier 2 of the build-failure item
+* **None queued right now.** See the writeup directly above (Redo,
+  opposite-mark tap-to-erase, periodic autosave) for what this round covered
+  — all unit/preview-verified, none yet real-device-confirmed.
+
+* **Previous round: none queued right now beyond the above.** See the four-item
+  writeup directly above (fill/X inversion detection, scan naming popup, library
+  widen/medal icon, tiered build-failure line marking) for what that round
+  covered — all preview/unit-verified, none yet real-device-confirmed. Tier 2 of
+  the build-failure item
   (naming a solver-derived line when no single line is individually flagged) is
   real and unit-tested at the data layer but its UI branch has not been
   triggered through a real end-to-end scenario yet — worth a real-device or a

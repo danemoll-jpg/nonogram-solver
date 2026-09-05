@@ -69,6 +69,7 @@ const els = {
   btnOpenStats: document.getElementById('btn-open-stats'),
   btnSaveProgress: document.getElementById('btn-save-progress'),
   btnUndo: document.getElementById('btn-undo'),
+  btnRedo: document.getElementById('btn-redo'),
   boardRoot: document.getElementById('board-root'),
   statusLine: document.getElementById('status-line'),
   modeFill: document.getElementById('mode-fill'),
@@ -76,6 +77,7 @@ const els = {
   modeErase: document.getElementById('mode-erase'),
   toggleAutocheck: document.getElementById('toggle-autocheck'),
   muteToggle: document.getElementById('mute-toggle'),
+  autosaveCadenceSelect: document.getElementById('autosave-cadence-select'),
   helpMenuBtn: document.getElementById('help-menu-btn'),
   helpMenuList: document.getElementById('help-menu-list'),
   menuHowToPlay: document.getElementById('menu-how-to-play'),
@@ -270,6 +272,11 @@ function startPuzzle(p) {
   els.completeModal.classList.add('hidden');
   renderBoard();
   updateStatus('');
+  // Periodic autosave (Current Objective — see TODO.md): restart the timer's clock on every
+  // fresh puzzle load, same reasoning as puzzleStartTime just above — a brand-new puzzle
+  // deserves a full cadence window before its first autosave, not whatever was left over from
+  // the previous one.
+  restartAutosaveTimer();
 }
 
 // ---- rendering ----
@@ -567,6 +574,11 @@ function syncAllCellVisuals() {
   }
   applyHighlightClasses();
   els.btnUndo.disabled = board.history.length === 0;
+  // New: Redo (Current Objective — see TODO.md) — same "disable when nothing to do" pattern
+  // as Undo, kept in this one central sync point so every mutation path (paintCell, a hint,
+  // Remove bad marks, the mistake-driven "back up to move #N", undo/redo themselves) updates
+  // it for free rather than needing its own explicit call.
+  els.btnRedo.disabled = board.redoStack.length === 0;
 
   if (board.isComplete()) {
     if (boardMatchesSolution()) {
@@ -742,6 +754,90 @@ els.btnSaveProgress.addEventListener('click', async () => {
   }
 });
 
+// ---- periodic autosave (Current Objective — see TODO.md) ----
+//
+// A real reversal of an earlier deliberate decision, not a silent change (see the module
+// comment right above saveProgressIfApplicable): explicit in-app-only triggers turned out to
+// still leave real gaps — direct report that "it is too easy to accidentally leave the screen
+// and lose your work." Browser-level leave-detection (beforeunload/visibilitychange) was
+// originally rejected specifically for being unreliable on iOS Safari, and that concern hasn't
+// gone away — if anything this project has since learned a lot more about exactly how
+// unreliable iOS Safari event timing can be, via the whole scroll-bug saga. So the PRIMARY
+// mechanism here is a periodic timer, reusing saveProgressIfApplicable's existing eligibility
+// rules unchanged (scan/drawn-origin, no-solution, complete, and untouched boards are all
+// still skipped exactly as before) — a timer doesn't depend on any single browser event firing
+// reliably, which is exactly the property leave-detection alone doesn't have. A best-effort
+// visibilitychange/pagehide handler is added further below too, but strictly as a
+// supplementary safety net, never as a substitute for this timer.
+//
+// Cadence is a local-only preference (like the mute toggle — a device/UI setting, not synced
+// across paired devices the way solved/in-progress/hidden puzzle state already is): it's a
+// choice about how OFTEN to save, not puzzle data itself, so there's no reason for it to
+// follow the player from device to device. Same localStorage-with-safe-fallback shape as
+// isMuted/setMuted (src/sounds.js).
+const AUTOSAVE_CADENCE_STORAGE_KEY = 'nonogram:autosaveCadenceMs';
+const AUTOSAVE_CADENCE_DEFAULT_MS = 120000; // 2 minutes — decided default (see TODO.md); confirmed not a Firestore cost/rate-limit concern at this frequency
+
+function loadAutosaveCadenceMs() {
+  try {
+    const raw = localStorage.getItem(AUTOSAVE_CADENCE_STORAGE_KEY);
+    if (raw === null) return AUTOSAVE_CADENCE_DEFAULT_MS;
+    const ms = Number(raw);
+    return Number.isFinite(ms) && ms >= 0 ? ms : AUTOSAVE_CADENCE_DEFAULT_MS;
+  } catch {
+    return AUTOSAVE_CADENCE_DEFAULT_MS; // localStorage unavailable (private mode, embedded webview) — fall back to the default cadence
+  }
+}
+
+function setAutosaveCadenceMs(ms) {
+  try {
+    localStorage.setItem(AUTOSAVE_CADENCE_STORAGE_KEY, String(ms));
+  } catch {
+    // best effort — the cadence choice just won't persist across sessions this time
+  }
+  restartAutosaveTimer();
+}
+
+let autosaveTimer = null;
+
+// (Re)starts the periodic timer against whatever cadence is currently selected — called once
+// up front, again on every puzzle load (startPuzzle, since a fresh puzzle means a fresh
+// "time since last save" clock is fine to start from), and whenever the Help-menu setting
+// changes. A cadence of 0 is the "Off" preset — the timer is simply left unset in that case.
+function restartAutosaveTimer() {
+  if (autosaveTimer) clearInterval(autosaveTimer);
+  autosaveTimer = null;
+  const cadenceMs = loadAutosaveCadenceMs();
+  if (cadenceMs <= 0) return;
+  autosaveTimer = setInterval(() => {
+    // Fire-and-forget, same contract as every other saveProgressIfApplicable call site — a
+    // failed background autosave (offline, not deployed yet) must never surface to the player
+    // or interrupt play.
+    saveProgressIfApplicable().catch(() => {});
+  }, cadenceMs);
+}
+
+els.autosaveCadenceSelect.value = String(loadAutosaveCadenceMs());
+els.autosaveCadenceSelect.addEventListener('change', (e) => {
+  setAutosaveCadenceMs(Number(e.target.value));
+});
+restartAutosaveTimer();
+
+// Supplementary, best-effort only (see this section's header comment) — deliberately never
+// awaited, and never relied on alone. visibilitychange (the tab/app being backgrounded or
+// switched away from) and pagehide (actual navigation away, including a hard close on most
+// mobile browsers) both fire more reliably than beforeunload specifically on mobile Safari,
+// but "more reliably" is still a long way from "reliably" — the periodic timer above is what
+// actually carries this feature; this is just free extra coverage for the common case where a
+// player leaves well inside the current cadence window.
+function bestEffortLeaveSave() {
+  saveProgressIfApplicable().catch(() => {});
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) bestEffortLeaveSave();
+});
+window.addEventListener('pagehide', bestEffortLeaveSave);
+
 // ---- confirm dialog (item: fix "Clear all" doing nothing) ----
 //
 // window.confirm() looks like the obvious fit for a destructive-action guard, but several
@@ -845,12 +941,21 @@ els.modeFill.addEventListener('click', () => setMode('fill'));
 els.modeX.addEventListener('click', () => setMode('x'));
 els.modeErase.addEventListener('click', () => setMode('erase'));
 
+// Current Objective (see TODO.md): a single tap/click on a cell holding the OPPOSITE mark
+// from the active mode used to replace it directly (e.g. tapping an X'd cell in Fill mode
+// went straight to FILLED) — direct ask to erase it back to UNKNOWN instead, requiring a
+// second tap to actually apply the new mark ("I mark X's down for spacing sometimes and
+// after filling I don't want to reach up to switch to erase"). Generalizes the pre-existing
+// same-mode toggle-to-clear (tapping an already-FILLED cell in Fill mode already cleared it)
+// rather than replacing it: any single tap on a cell that isn't already UNKNOWN now clears
+// it, whether the existing mark matches the active mode or not — only a tap on a genuinely
+// blank cell applies the mode's own mark. Deliberately single-tap/click only — drags/swipes
+// are unaffected (see modeTargetState below, which paintCell's drag-sweep path uses instead,
+// per the project owner's explicit "this does not apply for swipes at least for now").
 function targetStateFor(current) {
-  if (activeMode === 'fill') return current === FILLED ? UNKNOWN : FILLED;
-  // Eraser always aims at UNKNOWN — paintCell's current === state check already no-ops a
-  // click/drag-sweep over a cell that's UNKNOWN already (nothing to erase there).
-  if (activeMode === 'erase') return UNKNOWN;
-  return current === EMPTY ? UNKNOWN : EMPTY;
+  if (activeMode === 'erase') return UNKNOWN; // unchanged — already always aims at UNKNOWN
+  if (current !== UNKNOWN) return UNKNOWN;
+  return activeMode === 'fill' ? FILLED : EMPTY;
 }
 
 // Current Objective (TODO.md): a drag starting on a cell already in the mode's own target
@@ -1141,6 +1246,22 @@ function runUndo() {
 }
 els.btnUndo.addEventListener('click', runUndo);
 
+// ---- Redo, paired with Undo (Current Objective — see TODO.md) ----
+//
+// Standard redo-stack semantics, entirely implemented in Board itself (model.js) — undoLast/
+// undoToMove push whatever they remove onto board.redoStack, and any genuinely new move
+// (set/setBatch, used by every real mutation path) clears it, so this function is just the
+// UI-facing pop-and-resync, mirroring runUndo above exactly.
+function runRedo() {
+  if (!board || board.redoStack.length === 0) return;
+  board.redo();
+  autoXCells = deriveAutoXCells(board.history);
+  clearHighlights();
+  setExplain(null);
+  syncAllCellVisuals();
+}
+els.btnRedo.addEventListener('click', runRedo);
+
 // ---- live drag-fill cell counter (Current Objective — see TODO.md) ----
 //
 // A small floating badge that follows the pointer while the player is click-and-dragging a
@@ -1212,8 +1333,14 @@ function attachPointerHandlers(grid) {
     // click-an-already-filled-cell-to-clear-it (computeUnfillChanges/applyUnfillWithSound),
     // just generalized to EMPTY cells too — clearing an X mark has no line-unlock side effect
     // to compute (computeUnfillChanges is state-agnostic already), so reuse rather than
-    // reinvent. Non-erase modes keep their original FILLED-only definition unchanged.
-    const isUnfill = activeMode === 'erase' ? current !== UNKNOWN : current === FILLED && state === UNKNOWN;
+    // reinvent. Non-erase modes keep their original "clearing an existing mark" definition,
+    // just generalized the same way Eraser already is (Current Objective — see TODO.md):
+    // targetStateFor's new opposite-mark tap (EMPTY→UNKNOWN in Fill mode, or FILLED→UNKNOWN
+    // in Mark-empty mode) is a clear, same as the pre-existing same-mode toggle-to-clear —
+    // both now read as "current isn't UNKNOWN and we're heading to UNKNOWN" — so it also
+    // bypasses the locked-line gate below and gets computeUnfillChanges' auto-X-revert
+    // handling, exactly like clearing a FILLED cell already did.
+    const isUnfill = current !== UNKNOWN && state === UNKNOWN;
     if (!isUnfill && (rowLockedNow(r) || colLockedNow(c))) return false;
 
     const applied = isUnfill

@@ -105,6 +105,12 @@ export class Board {
     // instead of a blank grid, so pre-existing marks survive undoing moves made on top of
     // them. Defaults to blank, same as a puzzle with nothing to resume.
     this.baseline = createGrid(rows, cols);
+    // Redo (Current Objective — see TODO.md): moves undoToMove/undoLast remove from
+    // `history`, most-recently-undone last-in-first-out — see undoToMove and redo() below.
+    // Any genuinely new move (set/setBatch with clearRedo left at its default) wipes this,
+    // matching standard undo/redo semantics: branching off with a fresh move invalidates
+    // whatever "future" undo had set aside.
+    this.redoStack = [];
   }
 
   static fromGrid(grid, { hasHistory = true } = {}) {
@@ -120,6 +126,7 @@ export class Board {
     b.grid = cloneGrid(this.grid);
     b.baseline = cloneGrid(this.baseline);
     b.history = this.history.map((m) => ({ ...m, cells: m.cells.map((c) => ({ ...c })) }));
+    b.redoStack = this.redoStack.map((m) => ({ ...m, cells: m.cells.map((c) => ({ ...c })) }));
     b.hasHistory = this.hasHistory;
     return b;
   }
@@ -131,12 +138,15 @@ export class Board {
   // Set a single cell. Returns false (no-op) if it was already that state.
   // recordHistory:false is for scratch boards (hint preview, contradiction search) that
   // must not pollute the real move history. `source` tags the move (see class comment).
-  set(r, c, state, { recordHistory = true, source = 'player' } = {}) {
+  // clearRedo:false is for redo() itself (see below) — reapplying an undone move must NOT
+  // wipe whatever else is still waiting on the redo stack behind it.
+  set(r, c, state, { recordHistory = true, source = 'player', clearRedo = true } = {}) {
     const prev = this.grid[r][c];
     if (prev === state) return false;
     this.grid[r][c] = state;
     if (recordHistory && this.hasHistory) {
       this.history.push({ cells: [{ row: r, col: c, prev, next: state }], source });
+      if (clearRedo) this.redoStack = [];
     }
     return true;
   }
@@ -150,7 +160,8 @@ export class Board {
   // auto-X side effect, so autoXCells can be correctly rebuilt from board.history after an
   // undo (see deriveAutoXCells) instead of drifting out of sync via incremental add/delete.
   // Not used by model.js itself; just threaded through into `history` and the return value.
-  setBatch(changes, { recordHistory = true, source = 'player' } = {}) {
+  // clearRedo:false is for redo() itself (see below) — same reasoning as set()'s own option.
+  setBatch(changes, { recordHistory = true, source = 'player', clearRedo = true } = {}) {
     const applied = [];
     for (const { row, col, state, auto } of changes) {
       const prev = this.grid[row][col];
@@ -160,6 +171,7 @@ export class Board {
     }
     if (applied.length > 0 && recordHistory && this.hasHistory) {
       this.history.push({ cells: applied, source });
+      if (clearRedo) this.redoStack = [];
     }
     return applied;
   }
@@ -175,16 +187,37 @@ export class Board {
   // history[0, n) on top of it — "undo to move #n". Used when an on-demand check finds the
   // earliest wrong mark was move #n, and by undoLast() below.
   undoToMove(n) {
+    const removed = this.history.slice(n);
     const replay = this.history.slice(0, n);
     this.grid = cloneGrid(this.baseline);
     for (const move of replay) {
       for (const cell of move.cells) this.grid[cell.row][cell.col] = cell.next;
     }
     this.history = replay;
+    // Redo (Current Objective — see TODO.md): push whichever moves this removed onto
+    // redoStack so redo() can replay them, most-recently-undone on top — a multi-move jump
+    // (app.js's mistake-driven "back up to move #N") removes more than one at once; pushing
+    // in reverse means redo() naturally replays them back in their original order, one at a
+    // time. The common single-move case (undoLast) is just removed.length === 1.
+    for (let i = removed.length - 1; i >= 0; i--) this.redoStack.push(removed[i]);
   }
 
   undoLast() {
     if (this.history.length > 0) this.undoToMove(this.history.length - 1);
+  }
+
+  // Redo (Current Objective — see TODO.md): standard redo-stack semantics. Pops the most
+  // recently undone move and reapplies it via setBatch — same `source` tag and per-cell
+  // `auto` flag it originally had, so it becomes a normal new history entry indistinguishable
+  // from a fresh manual move — except clearRedo:false, since reapplying one undone move must
+  // not wipe out any others still waiting behind it on the stack. Returns the reapplied move,
+  // or null if there was nothing to redo.
+  redo() {
+    if (this.redoStack.length === 0) return null;
+    const move = this.redoStack.pop();
+    const changes = move.cells.map((c) => ({ row: c.row, col: c.col, state: c.next, auto: c.auto }));
+    this.setBatch(changes, { source: move.source, clearRedo: false });
+    return move;
   }
 }
 

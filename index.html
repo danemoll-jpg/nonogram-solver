@@ -65,6 +65,12 @@
                replaces the old native `title` — see the mode-x/mode-erase comment above. -->
           <button id="btn-undo" class="btn btn--icon" type="button" aria-label="Undo last move" data-tooltip="Undo last move" disabled>↩️</button>
 
+          <!-- New: Redo, paired with Undo (see TODO.md) — standard redo-stack semantics, all
+               in Board itself (src/model.js): undoing pushes onto board.redoStack, redoing
+               pops/reapplies, and any new move clears it. Disabled via app.js whenever
+               board.redoStack is empty, same pattern as Undo above. -->
+          <button id="btn-redo" class="btn btn--icon" type="button" aria-label="Redo" data-tooltip="Redo" disabled>↪️</button>
+
           <!-- Toolbar cleanup (see TODO.md): a small visual gap, not a divider line — just extra
                horizontal space separating the play controls above from the secondary/settings
                controls below. -->
@@ -100,6 +106,22 @@
                 <label class="help-menu__item help-menu__item--toggle">
                   <input type="checkbox" id="toggle-autocheck" />
                   Auto-check
+                </label>
+              </li>
+              <!-- New: adjustable autosave cadence (see TODO.md) — a preset list rather than
+                   free-form numeric input, matching the decided 30s/1min/2min/5min/off options.
+                   Local-only preference (like Mute above), not synced across paired devices —
+                   see app.js's own comment on that choice. -->
+              <li role="none" class="help-menu__toggle-item">
+                <label class="help-menu__item help-menu__item--select" for="autosave-cadence-select">
+                  Autosave
+                  <select id="autosave-cadence-select">
+                    <option value="30000">Every 30s</option>
+                    <option value="60000">Every 1 min</option>
+                    <option value="120000">Every 2 min</option>
+                    <option value="300000">Every 5 min</option>
+                    <option value="0">Off</option>
+                  </select>
                 </label>
               </li>
               <li class="help-menu__divider" role="none" aria-hidden="true"></li>
