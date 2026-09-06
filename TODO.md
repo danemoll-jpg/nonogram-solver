@@ -1294,42 +1294,70 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **New: lock a drag to the row or column it started on, for the whole gesture.**
-  Direct ask: "if I started filling on one row, I should stay on that row the
-  whole time, the same with the columns." Currently a drag can wander into an
-  adjacent row/column if the pointer's actual movement drifts even slightly off
-  a perfectly straight line (a real touch-drag concern, not just a mouse one) —
-  the fix is to detect the drag's axis once movement begins and clamp every
-  subsequent cell to it for the rest of the gesture.
-  - **Axis detection**: on drag start, record the starting cell but don't lock
-    an axis yet (a single cell doesn't indicate direction). Once the pointer
-    has genuinely moved, determine horizontal vs. vertical from whichever way
-    it actually moved more — **raw pointer/pixel movement (dx vs. dy) is
-    likely a more robust signal than which grid cell was first reached**,
-    since a fast movement could reach a diagonal cell on its very first sample
-    even when the player's intent was clearly a straight line; comparing
-    magnitudes of the actual on-screen movement should more reliably capture
-    intent than the discretized grid position alone. Code's call on the exact
-    tie-breaking rule for a genuinely ambiguous near-45° movement, but this
-    should be rare in practice.
-  - **Once locked, clamp for the rest of the gesture**: a horizontal lock
-    fixes the row and only lets the column vary as the pointer moves; a
-    vertical lock fixes the column and only lets the row vary — regardless of
-    where the pointer actually strays afterward, until the drag ends
-    (`pointerup`).
-  - **Real interaction with the existing fast-drag line-walk fix, worth
-    getting right rather than bolting on separately**: the existing Bresenham
-    `cellsOnLine` walk (built to avoid skipping cells during a fast straight
-    drag) currently interpolates a path between the last sample and the
-    current one — once an axis is locked, that interpolation needs to happen
-    ALONG the locked axis (walking only through cells in the locked row/
-    column), not as a diagonal path toward wherever the raw pointer position
-    currently is. The clamp should happen before the line-walk runs, not
-    after, so the interpolated cells never leave the locked axis either.
-  - **Applies symmetrically to all three modes** (Fill, Mark-empty, Eraser) —
-    this is a hit-testing/path concern (which cells a drag touches), not
-    specific to what state gets applied at each one, so the same locking logic
-    should sit underneath all three rather than being duplicated per mode.
+* **Drag-axis lock — done, verified end-to-end in browser preview (real
+  dispatched pointerdown/pointermove/pointerup events, not synthetic
+  unit-level calls).** Direct ask: "if I started filling on one row, I should
+  stay on that row the whole time, the same with the columns." A drag's
+  `dragging` state (`attachPointerHandlers`, `app.js`) now records the
+  starting cell/pointer position at `pointerdown` (`startRow`/`startCol`/
+  `startClientX`/`startClientY`) but leaves a new `lockAxis` field `null` —
+  a single cell doesn't indicate direction yet.
+  - **Axis detection, exactly as specced**: on the first `pointermove` where
+    the pointer has moved at least `AXIS_LOCK_THRESHOLD_PX` (6px — comfortably
+    under `MIN_CELL_PX`'s 18px floor, so it locks well before an unclamped
+    pre-lock path could plausibly cut across more than one cell diagonally)
+    in either raw screen direction, `lockAxis` is set from **raw pointer
+    movement (dx vs. dy since the drag started), not which grid cell was
+    first reached** — `Math.abs(dx) >= Math.abs(dy) ? 'row' : 'col'` (an exact
+    tie defaults to horizontal, code's own call per the task, expected to be
+    rare in practice). Once set, `lockAxis` is never re-evaluated for the
+    rest of that gesture, confirmed directly: a drag that locks vertical on
+    its first move, then drifts hard sideways on a later sample, stays locked
+    to the original column (verified in preview, see below) rather than
+    re-detecting a new direction mid-gesture.
+  - **Clamped BEFORE the line-walk, per the task's own emphasis**: the
+    sampled cell (`r1`/`c1`) is clamped to `dragging.startRow`/`startCol`
+    right after axis detection, and only THEN does the existing Bresenham
+    `cellsOnLine(dragging.lastRow, dragging.lastCol, r1, c1)` walk run — since
+    `lastRow`/`lastCol` is itself always on-axis once locked (every cell
+    painted so far was clamped the same way), the walk between the two ends
+    up a straight line along the locked axis rather than interpolating
+    diagonally toward wherever the raw pointer currently sits. This is what
+    makes the fix correct for the fast-movement case the task called out
+    (reaching a diagonal cell on the very first sample), not just for a slow
+    cell-by-cell drag.
+  - **Applies to all three modes via one shared code path, not duplicated per
+    mode**, exactly as specced — the clamp sits in `pointermove` before
+    `paintCell` is ever called, so Fill/Mark-empty/Eraser all inherit it
+    automatically. Confirmed directly for all three in browser preview, not
+    just reasoned about: a diagonal-first-sample drag starting on a "5"
+    (full-row) line stayed on that row for Fill; the identical shape stayed
+    on-column for a second Fill case; a Mark-empty (X) drag confirmed the
+    same horizontal clamp; an Eraser drag over a pre-filled row confirmed it
+    erased straight across that row only, never touching the row diagonally
+    below even though the raw pointer swept well into it.
+  - **One real interaction confirmed with a PRE-EXISTING, unrelated mechanic
+    while testing, not a bug in this fix**: an early test drag locked
+    correctly to column 0 and painted 2 of its 3 intended cells, then stopped
+    — investigation showed column 0's own clue ("2") was already satisfied by
+    those 2 cells, so the solver's existing auto-X/line-lock feature had
+    already locked the rest of that column to EMPTY before the drag's third
+    sample ran, which correctly blocked it (the same "no new mark accepted in
+    a locked line" rule every other mode already respects). Re-tested against
+    a column with more headroom (clue "4") to confirm the fix itself paints
+    every intended cell along the axis when nothing else blocks it — it does.
+  - **No automated test added, per this project's own established precedent**
+    for DOM/pointer-interaction features (the crosshair highlight and
+    drag-fill-counter features before it): there's no jsdom/DOM-testing
+    dependency in this project (`package.json` has none), so verification for
+    this class of change is real dispatched pointer events against the live
+    app in browser preview, as done here, not a committed unit test. All 836
+    existing tests still pass unmodified (this is a pure `app.js` DOM-event
+    change, nothing solver/model-related touched).
+  - Not yet real-device-confirmed — touch-drag behavior specifically (as
+    opposed to the mouse-pointer events used for preview verification) still
+    needs the project owner's own on-device pass, same status every other
+    recent addition has.
 
 * **Previous round: none queued right now beyond the above.** See the four-item
   writeup directly above (fill/X inversion detection, scan naming popup, library

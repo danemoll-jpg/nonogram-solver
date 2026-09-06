@@ -589,18 +589,29 @@ Current Objective; see `TODO.md`'s Completed Tasks for the full writeup.
   beforeunload-alone reliability mistake — the timer is what actually
   carries the feature.
 
-**Current objective, new item: lock a drag to the row or column it started on
-for the whole gesture.** A drag currently can wander into an adjacent row/
-column if the pointer's actual movement isn't perfectly straight. Detect the
-axis from the pointer's real movement (dx vs. dy is likely more robust than
-which grid cell was first reached, since a fast movement could land on a
-diagonal cell on its very first sample), then clamp every subsequent cell to
-that axis for the rest of the gesture. Real interaction to get right: the
-clamp needs to happen BEFORE the existing Bresenham fast-drag line-walk runs,
-so the interpolated path between samples also stays on the locked axis rather
-than cutting diagonally. Applies the same way to all three modes (Fill,
-Mark-empty, Eraser) — a hit-testing concern, not a per-mode one. See
-`TODO.md` for full detail.
+**Drag-axis lock — done, preview-verified (real dispatched pointer events, not
+synthetic unit calls).** A drag now locks to the row or column it started on
+for the whole gesture, per direct request ("if I started filling on one row,
+I should stay on that row the whole time"). `attachPointerHandlers`'s
+`dragging` state (`app.js`) gains `startRow`/`startCol`/`startClientX`/
+`startClientY` at `pointerdown` and a `lockAxis` (`'row' | 'col' | null`) that
+`pointermove` sets, once, from raw pointer/pixel movement (dx vs. dy since the
+drag started, not which grid cell was first reached — a fast movement can
+land on a diagonal cell on its very first sample) once that movement clears a
+small `AXIS_LOCK_THRESHOLD_PX` (6px) noise floor. Once locked, the sampled
+cell is clamped to the starting row/column BEFORE the existing Bresenham
+`cellsOnLine` line-walk runs, so the interpolated path between samples stays
+on-axis too rather than cutting diagonally — this is what makes it correct
+for a fast/diagonal-first-sample drag, not just a slow one. Sits in the one
+shared `pointermove` path all three modes (Fill, Mark-empty, Eraser) already
+funnel through, so no per-mode duplication was needed; confirmed directly for
+all three in browser preview, plus that the lock persists even when a later
+sample in the same gesture drifts hard the other way. No automated test added
+— same "no jsdom in this project, DOM/pointer features are browser-preview-
+verified" precedent the crosshair-highlight and drag-fill-counter features
+already established. All 836 tests still pass (pure `app.js` change). Not yet
+real-device-confirmed (touch-specific, as opposed to the mouse pointer events
+preview verification used). See `TODO.md` for the full writeup.
 
 The scroll bug's original scan-wizard trigger remains genuinely fixed and
 confirmed, and the library-rename trigger is now ALSO confirmed on the real

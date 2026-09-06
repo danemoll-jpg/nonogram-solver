@@ -1271,6 +1271,13 @@ els.btnRedo.addEventListener('click', runRedo);
 // happen often enough during normal play that per-stroke DOM churn isn't worth it, and
 // nothing about the badge needs to persist between strokes.
 let dragCountBadgeEl = null;
+
+// Axis-lock threshold (Current Objective — see TODO.md): how far the pointer must move, in
+// raw pixels, before a drag's direction is considered genuine rather than jitter/a near-still
+// press. Comfortably below MIN_CELL_PX (18) so it locks well before the pre-lock (unclamped)
+// path could plausibly cut across more than one cell diagonally.
+const AXIS_LOCK_THRESHOLD_PX = 6;
+
 function dragCountBadge() {
   if (!dragCountBadgeEl) {
     dragCountBadgeEl = document.createElement('div');
@@ -1404,7 +1411,22 @@ function attachPointerHandlers(grid) {
     // see modeTargetState's comment — NOT `newState`, which is only this pressed cell's own
     // click-toggle result and would wrongly redefine the whole stroke as "clear" when the
     // pressed cell happened to already be marked.
-    dragging = { paintState: modeTargetState(), touched: new Set([`${r},${c}`]), count: 0, lastRow: r, lastCol: c };
+    dragging = {
+      paintState: modeTargetState(),
+      touched: new Set([`${r},${c}`]),
+      count: 0,
+      lastRow: r,
+      lastCol: c,
+      // Axis lock (Current Objective — see TODO.md): the cell/pointer position the drag
+      // started at, so pointermove below can detect direction from genuine movement and then
+      // clamp to it. `lockAxis` stays null until that movement actually happens — a single
+      // cell/press doesn't indicate a direction yet.
+      startRow: r,
+      startCol: c,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      lockAxis: null, // 'row' (horizontal drag, row fixed, col varies) | 'col' (vertical, col fixed) | null
+    };
     const changed = paintCell(el, newState);
     // Only show/count for a genuine fill or X paint — not a plain click-to-clear (newState
     // UNKNOWN), which isn't "painting a run" and wouldn't make sense to badge (see this
@@ -1425,8 +1447,35 @@ function attachPointerHandlers(grid) {
     }
     const el = cellAt(e.clientX, e.clientY);
     if (!el) return;
-    const r1 = Number(el.dataset.row);
-    const c1 = Number(el.dataset.col);
+    let r1 = Number(el.dataset.row);
+    let c1 = Number(el.dataset.col);
+
+    // Axis lock (Current Objective — see TODO.md): "if I started filling on one row, I
+    // should stay on that row the whole time, the same with columns." Without this, a drag
+    // can wander into an adjacent row/column whenever the pointer's actual path isn't
+    // perfectly straight — a real touch-drag concern, not just a mouse one. Direction is
+    // detected from raw pointer/pixel movement (dx vs. dy since the drag started), NOT from
+    // which grid cell was first reached — a fast movement can land on a diagonal cell on its
+    // very first sample even when the intent was clearly a straight line, so the discretized
+    // grid position alone isn't a reliable signal of direction. Locks only once the pointer
+    // has moved at least AXIS_LOCK_THRESHOLD_PX in either direction (a near-still press
+    // shouldn't commit to a direction yet); an exact tie (rare, a near-45° movement) defaults
+    // to horizontal — code's call, per the task.
+    if (!dragging.lockAxis) {
+      const dx = e.clientX - dragging.startClientX;
+      const dy = e.clientY - dragging.startClientY;
+      if (Math.abs(dx) >= AXIS_LOCK_THRESHOLD_PX || Math.abs(dy) >= AXIS_LOCK_THRESHOLD_PX) {
+        dragging.lockAxis = Math.abs(dx) >= Math.abs(dy) ? 'row' : 'col';
+      }
+    }
+    // Clamp to the locked axis BEFORE the line-walk below runs (not after), so the Bresenham
+    // interpolation between `lastRow/lastCol` and this sample stays on the locked row/column
+    // too, instead of cutting diagonally toward wherever the raw pointer currently is —
+    // `lastRow/lastCol` is itself always on-axis once locked (every cell painted so far was
+    // clamped the same way), so the walk between the two ends up a straight line along it.
+    if (dragging.lockAxis === 'row') r1 = dragging.startRow;
+    else if (dragging.lockAxis === 'col') c1 = dragging.startCol;
+
     setCrosshairHighlight(r1, c1);
 
     // Walk every cell between where the drag last was and where it is now (see cellsOnLine's
