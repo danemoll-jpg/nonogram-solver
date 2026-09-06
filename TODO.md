@@ -1294,9 +1294,42 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
-* **None queued right now.** See the writeup directly above (Redo,
-  opposite-mark tap-to-erase, periodic autosave) for what this round covered
-  — all unit/preview-verified, none yet real-device-confirmed.
+* **New: lock a drag to the row or column it started on, for the whole gesture.**
+  Direct ask: "if I started filling on one row, I should stay on that row the
+  whole time, the same with the columns." Currently a drag can wander into an
+  adjacent row/column if the pointer's actual movement drifts even slightly off
+  a perfectly straight line (a real touch-drag concern, not just a mouse one) —
+  the fix is to detect the drag's axis once movement begins and clamp every
+  subsequent cell to it for the rest of the gesture.
+  - **Axis detection**: on drag start, record the starting cell but don't lock
+    an axis yet (a single cell doesn't indicate direction). Once the pointer
+    has genuinely moved, determine horizontal vs. vertical from whichever way
+    it actually moved more — **raw pointer/pixel movement (dx vs. dy) is
+    likely a more robust signal than which grid cell was first reached**,
+    since a fast movement could reach a diagonal cell on its very first sample
+    even when the player's intent was clearly a straight line; comparing
+    magnitudes of the actual on-screen movement should more reliably capture
+    intent than the discretized grid position alone. Code's call on the exact
+    tie-breaking rule for a genuinely ambiguous near-45° movement, but this
+    should be rare in practice.
+  - **Once locked, clamp for the rest of the gesture**: a horizontal lock
+    fixes the row and only lets the column vary as the pointer moves; a
+    vertical lock fixes the column and only lets the row vary — regardless of
+    where the pointer actually strays afterward, until the drag ends
+    (`pointerup`).
+  - **Real interaction with the existing fast-drag line-walk fix, worth
+    getting right rather than bolting on separately**: the existing Bresenham
+    `cellsOnLine` walk (built to avoid skipping cells during a fast straight
+    drag) currently interpolates a path between the last sample and the
+    current one — once an axis is locked, that interpolation needs to happen
+    ALONG the locked axis (walking only through cells in the locked row/
+    column), not as a diagonal path toward wherever the raw pointer position
+    currently is. The clamp should happen before the line-walk runs, not
+    after, so the interpolated cells never leave the locked axis either.
+  - **Applies symmetrically to all three modes** (Fill, Mark-empty, Eraser) —
+    this is a hit-testing/path concern (which cells a drag touches), not
+    specific to what state gets applied at each one, so the same locking logic
+    should sit underneath all three rather than being duplicated per mode.
 
 * **Previous round: none queued right now beyond the above.** See the four-item
   writeup directly above (fill/X inversion detection, scan naming popup, library
@@ -1574,3 +1607,21 @@ Technical Notes / Blockers
   confirmed twice now; not currently being pursued further.
 * Sibling repo `game-hub` (`C:\Users\danmo\game-hub`) is directly accessible to
   Code — the game-hub listing is live at https://dansgamehub.netlify.app/.
+* **Deploy-batching process note, confirmed working in practice**: since Netlify
+  auto-deploys on every push to `main` and the project owner is on a limited
+  number of deploys, the practice is to hold back multiple completed rounds of
+  work locally and push them together in one batch rather than deploying after
+  each individual round. This round is a real, direct example of it working as
+  intended — the project owner deliberately held back the previous round (fill/X
+  inversion detection, scan naming popup, library widen/medal icon, tiered
+  build-failure line marking) and pushed it together with this round (Redo,
+  opposite-mark tap-to-erase, periodic autosave) in a single deploy, rather than
+  spending two separate deploys on two separate rounds.
+* **Standing process note: commit before handoff.** Code should commit its work
+  (including the updated `TODO.md`/`CLAUDE.md`) before reporting back a round as
+  done — the project owner's handoff/review step depends on seeing the actual
+  committed repo state, not uncommitted local changes that might not be
+  captured when the docs get shared back. This is separate from the
+  deploy-batching note above (committing locally vs. pushing to `main`/
+  deploying are different steps) — commit every round; batch the push/deploy
+  across multiple rounds if holding back per the note above.
