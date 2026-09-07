@@ -589,6 +589,37 @@ Current Objective; see `TODO.md`'s Completed Tasks for the full writeup.
   beforeunload-alone reliability mistake — the timer is what actually
   carries the feature.
 
+**Two related drag-behavior refinements — done, preview-verified (real
+dispatched pointer events, not synthetic unit calls); not yet
+real-device-confirmed.**
+1. **Starting a drag on a cell already in the SAME state the drag is about to
+   paint no longer clears it — it's a pass-through, and the drag continues
+   normally.** Refines (not reverses) the earlier drag fix, which deliberately
+   preserved toggle-to-clear for a plain single tap — that tap behavior is
+   untouched; only the *start of a drag* skips it now. Since a tap and the
+   start of a drag are indistinguishable until real movement happens, the
+   toggle-clear decision for exactly this case is deferred
+   (`dragging.pendingClearEl`, `app.js`) — `pointermove`'s existing axis-lock
+   detection discards it once a genuine drag is confirmed, or `endDrag`
+   applies it if the gesture turns out to have been a plain tap after all.
+   Symmetric for Fill/Mark-empty; Eraser is unaffected (its own target is
+   always UNKNOWN, so the case can't arise for it).
+2. **The live drag cell-count badge now counts the drag's actual span (start
+   to current position along the locked axis), not just newly-painted cells.**
+   An already-correctly-filled cell the drag passes over now counts toward a
+   clue's run length. Simple calculation thanks to the recent axis-lock
+   feature: `dragging.count = |current − start| + 1` along the one locked
+   axis, recomputed every `pointermove` once `lockAxis` is set.
+
+Verified directly in browser preview (real `PointerEvent`s dispatched on grid
+cells): pressing an already-FILLED cell to start a Fill drag left it FILLED
+throughout while the badge correctly read the full span (2, then 3) across
+already-filled plus newly-filled cells; symmetric in Mark-empty mode; a
+genuine plain tap (no movement) on an already-marked cell still cleared it as
+before; the pre-existing opposite-mark tap-to-erase and Eraser mode were both
+re-checked unaffected. All 836 tests pass (pure `app.js` DOM-event change). See
+`TODO.md` for the full writeup.
+
 **Drag-axis lock — done, preview-verified (real dispatched pointer events, not
 synthetic unit calls).** A drag now locks to the row or column it started on
 for the whole gesture, per direct request ("if I started filling on one row,
@@ -609,9 +640,9 @@ all three in browser preview, plus that the lock persists even when a later
 sample in the same gesture drifts hard the other way. No automated test added
 — same "no jsdom in this project, DOM/pointer features are browser-preview-
 verified" precedent the crosshair-highlight and drag-fill-counter features
-already established. All 836 tests still pass (pure `app.js` change). Not yet
-real-device-confirmed (touch-specific, as opposed to the mouse pointer events
-preview verification used). See `TODO.md` for the full writeup.
+already established. All 836 tests still pass (pure `app.js` change).
+**CONFIRMED on the real device by the project owner** — real touch-drag
+behavior matches the intended axis-lock. See `TODO.md` for the full writeup.
 
 The scroll bug's original scan-wizard trigger remains genuinely fixed and
 confirmed, and the library-rename trigger is now ALSO confirmed on the real

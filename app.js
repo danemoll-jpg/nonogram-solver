@@ -968,6 +968,9 @@ function targetStateFor(current) {
 // no-op. This is the mode's own normal target regardless of what the first cell happens to
 // already be — the toggle-to-clear behavior stays exactly as before for a plain single click
 // (see the pointerdown handler below), just no longer leaks into what a drag-sweep paints.
+// Refined further by a later Current Objective item (TODO.md): even the pressed cell's own
+// toggle-to-clear is now deferred until pointerdown's gesture is known to be a plain tap rather
+// than the start of a drag — see pointerdown's `deferClear` handling below.
 function modeTargetState() {
   if (activeMode === 'fill') return FILLED;
   if (activeMode === 'erase') return UNKNOWN;
@@ -1299,7 +1302,7 @@ function hideDragCountBadge() {
 }
 
 function attachPointerHandlers(grid) {
-  let dragging = null; // { paintState, touched: Set<string>, count: number }
+  let dragging = null; // { paintState, touched: Set<string>, count: number, pendingClearEl }
 
   grid.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -1406,13 +1409,23 @@ function attachPointerHandlers(grid) {
     const r = Number(el.dataset.row);
     const c = Number(el.dataset.col);
     setCrosshairHighlight(r, c);
-    const newState = targetStateFor(board.get(r, c));
-    // paintState (what a drag-sweep paints into later cells) is the mode's own normal target —
-    // see modeTargetState's comment — NOT `newState`, which is only this pressed cell's own
-    // click-toggle result and would wrongly redefine the whole stroke as "clear" when the
-    // pressed cell happened to already be marked.
+    const paintState = modeTargetState();
+    const current = board.get(r, c);
+    // Current Objective (TODO.md item 1) — refines the drag-on-already-filled-cell fix above,
+    // doesn't reverse it: pressing on a cell already in the mode's own paint target (already-
+    // FILLED starting a Fill drag, already-EMPTY starting a Mark-empty drag) used to clear it
+    // immediately via targetStateFor's plain-tap toggle-to-clear semantics — correct for a
+    // genuine single tap, wrong for the start of a drag, which the project owner wants to leave
+    // that cell as a pass-through instead. A tap and the start of a drag are indistinguishable
+    // until real movement happens, so defer the toggle-clear decision for exactly this case:
+    // hold off on painting here, and let pointermove's axis-lock detection (a real drag has
+    // begun) discard it below, or endDrag (no drag ever happened — a plain tap) apply it after
+    // all. Every other case — a blank cell, or the pre-existing opposite-mark tap-to-erase — is
+    // unaffected, still applied immediately exactly as before.
+    const deferClear = activeMode !== 'erase' && current === paintState;
+    const newState = deferClear ? current : targetStateFor(current);
     dragging = {
-      paintState: modeTargetState(),
+      paintState,
       touched: new Set([`${r},${c}`]),
       count: 0,
       lastRow: r,
@@ -1426,8 +1439,9 @@ function attachPointerHandlers(grid) {
       startClientX: e.clientX,
       startClientY: e.clientY,
       lockAxis: null, // 'row' (horizontal drag, row fixed, col varies) | 'col' (vertical, col fixed) | null
+      pendingClearEl: deferClear ? el : null,
     };
-    const changed = paintCell(el, newState);
+    const changed = deferClear ? false : paintCell(el, newState);
     // Only show/count for a genuine fill or X paint — not a plain click-to-clear (newState
     // UNKNOWN), which isn't "painting a run" and wouldn't make sense to badge (see this
     // section's header comment).
@@ -1466,6 +1480,10 @@ function attachPointerHandlers(grid) {
       const dy = e.clientY - dragging.startClientY;
       if (Math.abs(dx) >= AXIS_LOCK_THRESHOLD_PX || Math.abs(dy) >= AXIS_LOCK_THRESHOLD_PX) {
         dragging.lockAxis = Math.abs(dx) >= Math.abs(dy) ? 'row' : 'col';
+        // Current Objective (TODO.md item 1): real drag movement just happened, so this is
+        // conclusively a drag, not a plain tap — the pressed cell's deferred same-state clear
+        // (see pointerdown) is discarded rather than applied, leaving it as a pass-through.
+        dragging.pendingClearEl = null;
       }
     }
     // Clamp to the locked axis BEFORE the line-walk below runs (not after), so the Bresenham
@@ -1483,26 +1501,40 @@ function attachPointerHandlers(grid) {
     // jump more than one cell between two pointermove events. touched still dedupes (a cell
     // this line re-crosses, or one already handled by an earlier event, is skipped exactly as
     // before), so this only ever paints strictly more of what a drag already visually covered.
-    let anyChanged = false;
     for (const [r, c] of cellsOnLine(dragging.lastRow, dragging.lastCol, r1, c1)) {
       const key = `${r},${c}`;
       if (dragging.touched.has(key)) continue;
       dragging.touched.add(key);
       const cellEl = cellEls.get(key);
       if (!cellEl) continue;
-      const changed = paintCell(cellEl, dragging.paintState, { dragStep: true });
-      if (changed && dragging.paintState !== UNKNOWN) {
-        dragging.count++;
-        anyChanged = true;
-      }
+      paintCell(cellEl, dragging.paintState, { dragStep: true });
     }
     dragging.lastRow = r1;
     dragging.lastCol = c1;
-    if (anyChanged) showDragCountBadge(e.clientX, e.clientY, dragging.count);
+
+    // Current Objective (TODO.md item 2): the badge counts the drag's actual SPAN along its
+    // locked axis (start to current position), not how many cells it happened to newly paint —
+    // an already-correctly-filled cell the drag passes over still counts toward a clue's run
+    // length even though no state change happens there. Simple now that a drag is locked to a
+    // single row/column: it's just the distance between the start and current position along
+    // that one axis, plus one for the starting cell itself.
+    if (dragging.lockAxis && dragging.paintState !== UNKNOWN) {
+      dragging.count = dragging.lockAxis === 'row'
+        ? Math.abs(c1 - dragging.startCol) + 1
+        : Math.abs(r1 - dragging.startRow) + 1;
+      showDragCountBadge(e.clientX, e.clientY, dragging.count);
+    }
     syncAllCellVisuals();
   });
 
   function endDrag() {
+    if (dragging?.pendingClearEl) {
+      // Current Objective (TODO.md item 1): axis-lock never engaged during this gesture — it
+      // was a plain tap, not a drag — so the deferred same-state toggle-to-clear applies after
+      // all, exactly as a plain tap always has (see pointerdown).
+      paintCell(dragging.pendingClearEl, UNKNOWN);
+      syncAllCellVisuals();
+    }
     dragging = null;
     hideDragCountBadge(); // transient in-stroke feedback only — see this section's header comment
     clearCrosshairHighlight();

@@ -1294,9 +1294,70 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
+* **Two related drag-behavior refinements, both found via real play — done,
+  preview-verified (real dispatched pointer events, not synthetic
+  unit-level calls). Not yet real-device-confirmed.**
+  1. **Starting a drag by pressing on a cell already in the SAME state the
+     drag is about to paint (already-FILLED starting a Fill drag,
+     already-EMPTY starting a Mark-empty drag) no longer clears that cell —
+     it's left as a pass-through and the drag continues normally.** Refines
+     the earlier drag-fix decision, doesn't reverse it: a plain single
+     tap/click (never becomes a drag) still toggles an already-marked cell
+     back to UNKNOWN exactly as before — only the *start of a drag*
+     specifically skips that toggle now. The real difficulty: a tap and the
+     start of a drag are indistinguishable at `pointerdown` time, before any
+     movement has happened, so the toggle-to-clear decision for exactly this
+     case (pressed cell already equals the mode's own paint target) is now
+     **deferred** rather than applied immediately — `dragging.pendingClearEl`
+     (`app.js`) holds the cell instead of painting it. `pointermove`'s
+     existing axis-lock detection (already the project's own definition of
+     "real drag movement, not jitter") resolves it: once `lockAxis` gets set,
+     the deferred clear is discarded (genuine drag → pass-through); if the
+     gesture ends via `pointerup`/`pointercancel` with `lockAxis` still null
+     (a genuine plain tap), `endDrag` applies the clear then, reproducing the
+     exact original tap behavior just delayed to release. Every other
+     pointerdown case — a blank cell, and the pre-existing opposite-mark
+     tap-to-erase (e.g. tapping an X'd cell in Fill mode) — is untouched,
+     still applied immediately exactly as before; Eraser mode is excluded
+     from the deferral entirely (its own target is always UNKNOWN, so this
+     case can't arise for it).
+  2. **The live drag cell-count badge now counts the drag's actual SPAN
+     (start to current position along the locked axis), not just how many
+     cells it happened to newly paint** — an already-correctly-filled cell
+     the drag passes over now counts toward a clue's run length, matching
+     the direct report ("it doesn't count a cell if it is already filled in,
+     which causes me to drag further than needed"). `pointermove`'s old
+     per-cell increment-on-change loop is gone; once `dragging.lockAxis` is
+     set, `dragging.count` is recomputed every move as
+     `|current − start| + 1` along that one locked axis (row or col,
+     whichever is fixed) — a pure geometric distance, correct regardless of
+     which individual cells along the way are already filled, already X'd,
+     or blocked by a locked line. Symmetric for Fill and Mark-empty; Eraser
+     never shows this badge, unaffected as before.
+  - **Verified directly in browser preview** (real `PointerEvent`s dispatched
+    on the actual grid cells, not calling internal functions): pressing an
+    already-FILLED cell to start a Fill-mode drag left it FILLED throughout
+    (not momentarily cleared) while the badge correctly read 2 then 3 as the
+    drag swept across two already-filled cells plus one genuinely new one;
+    the identical case reproduced symmetrically in Mark-empty (X) mode; a
+    *plain* tap (pointerdown+pointerup with zero movement) on an
+    already-marked cell still cleared it to UNKNOWN exactly as before,
+    confirming the tap-only toggle-to-clear behavior survived unchanged; the
+    pre-existing opposite-mark tap-to-erase (Fill mode tapping an X'd cell)
+    also fired unchanged; and Eraser mode's own drag-start behavior was
+    re-checked unaffected. All 836 tests pass (this is a pure `app.js`
+    DOM-event change, nothing solver/model-related touched) — no new
+    automated test added, per this project's own established precedent for
+    this class of DOM/pointer-interaction change (the crosshair highlight,
+    drag-fill-counter, and drag-axis-lock features before it all used the
+    same browser-preview-only verification, since there's no jsdom/DOM-
+    testing dependency in this project).
+
+**No current objective is queued right now.**
+
 * **Drag-axis lock — done, verified end-to-end in browser preview (real
   dispatched pointerdown/pointermove/pointerup events, not synthetic
-  unit-level calls).** Direct ask: "if I started filling on one row, I should
+  unit-level calls), and CONFIRMED on the real device.** Direct ask: "if I started filling on one row, I should
   stay on that row the whole time, the same with the columns." A drag's
   `dragging` state (`attachPointerHandlers`, `app.js`) now records the
   starting cell/pointer position at `pointerdown` (`startRow`/`startCol`/
@@ -1354,10 +1415,6 @@ Current Objective (Focus Area)
     app in browser preview, as done here, not a committed unit test. All 836
     existing tests still pass unmodified (this is a pure `app.js` DOM-event
     change, nothing solver/model-related touched).
-  - Not yet real-device-confirmed — touch-drag behavior specifically (as
-    opposed to the mouse-pointer events used for preview verification) still
-    needs the project owner's own on-device pass, same status every other
-    recent addition has.
 
 * **Previous round: none queued right now beyond the above.** See the four-item
   writeup directly above (fill/X inversion detection, scan naming popup, library
