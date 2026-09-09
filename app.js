@@ -39,7 +39,17 @@ let board = null;
 let autoCheckEnabled = false;
 let activeMode = 'fill'; // 'fill' | 'x' | 'erase' — which mark a click/drag applies (item 7.1)
 let highlightedCells = []; // { row, col, kind: 'reasoning' | 'result' }
-let puzzleStartTime = 0;
+// Active-time accumulator (Current Objective — see TODO.md): elapsed time used to be a pure
+// Date.now() difference against a single fixed start, which kept counting through any stretch
+// the app was backgrounded/screen-locked/tab-switched-away — a real correctness bug, not
+// cosmetic, since this number becomes both the personal best AND a candidate for the global
+// fastest-time record (see submitGlobalFastestTime below). Reuses the same visibilitychange
+// signal already wired up for autosave (see that section further down) to pause the
+// accumulator the moment the tab is hidden and resume it the moment it's visible again, so
+// elapsed time only ever counts genuinely active/visible play — see getElapsedMs/pauseActiveTime/
+// resumeActiveTime.
+let activeElapsedMs = 0; // ms accumulated from completed visible segments this session
+let activeSegmentStart = 0; // Date.now() the current visible segment began; 0 while paused (hidden)
 let puzzleCompleteShown = false;
 // Undo button (Current Objective — see TODO.md): computeCompletionStats derives hints-used
 // by walking board.history, but undoLast() actually removes the undone move from history —
@@ -253,10 +263,15 @@ function setExplain(content) {
 // the library's "Incomplete" resume flow — see the library "Play" handler below and
 // TODO.md's saved/incomplete-progress item), carry forward stats from BEFORE this session:
 // board.history only ever records moves made in the current session (a save is a grid
-// snapshot, not a full move log — see src/puzzleLibrary.js), so puzzleStartTime is offset
-// backwards by resumeElapsedMs (making elapsed-time display include prior time for free,
-// with no separate accumulator) and computeCompletionStats adds resumeHintsUsed onto
-// whatever it derives from this session's own history.
+// snapshot, not a full move log — see src/puzzleLibrary.js), so getElapsedMs adds
+// resumeElapsedMs on top of this session's own active-time accumulator (making elapsed-time
+// display include prior sessions' time for free) and computeCompletionStats adds
+// resumeHintsUsed onto whatever it derives from this session's own history.
+// resumeElapsedMs itself is only ever written by this same corrected getElapsedMs computation
+// (see saveProgressIfApplicable/maybeShowCompletion below), so a chain of resumes stays
+// active-time-only rather than just fixing the point where sessions get summed together — a
+// resumeElapsedMs saved by a pre-fix build is the one case that can still carry forward an
+// inflated number, since it was never re-computable after the fact.
 function startPuzzle(p) {
   puzzle = p;
   board = puzzle.initialMarks ? Board.fromGrid(puzzle.initialMarks) : new Board(puzzle.rows, puzzle.cols);
@@ -264,7 +279,8 @@ function startPuzzle(p) {
   highlightedCells = [];
   autoXCells = new Set();
   hintsUsedFloor = 0;
-  puzzleStartTime = Date.now() - (puzzle.resumeElapsedMs || 0);
+  activeElapsedMs = 0;
+  activeSegmentStart = document.hidden ? 0 : Date.now();
   puzzleCompleteShown = false;
   setExplain(null);
   els.btnContradiction.classList.add('hidden');
@@ -273,9 +289,9 @@ function startPuzzle(p) {
   renderBoard();
   updateStatus('');
   // Periodic autosave (Current Objective — see TODO.md): restart the timer's clock on every
-  // fresh puzzle load, same reasoning as puzzleStartTime just above — a brand-new puzzle
-  // deserves a full cadence window before its first autosave, not whatever was left over from
-  // the previous one.
+  // fresh puzzle load, same reasoning as the active-time accumulator reset just above — a
+  // brand-new puzzle deserves a full cadence window before its first autosave, not whatever was
+  // left over from the previous one.
   restartAutosaveTimer();
 }
 
@@ -635,6 +651,40 @@ function formatDuration(ms) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+// ---- active-time accumulator (Current Objective — see TODO.md) ----
+//
+// Replaces the old pure-wall-clock `Date.now() - puzzleStartTime` elapsed-time calculation,
+// which kept counting through any stretch the app was backgrounded/screen-locked/tab-switched-
+// away, with a pause/resume accumulator driven by the visibilitychange listener already wired
+// up for autosave further down (see that section's own comment) — one shared signal, two
+// independent reactions to it. Every caller that used to read a raw Date.now() difference
+// (maybeShowCompletion, saveProgressIfApplicable) now calls getElapsedMs() instead, so the fix
+// applies uniformly to this session's own computation everywhere it's used — not just patched
+// at the point resumeElapsedMs from a prior session gets summed in (see startPuzzle's comment).
+
+// Current elapsed time for this session: completed visible segments already folded into
+// activeElapsedMs, plus whatever's elapsed in the segment currently in progress (0 if paused/
+// hidden), plus any prior session's time carried forward on a resumed puzzle.
+function getElapsedMs() {
+  const liveSegmentMs = !document.hidden && activeSegmentStart ? Date.now() - activeSegmentStart : 0;
+  return (puzzle?.resumeElapsedMs || 0) + activeElapsedMs + liveSegmentMs;
+}
+
+// Folds the just-ended visible segment into the accumulator and stops the clock. A no-op if
+// already paused (activeSegmentStart is 0) — visibilitychange can in principle fire redundantly,
+// and double-counting a segment would silently reintroduce the same class of inflation bug.
+function pauseActiveTime() {
+  if (!activeSegmentStart) return;
+  activeElapsedMs += Date.now() - activeSegmentStart;
+  activeSegmentStart = 0;
+}
+
+// Starts a new visible segment. A no-op if already running, for the same redundant-event reason
+// as pauseActiveTime.
+function resumeActiveTime() {
+  if (!activeSegmentStart) activeSegmentStart = Date.now();
+}
+
 // Hints-used and mistakes-made are both derived from move history rather than tracked with
 // separate live counters — applyHintDeduction tags hint-originated moves with source:'hint',
 // and any cell ever written to a state that disagrees with the solution counts as a caught
@@ -667,7 +717,7 @@ function maybeShowCompletion() {
   if (puzzleCompleteShown || !puzzle.solution) return;
   puzzleCompleteShown = true;
   playSound('completeFanfare');
-  const timeMs = Date.now() - puzzleStartTime;
+  const timeMs = getElapsedMs();
   const { hintsUsed, mistakes } = computeCompletionStats();
   els.statName.textContent = puzzle.name; // reveal — see the library modal's renderLibraryList
   els.statTime.textContent = formatDuration(timeMs);
@@ -724,7 +774,7 @@ async function saveProgressIfApplicable() {
     return;
   }
   const { hintsUsed } = computeCompletionStats();
-  const elapsedMs = Date.now() - puzzleStartTime;
+  const elapsedMs = getElapsedMs();
   await saveInProgressPuzzle(puzzle.id, board.grid, elapsedMs, hintsUsed);
 }
 
@@ -833,8 +883,17 @@ restartAutosaveTimer();
 function bestEffortLeaveSave() {
   saveProgressIfApplicable().catch(() => {});
 }
+// The same visibilitychange signal also drives the active-time accumulator (Current Objective
+// — see TODO.md, and that section's own comment above computeCompletionStats): pausing before
+// the save fires means a save triggered by this same event captures the correct just-paused
+// elapsed time rather than whatever it was a tick earlier.
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) bestEffortLeaveSave();
+  if (document.hidden) {
+    pauseActiveTime();
+    bestEffortLeaveSave();
+  } else {
+    resumeActiveTime();
+  }
 });
 window.addEventListener('pagehide', bestEffortLeaveSave);
 
@@ -2191,8 +2250,9 @@ els.btnLibraryClose.addEventListener('click', () => {
 // why), since it's still irreversible.
 //
 // Re-invoking startPuzzle(puzzle) already zeroes hints-used and elapsed time for free (both
-// are derived fresh — see computeCompletionStats and puzzleStartTime — not carried on the
-// puzzle object), so a plain re-init is enough EXCEPT for a resumed in-progress puzzle (see
+// are derived fresh — see computeCompletionStats and the active-time accumulator above
+// getElapsedMs — not carried on the puzzle object), so a plain re-init is enough EXCEPT for a
+// resumed in-progress puzzle (see
 // TODO.md's saved/incomplete-progress item): `puzzle.resumed` carries an `initialMarks` +
 // `resumeElapsedMs`/`resumeHintsUsed` baseline from the save it was loaded from, and a plain
 // startPuzzle(puzzle) would re-seed right back to THAT saved snapshot rather than truly

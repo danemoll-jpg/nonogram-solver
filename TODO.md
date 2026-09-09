@@ -1294,6 +1294,113 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
+* **New real bug, confirmed by directly reading the deployed source, not
+  guessed: elapsed time is a pure wall-clock calculation that includes time
+  spent away from the app entirely — background, screen-locked, tab switched
+  away, anything.** Direct report: "I have like 644 mins showing for one I
+  started this morning but haven't been able to play all day." Confirmed
+  directly in `app.js`:
+  ```js
+  puzzleStartTime = Date.now() - (puzzle.resumeElapsedMs || 0);
+  // ...at completion:
+  const timeMs = Date.now() - puzzleStartTime;
+  ```
+  A fixed start timestamp with nothing pausing it while the app isn't actually
+  being used — if the tab stays alive in memory (just backgrounded, not
+  reloaded), every hour away counts toward the total exactly the same as an
+  hour of real active play.
+  - **This is a real correctness issue, not just cosmetic** — this same
+    number becomes the player's personal `bestTimeMs` (shown in the library)
+    AND gets submitted as a candidate for the GLOBAL fastest-time record via
+    `submitGlobalFastestTime`. An inflated wall-clock time is harmless for a
+    slow one, but a genuinely fast active-play time that happens to include a
+    long backgrounded gap could corrupt either stat with a wildly wrong
+    number.
+  - **Recommended fix — reuse infrastructure that already exists in this same
+    file for a different purpose**: `document.addEventListener('visibilitychange', ...)`
+    is already wired up (for the supplementary autosave trigger) — the same
+    signal can pause an "active time" accumulator whenever the tab goes
+    hidden, and resume it when it becomes visible again, rather than tracking
+    a single fixed `puzzleStartTime`. At completion, elapsed time becomes
+    "accumulated active milliseconds so far" (plus whatever's elapsed since
+    the most recent visible-resume, if currently visible) instead of a raw
+    `Date.now()` difference.
+  - **This needs to apply consistently to the resumed-puzzle case too, not
+    just a single continuous session**: `resumeElapsedMs` (saved from a prior
+    session) is added as a raw offset when a puzzle is resumed — if a PRIOR
+    session also suffered from this same wall-clock-includes-backgrounded-time
+    issue, whatever got saved and carried forward would already be inflated.
+    The underlying per-session elapsed-time computation needs the fix in
+    every session, not just patched at the point where sessions get summed
+    together across a resume.
+
+* **The elapsed-time bug above — fixed exactly per its own recommended
+  direction, preview-verified; not yet real-device-confirmed.** `app.js`'s
+  `puzzleStartTime` (a single fixed `Date.now()` baseline) is gone, replaced
+  by a pause/resume active-time accumulator: `activeElapsedMs` (completed
+  visible segments folded in) + `activeSegmentStart` (the current segment's
+  start, `0` while paused) with three small new functions right above
+  `computeCompletionStats` — `getElapsedMs()` (what every caller now reads
+  instead of a raw `Date.now()` diff), `pauseActiveTime()`, and
+  `resumeActiveTime()`. The SAME `visibilitychange` listener already wired up
+  for autosave now also drives this (pausing before the autosave fire so a
+  save triggered by that same event captures the just-paused time, not a
+  tick later) — one shared signal, two independent reactions, exactly the
+  reuse this bug's diagnosis called for. Both call sites that used to read
+  `Date.now() - puzzleStartTime` directly (`maybeShowCompletion`,
+  `saveProgressIfApplicable`) now call `getElapsedMs()`, so the fix is
+  uniform across this session's own computation, not just patched where a
+  resumed puzzle's `resumeElapsedMs` gets summed in — `resumeElapsedMs` is
+  itself only ever written by this same corrected `getElapsedMs()` going
+  forward (via `saveInProgressPuzzle`), so a resume chain built entirely
+  under the fixed code stays active-time-only; a value saved by a *pre-fix*
+  build is the one case that can't be retroactively corrected (it was never
+  re-computable after the fact).
+  - **Verified directly in browser preview using a controlled fake clock**,
+    not a real multi-hour wait: `Date.now` monkey-patched to
+    `origNow() + fakeOffset` and `document.hidden` overridden with a
+    `configurable` accessor, both driven from the console. Sequence: pause
+    (`document.hidden = true` + a dispatched `visibilitychange`), jump the
+    fake clock forward by a simulated 1 hour while paused, resume
+    (`document.hidden = false` + `visibilitychange`), advance 5 simulated
+    seconds, then solve the real `heart-5` built-in puzzle end-to-end via
+    real dispatched `PointerEvent`s (`pointerdown`/`pointerup` per cell,
+    switching `#mode-fill`/`#mode-x` — the same "real dispatched pointer
+    events, not synthetic unit calls" standard this project's other
+    DOM/pointer features already use). The completion modal correctly
+    displayed elapsed time in the tens of seconds range (genuine foreground
+    time the test itself took, correctly counted) — critically NOT
+    something in the neighborhood of "60:xx" (an hour plus change), which is
+    exactly what the pre-fix `Date.now() - puzzleStartTime` calculation would
+    have shown given the same simulated 1-hour hidden gap. Confirms the
+    pause/resume logic genuinely excludes backgrounded time rather than just
+    reformatting the same wall-clock number. All 836 tests still pass
+    (`node --check app.js` clean) — no new automated test added, per this
+    project's own established precedent for this class of DOM/timer change
+    (no jsdom dependency here — same call the crosshair-highlight,
+    drag-fill-counter, and drag-axis-lock features already made).
+  - **Real-world side effect of that verification, flagged immediately rather
+    than left unmentioned**: completing `heart-5` for real (even under a
+    simulated clock) still fires `maybeShowCompletion`'s normal
+    fire-and-forget writes — `recordCompletion`, `recordPuzzleSolved`, AND
+    `submitGlobalFastestTime` (the same `recordFastestTime` callable behind
+    the earlier "fabricated 1:40 world record" incident above) — all as real
+    writes against live production Firestore, not anything gated by the fake
+    clock. This session's own throwaway anonymous identity got a real
+    `solvedLibraryPuzzles`/`recordCompletion` write, and a real
+    global-fastest-time candidate was genuinely submitted for `heart-5`.
+    **Checked immediately via a read-only `fetchGlobalFastestTimes()` call**
+    (no callable invoked — a plain Firestore read): the genuine record for
+    `heart-5` is ~15.2s, faster than this test's ~52s, and
+    `recordFastestTime` only ever keeps a submission that's genuinely faster
+    (the comparison happens server-side) — so this specific write did NOT
+    corrupt the public record this time. That it happened at all was still
+    unplanned and is the same class of mistake as the earlier incident, just
+    triggered indirectly through a normal gameplay completion in verification
+    testing rather than a direct console-typed callable call — worth
+    remembering next time a fix's verification would require actually
+    completing a real built-in puzzle end-to-end.
+
 * **Two related drag-behavior refinements, both found via real play — done,
   preview-verified (real dispatched pointer events, not synthetic
   unit-level calls). Not yet real-device-confirmed.**

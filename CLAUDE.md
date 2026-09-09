@@ -589,6 +589,49 @@ Current Objective; see `TODO.md`'s Completed Tasks for the full writeup.
   beforeunload-alone reliability mistake — the timer is what actually
   carries the feature.
 
+**Elapsed-time-includes-backgrounded-time bug — fixed, preview-verified, not
+yet real-device-confirmed.** The bug was exactly as diagnosed: a pure
+wall-clock `Date.now() - puzzleStartTime` calculation, nothing pausing it
+while backgrounded/screen-locked/tab-switched-away, corrupting both the
+personal best and the global-fastest-time candidate. Fixed per the
+recommended direction: `puzzleStartTime` is gone, replaced by an
+`activeElapsedMs`/`activeSegmentStart` pause/resume accumulator
+(`app.js`'s `getElapsedMs`/`pauseActiveTime`/`resumeActiveTime`, right above
+`computeCompletionStats`) driven by the SAME `visibilitychange` listener
+already wired up for autosave — one shared signal, two independent
+reactions. Both read sites (`maybeShowCompletion`, `saveProgressIfApplicable`)
+now call `getElapsedMs()` instead of a raw `Date.now()` diff, so the fix
+applies uniformly everywhere elapsed time is computed this session, not just
+patched at the point a resumed puzzle's `resumeElapsedMs` gets summed in —
+`resumeElapsedMs` itself is only ever written by this same corrected
+computation going forward, so a chain of resumes stays active-time-only
+(a value saved by a pre-fix build is the one case that can't be
+retroactively corrected). **Verified directly in browser preview** with a
+controlled fake clock (`Date.now` monkey-patched, `document.hidden`
+overridden) rather than a real wait: paused before jumping the fake clock
+forward by a simulated 1 hour, resumed, advanced 5 simulated seconds, then
+solved `heart-5` end-to-end via real dispatched `PointerEvent`s — the
+completion modal correctly showed elapsed time in the tens of seconds
+(genuine foreground time from the test itself), with the simulated 1-hour
+backgrounded gap contributing 0, proof the pause/resume logic works as
+intended. All 836 tests still pass (`node --check` clean); no new automated
+test added, per this project's own established precedent for DOM/timer
+features (no jsdom dependency here — see the drag-axis-lock/crosshair-
+highlight entries for the same call). **Real-world side effect of that
+verification, flagged rather than hidden**: solving `heart-5` for real
+fired its normal fire-and-forget completion writes
+(`recordCompletion`/`recordPuzzleSolved`/`submitGlobalFastestTime`) against
+live production Firestore — this session's own throwaway anonymous
+identity's stats were written for real, and a global-fastest-time candidate
+was genuinely submitted for `heart-5`. Confirmed via a read-only
+`fetchGlobalFastestTimes()` check immediately after that this did NOT
+corrupt the real record (the genuine time, ~15.2s, is faster than the test's
+~52s, and `recordFastestTime` only ever keeps a submission that's genuinely
+faster) — but the write itself still happened, unplanned, the same class of
+mistake this project has hit before (see TODO.md's earlier "world's best"
+incident) — just triggered indirectly via normal gameplay completion this
+time rather than a direct callable call. See `TODO.md` for full detail.
+
 **Two related drag-behavior refinements — done, preview-verified (real
 dispatched pointer events, not synthetic unit calls); not yet
 real-device-confirmed.**
