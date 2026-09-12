@@ -1294,6 +1294,158 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
+* **New real bug: a hint's actual suggested NEW cell (not the reasoning cells
+  shown alongside it) is sometimes a cell that's already correctly filled in
+  — directly confirmed with the project owner, not a UI-clarity mix-up
+  between "reasoning" and "result" highlighting.** This hits the core value
+  proposition of the whole app (a solver that gives genuinely new, correct
+  guidance), so treat as HIGH PRIORITY, ahead of the elapsed-time bug below.
+  - **Concrete places to investigate, not a prescribed fix**:
+    1. Verify whether `getNextHint` (`src/solver.js`) or the underlying line
+       techniques in `src/lineSolver.js` properly guarantee every
+       `resultCells` entry is currently UNKNOWN on the live board right
+       before being returned. This project's existing brute-force/soundness
+       tests are strong but clearly haven't caught this specific case —
+       worth checking whether it's a rare trigger condition rather than
+       assuming the tests would have caught something this basic if common.
+    2. Given how much drag/tap/board-mutation logic has changed very
+       recently (opposite-mark tap-to-erase, the deferred-clear pass-through
+       on drag start, axis-lock) — worth directly checking whether any of
+       these left a cell's actual `board.get(r,c)` state out of sync with
+       what's visually rendered. If the board's internal state genuinely
+       still reads UNKNOWN for a cell that LOOKS filled, `getNextHint` could
+       be technically correct relative to that (wrong) internal state while
+       still producing a hint that looks broken to the player — this would
+       point at a recent `app.js` regression rather than the solver itself.
+  - A specific repro (which puzzle, which moves led up to it) would help a
+    lot if the project owner can reconstruct one.
+
+* **The hint bug above — root-caused and fixed, preview-verified with a direct
+  repro; not yet real-device-confirmed.** Neither of the two suspected leads
+  was the actual cause: `getNextHint`/`lineSolver.js` are provably sound (every
+  technique explicitly filters to `line[index] === UNKNOWN` before including a
+  cell in `resultCells` — re-read line by line, not just re-run), and
+  interactive stress-testing of every recently-changed drag/tap path named in
+  lead 2 (axis-lock, the deferred-clear pass-through, opposite-mark
+  tap-to-erase, Eraser drags, mixed with Undo/Redo) via real dispatched
+  `PointerEvent`s found zero cases of `board.get(r,c)` disagreeing with what
+  was rendered, across ~17 hint applications on deliberately messy/
+  contradictory boards.
+  - **Actual root cause: a stale-async-response bug in `runGetHint`/the
+    "Dig deeper" contradiction-hint handler (`app.js`), unrelated to both
+    leads.** `phraseDeduction` (`src/hintPhrasing.js`) is a real network round
+    trip to the LLM-phrasing Cloud Function — up to 8 seconds, per
+    `firebase.js`'s own `withTimeout` budget — and nothing disabled
+    re-requesting a hint, or playing on, while one was in flight. Both hint
+    handlers apply the deduction and highlight it **synchronously** the
+    instant a hint is requested (the cell really is filled immediately) — but
+    `setExplain(await phraseDeduction(hint))` applied whatever text
+    eventually came back completely unconditionally, with no check that
+    anything had happened meanwhile.
+  - **Directly reproduced** (browser preview, dispatched pointer events):
+    requested a hint (row filled + highlighted immediately, as expected),
+    then tapped a different cell while the LLM call was still pending
+    (a completely ordinary "didn't wait to read the explanation" action —
+    `clearHighlights()` fires from that tap same as any manual move). ~9
+    seconds later the delayed text landed anyway: *"Since the clue for Row 2
+    is a single 5 ... fill in all of cells (row 2, col 1) through (row 2, col
+    5)"* — describing cells that, by then, had been sitting there correctly
+    filled for seconds, with no highlight left to go with it. That's the bug
+    exactly as reported: the hint reads as pointing at an already-filled
+    cell, because the fill happened instantly but the narration arrived late
+    and unconditionally, after the player had moved on. The same staleness
+    risk applies even worse to switching puzzles entirely while a hint's text
+    is still in flight (the old text would land on whatever puzzle the player
+    switched to).
+  - **Fix**: a module-level `explainRequestId` counter. `clearHighlights()`
+    (already called by every action that should invalidate a pending hint's
+    own explanation — a manual move via `pointerdown`, Undo, Redo, Remove bad
+    marks, the mistake-driven back-up-to-move#N flow) now bumps it;
+    `startPuzzle` (switching/restarting/resuming a puzzle) bumps it directly,
+    since it doesn't call `clearHighlights()` itself. Each hint call site
+    captures its own value right when it starts and checks it again after
+    `await phraseDeduction(hint)` — only calls `setExplain` if nothing bumped
+    the counter in between, otherwise silently drops the stale response.
+  - **Verified directly in browser preview**: re-ran the exact repro above
+    against the fixed code — the explain panel correctly stayed on its
+    neutral placeholder text instead of the stale hint text landing 9 seconds
+    later. Separately confirmed the normal, undisturbed case still works: a
+    hint requested and left alone still gets its real LLM-phrased explanation
+    once the network call resolves. All 836 tests still pass (`node --check
+    app.js` clean) — this is a pure `app.js` async-control-flow change, no
+    solver/model code touched. Not yet real-device-confirmed.
+  - **This staleness fix is real and worth keeping, but the project owner's
+    direct correction below shows it was NOT the bug actually reported** — see
+    the next entry for the real root cause and fix.
+
+* **Direct correction from the project owner: the stale-async-response race
+  above requires acting before a hint's response returns, and the project
+  owner explicitly does not do that** — they wait for the response every
+  time, and it's usually quick. That, plus two more details, pointed at a
+  completely different root cause:
+  1. The behavior "has been seen before, like when it was first designed" —
+     long-predates the recent drag/tap work, ruling out lead 2 even more
+     conclusively than the stress-testing already had.
+  2. Every recent occurrence: the cell the hint's TEXT named was already
+     filled in, "certainly from before I asked about it" — not something that
+     happened moments earlier.
+  3. It recurred multiple times in one puzzle session, to the point hints
+     stopped being useful at all and the player had to guess-and-check
+     instead.
+  - **Actual root cause: LLM-hallucinated coordinates in the hint phrasing
+    itself, not the solver, the board state, or a timing race.** The
+    underlying deduction and its on-screen highlight were both already
+    provably/empirically correct (see above) — the bug was entirely in the
+    TEXT. `phraseHint` (`functions/index.js`) used to hand the LLM the exact
+    result-cell coordinates and its system prompt explicitly told it to
+    "reference the clue numbers and cells described" in its own freely-varied
+    prose. Asking a model to transcribe specific numbers while paraphrasing —
+    not copying a template — is exactly the kind of task an LLM can get wrong
+    on the numbers even while the reasoning around them is fine. When it named
+    the wrong cell, and that cell was already filled (likely on a
+    well-progressed board), the hint reads as pointing at something already
+    done — matching all three details above: long-standing (the LLM-phrasing
+    feature itself is old), about what the hint *says* not what it *does*, and
+    intermittent (LLM output varies call to call).
+  - **Fix, at the source**: `phraseHint` is no longer given exact cell
+    coordinates at all (`describeDeduction` now sends only counts, not
+    coordinate lists) and its `SYSTEM_PROMPT` explicitly says not to invent
+    any — its only job is the reasoning. `src/hintPhrasing.js` gained
+    `factualDirective(deduction)`, a small pure function that generates the
+    one authoritative, code-generated statement of exactly which cells to
+    mark (e.g. "Row 2: Fill (row 2, col 1), (row 2, col 2)...") straight from
+    the same trusted deduction data that drives the highlight — prepended to
+    whatever reasoning text comes back, from either the LLM or the
+    `defaultPhraser` fallback. The LLM can no longer state a coordinate wrong
+    because it's never given one to restate.
+  - **Verified end-to-end against the live, deployed Cloud Function** (not
+    just the local fallback): redeployed `phraseHint` with the new prompt,
+    then requested real hints in browser preview. Confirmed the reasoning
+    text no longer restates any coordinates (e.g. "Since the clue for that row
+    is a single 5... there's no room to shift it left or right" — no cell
+    numbers), while the deterministic directive in front always states the
+    real cells correctly. Also confirmed the `defaultPhraser` fallback path
+    (triggered a couple of times by the *other* issue found below) still
+    works exactly as before — it never had this problem, since it only ever
+    names the line, not individual coordinates.
+  - **Also found and fixed while verifying, a separate pre-existing
+    reliability issue, not the coordinate bug**: 2 of the first 5 live test
+    calls failed with the function's own existing "no text block in Anthropic
+    response" diagnostic (already present in the code before this round,
+    meaning it was a known-but-unexplained issue) — `stop_reason: 'max_tokens'`
+    with the 200-token budget exhausted before a text block ever appeared.
+    Bumped `max_tokens` 200 → 500 and redeployed; the next several calls
+    succeeded cleanly. A failure here always safely fell back to
+    `defaultPhraser` rather than breaking the hint, but silently lost the
+    LLM's varied phrasing every time it happened — worth an entry given how
+    frequently it was firing.
+  - **New unit test** (`test/hintPhrasing.test.js`, `factualDirective`
+    exported for this purpose): 5 cases covering single- and multi-cell
+    results, 1-indexing, the no-line case, and both "no result cells" shapes.
+    All 841 tests pass (836 + 5 new). Not yet real-device-confirmed — the
+    LLM-response variance this bug lived in makes that especially worth doing
+    over a real play session, not just a few preview spot-checks.
+
 * **New real bug, confirmed by directly reading the deployed source, not
   guessed: elapsed time is a pure wall-clock calculation that includes time
   spent away from the app entirely — background, screen-locked, tab switched

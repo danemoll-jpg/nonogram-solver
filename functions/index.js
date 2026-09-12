@@ -25,17 +25,29 @@ const anthropicApiKey = defineSecret('ANTHROPIC_API_KEY');
 
 const MODEL = 'claude-sonnet-5';
 
+// Current Objective (see TODO.md — "the hint's suggested cell is sometimes already correctly
+// filled in"): this prompt used to hand over exact result-cell coordinates and ask the model to
+// restate them in its own freely-varied prose. That's a paraphrase task a model can get the
+// actual numbers wrong on, unlike copying a template — and when it named the wrong cell, the
+// hint read as pointing at something already filled in, even though the underlying deduction
+// and the on-screen highlight were both always correct. Fix: this function is never given exact
+// cell coordinates at all (see describeDeduction below), and is explicitly told not to invent
+// any — the app states exactly which cells to mark separately, deterministically, in code (see
+// src/hintPhrasing.js's factualDirective). This prompt's only job is the reasoning.
 const SYSTEM_PROMPT = `You are a friendly, experienced nonogram (picross) solver helping a
-player who is stuck. You'll be given one structured deduction describing a single forced
-move the solver already computed — your only job is to phrase it in natural, varied,
-conversational language, the way an experienced human solver would explain their reasoning
-out loud.
+player who is stuck. You'll be given the facts behind one forced move the solver already
+computed — your only job is to explain the *reasoning* behind it in natural, varied,
+conversational language, the way an experienced human solver would explain their thinking
+out loud. The app already tells the player exactly which cells to mark, separately and
+reliably — you are not given that information and must not invent it.
 
 Rules:
 - 1-2 sentences. No preamble, no restating these instructions, no markdown.
-- Explain the *reasoning*, not just the answer — reference the clue numbers and cells
-  described, so the player learns the technique, not just this one move.
-- Rows and columns are already given 1-indexed for display — use those numbers as-is.
+- Explain *why* the move is forced — reference the clue numbers and the line given, so the
+  player learns the technique, not just this one move.
+- Do NOT state specific row/column numbers, cell coordinates, or exact cell counts — you
+  aren't given that detail, so refer to the affected cells only in general terms ("that
+  cell", "those cells", "the run").
 - If the technique is "mistake", gently explain what's wrong, not how to fix everything else.
 - Never mention anything beyond the single deduction you're given — no spoilers about the
   rest of the board.`;
@@ -64,7 +76,18 @@ exports.phraseHint = onCall({ secrets: [anthropicApiKey], cors: true }, async (r
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 200,
+        // Bumped from 200 (Current Objective — see TODO.md): the deploy verifying the
+        // coordinate-hallucination fix above surfaced this pre-existing "no text block in
+        // Anthropic response" diagnostic firing for real, at a high rate (2 of 5 test calls) —
+        // `stop_reason: 'max_tokens'` with only one non-text content block, meaning the model's
+        // response budget was being exhausted before it ever got to a text block. 200 was too
+        // tight a budget for this model on this prompt; not caused by the coordinate fix itself
+        // (this failure mode already had its own TEMPORARY DIAGNOSTIC logging in place below,
+        // meaning it was a known-but-unexplained issue before this round), though the longer,
+        // more constrained system prompt above may have made it worse. A failure here always
+        // falls back to defaultPhraser (src/hintPhrasing.js) — safe, but loses the LLM's varied
+        // phrasing — so this is a real reliability fix, not just cosmetic.
+        max_tokens: 500,
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -109,11 +132,9 @@ function describeClue(clue) {
   return `[${clue.join(', ')}]`;
 }
 
-function describeCells(cells) {
-  if (!cells || cells.length === 0) return 'none';
-  return cells.map((c) => `(row ${c.row + 1}, col ${c.col + 1})`).join(', ');
-}
-
+// Current Objective (see TODO.md, and this file's SYSTEM_PROMPT comment): deliberately does
+// NOT include reasoningCells/resultCells' actual coordinates — only counts. The model has no
+// way to state a specific cell wrong if it's never given one to restate.
 function describeDeduction(deduction) {
   const { technique, line, reasoningCells, resultCells, resultState, meta = {} } = deduction;
   const lines = [
@@ -121,8 +142,8 @@ function describeDeduction(deduction) {
     `line: ${describeLine(line) ?? 'n/a'}`,
     `clue for that line: ${describeClue(meta.clue)}`,
     `line length: ${meta.length ?? 'n/a'}`,
-    `reasoning cells (already-known marks the deduction relies on): ${describeCells(reasoningCells)}`,
-    `result cells (what the player should mark now): ${describeCells(resultCells)}`,
+    `number of reasoning cells (already-known marks the deduction relies on): ${reasoningCells?.length ?? 0}`,
+    `number of result cells (what the player should mark now): ${resultCells?.length ?? 0}`,
     `result state to mark them: ${resultState}`,
   ];
   if (technique === 'edge') lines.push(`matched run length: ${meta.runLength}`);

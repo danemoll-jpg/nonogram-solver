@@ -3,6 +3,7 @@ import './model.test.js';
 import './lineSolver.test.js';
 import './solver.test.js';
 import './contradiction.test.js';
+import './hintPhrasing.test.js';
 import './mistakes.test.js';
 import './gridDetect.test.js';
 import './scanPuzzle.test.js';

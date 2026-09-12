@@ -304,6 +304,44 @@
   `anchor.mp3` was dropped in at that path BEFORE this round's deployment (not a later
   step), no code changes needed. See `TODO.md`'s Completed Tasks for the full writeup.
   All 822 tests pass; **CONFIRMED on the real device**.
+- **Real bug found and fixed along the way, kept because it's genuine: a stale-async-
+  response race where `runGetHint`/the "Dig deeper" handler (`app.js`) could write a
+  hint's LLM-phrased explanation to the panel after something else had already happened
+  (another hint, a manual move, Undo/Redo, switching puzzles) — fixed with an
+  `explainRequestId` counter each hint call site checks after its network `await`, only
+  applying the response if nothing invalidated it meanwhile.** This was an initial
+  hypothesis for "a hint's suggested cell is sometimes already correctly filled in," but
+  the project owner directly corrected it: they always wait for a hint's response before
+  acting, so this specific race can't be what they saw. Real fix for a real bug, just not
+  *the* bug — see the next entry for the actual root cause and fix.
+- **The actual root cause of "a hint's suggested cell is sometimes already correctly
+  filled in," per the project owner's correction (predates the recent drag/tap work,
+  about what the hint TEXT says rather than the board/highlight, recurs within one
+  session) — LLM-hallucinated coordinates in the hint phrasing, not the solver.**
+  `getNextHint`/`lineSolver.js` were already provably sound (every result cell is
+  guaranteed `UNKNOWN` at computation time) and the on-screen highlight was confirmed
+  correct via extensive stress-testing — the bug was entirely in the LLM-generated
+  explanation TEXT. `phraseHint` (`functions/index.js`) used to hand the LLM exact
+  result-cell coordinates and explicitly ask it to restate them in its own freely-varied
+  prose — a paraphrase task a model can get the actual numbers wrong on, even while the
+  reasoning around them reads fine. When it named the wrong cell, and that cell was
+  already filled (likely on a well-progressed board), the hint read as pointing at
+  something already done. Fixed at the source: the LLM is no longer given exact
+  coordinates at all (`describeDeduction` now sends only counts) and is explicitly told
+  not to invent any — its only job is the reasoning. New `factualDirective` in
+  `src/hintPhrasing.js` is the one place exact cells are ever stated, generated straight
+  from the same trusted deduction data that drives the highlight, prepended to whatever
+  reasoning text comes back (LLM or `defaultPhraser` fallback). Verified end-to-end
+  against the live, redeployed Cloud Function (not just the local fallback) — confirmed
+  the LLM's reasoning text no longer restates any coordinates while the deterministic
+  directive in front is always correct. Also found and fixed a separate pre-existing
+  reliability issue surfaced while verifying: 2 of the first 5 live calls hit the
+  function's own existing "no text block" diagnostic (`stop_reason: 'max_tokens'`, budget
+  exhausted before any text) — bumped `max_tokens` 200→500 and redeployed; subsequent
+  calls succeeded cleanly. New test (`test/hintPhrasing.test.js`, 5 cases). All 841 tests
+  pass. **Both Cloud Function changes are deployed and live.** Not yet real-device-
+  confirmed — worth checking over a real play session given the bug lived in LLM output
+  variance, not something a quick preview spot-check fully rules out.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -589,48 +627,37 @@ Current Objective; see `TODO.md`'s Completed Tasks for the full writeup.
   beforeunload-alone reliability mistake — the timer is what actually
   carries the feature.
 
-**Elapsed-time-includes-backgrounded-time bug — fixed, preview-verified, not
-yet real-device-confirmed.** The bug was exactly as diagnosed: a pure
-wall-clock `Date.now() - puzzleStartTime` calculation, nothing pausing it
-while backgrounded/screen-locked/tab-switched-away, corrupting both the
-personal best and the global-fastest-time candidate. Fixed per the
-recommended direction: `puzzleStartTime` is gone, replaced by an
-`activeElapsedMs`/`activeSegmentStart` pause/resume accumulator
-(`app.js`'s `getElapsedMs`/`pauseActiveTime`/`resumeActiveTime`, right above
-`computeCompletionStats`) driven by the SAME `visibilitychange` listener
-already wired up for autosave — one shared signal, two independent
-reactions. Both read sites (`maybeShowCompletion`, `saveProgressIfApplicable`)
-now call `getElapsedMs()` instead of a raw `Date.now()` diff, so the fix
-applies uniformly everywhere elapsed time is computed this session, not just
-patched at the point a resumed puzzle's `resumeElapsedMs` gets summed in —
-`resumeElapsedMs` itself is only ever written by this same corrected
-computation going forward, so a chain of resumes stays active-time-only
-(a value saved by a pre-fix build is the one case that can't be
-retroactively corrected). **Verified directly in browser preview** with a
-controlled fake clock (`Date.now` monkey-patched, `document.hidden`
-overridden) rather than a real wait: paused before jumping the fake clock
-forward by a simulated 1 hour, resumed, advanced 5 simulated seconds, then
-solved `heart-5` end-to-end via real dispatched `PointerEvent`s — the
-completion modal correctly showed elapsed time in the tens of seconds
-(genuine foreground time from the test itself), with the simulated 1-hour
-backgrounded gap contributing 0, proof the pause/resume logic works as
-intended. All 836 tests still pass (`node --check` clean); no new automated
-test added, per this project's own established precedent for DOM/timer
-features (no jsdom dependency here — see the drag-axis-lock/crosshair-
-highlight entries for the same call). **Real-world side effect of that
-verification, flagged rather than hidden**: solving `heart-5` for real
-fired its normal fire-and-forget completion writes
-(`recordCompletion`/`recordPuzzleSolved`/`submitGlobalFastestTime`) against
-live production Firestore — this session's own throwaway anonymous
-identity's stats were written for real, and a global-fastest-time candidate
-was genuinely submitted for `heart-5`. Confirmed via a read-only
-`fetchGlobalFastestTimes()` check immediately after that this did NOT
-corrupt the real record (the genuine time, ~15.2s, is faster than the test's
-~52s, and `recordFastestTime` only ever keeps a submission that's genuinely
-faster) — but the write itself still happened, unplanned, the same class of
-mistake this project has hit before (see TODO.md's earlier "world's best"
-incident) — just triggered indirectly via normal gameplay completion this
-time rather than a direct callable call. See `TODO.md` for full detail.
+**HIGH PRIORITY — new real bug: a hint's actual suggested NEW cell (not the
+reasoning cells shown alongside it) is sometimes already correctly filled
+in** — directly confirmed with the project owner, not a UI-clarity mix-up
+between "reasoning" and "result" highlighting. This hits the core value
+proposition of the whole app (genuinely new, correct guidance), so treat as
+top priority, ahead of the elapsed-time bug below. Two concrete places to
+investigate, not a prescribed fix: (1) whether `getNextHint`/the line
+techniques in `lineSolver.js` properly guarantee every `resultCells` entry is
+currently UNKNOWN on the live board right before returning; (2) given how
+much drag/tap/board-mutation logic has changed very recently (opposite-mark
+erase, deferred-clear pass-through, axis-lock), whether a cell's actual board
+state could have gotten out of sync with what's visually rendered. A specific
+repro would help a lot if reconstructable. See `TODO.md` for full detail.
+
+**The elapsed-time bug — FIXED, preview-verified with a controlled fake
+clock, not yet real-device-confirmed.** `puzzleStartTime` (a fixed
+`Date.now()` baseline) replaced with a pause/resume active-time accumulator
+(`activeElapsedMs`/`activeSegmentStart`, `getElapsedMs()`), driven by the
+same `visibilitychange` listener already wired up for autosave — exactly the
+reuse originally recommended. Verified with a monkey-patched clock (pause,
+jump the fake clock forward 1 simulated hour, resume, solve `heart-5` for
+real via real dispatched pointer events) — the completion modal correctly
+showed only the genuine foreground time, not the hour-plus a pre-fix build
+would have shown. **Worth knowing**: that verification (a real puzzle
+completion, even under a simulated clock) triggered real fire-and-forget
+writes to live production Firestore, including a genuine global-fastest-time
+submission for `heart-5` — checked immediately via a read-only fetch and
+confirmed it did NOT beat the real ~15.2s record (this test's ~52s lost
+fairly), so no corruption happened this time, but it's the same class of
+"a verification step turned into an unplanned live write" as the earlier
+fabricated-record incident. See `TODO.md` for full detail.
 
 **Two related drag-behavior refinements — done, preview-verified (real
 dispatched pointer events, not synthetic unit calls); not yet

@@ -276,6 +276,7 @@ function startPuzzle(p) {
   puzzle = p;
   board = puzzle.initialMarks ? Board.fromGrid(puzzle.initialMarks) : new Board(puzzle.rows, puzzle.cols);
   board.hasHistory = true;
+  invalidatePendingHintText(); // see its own comment — a hint requested on the puzzle being left
   highlightedCells = [];
   autoXCells = new Set();
   hintsUsedFloor = 0;
@@ -634,8 +635,35 @@ function highlightDeduction(deduction) {
 }
 
 function clearHighlights() {
+  invalidatePendingHintText();
   highlightedCells = [];
   applyHighlightClasses();
+}
+
+// Real bug found and fixed (Current Objective — see TODO.md): "the hint's suggested cell is
+// sometimes already correctly filled in." Root cause was never the solver (getNextHint/
+// lineSolver.js only ever return a resultCell that's currently UNKNOWN on the live board —
+// verified directly, and confirmed by extensive interactive stress-testing of every recently-
+// changed drag/tap path against it, all clean) — it's that phraseDeduction (src/hintPhrasing.js)
+// is a real network round trip to the LLM-phrasing Cloud Function, up to 8 seconds (see
+// firebase.js's withTimeout), and nothing disables re-requesting a hint or otherwise acting on
+// the board while one is in flight. runGetHint/the contradiction-hint handler both apply the
+// deduction and highlight it SYNCHRONOUSLY the instant a hint is requested — the cell really is
+// filled and highlighted immediately — but `setExplain(await phraseDeduction(hint))` used to
+// apply whatever text eventually came back completely unconditionally. Directly reproduced: hint
+// requested, player taps any other cell while the LLM call is still pending (clearHighlights()
+// fires from that tap, same as any manual move) — the delayed text lands a few seconds later
+// describing a cell that, by then, has been sitting there correctly filled for a while, with no
+// highlight left to go with it. Fix: every action that should make an in-flight hint's own
+// explanation stale — a manual move, Undo, Redo, Remove bad marks, the mistake-driven back-up-
+// to-move#N flow (all already route through clearHighlights()), plus switching/restarting/
+// resuming a puzzle (startPuzzle, which doesn't call clearHighlights() — cellEls isn't rebuilt
+// yet at that point) — bumps `explainRequestId`; each hint call site captures its own value right
+// when it starts and only calls setExplain with the network response if nothing has bumped the
+// counter since.
+let explainRequestId = 0;
+function invalidatePendingHintText() {
+  explainRequestId++;
 }
 
 function updateStatus(msg) {
@@ -1617,6 +1645,7 @@ function onCellChanged(r, c) {
 
 async function runGetHint() {
   clearHighlights();
+  const myRequestId = explainRequestId; // see invalidatePendingHintText's comment
   els.btnContradiction.classList.add('hidden');
   const hint = getNextHint(board, puzzle);
   if (!hint) {
@@ -1630,7 +1659,9 @@ async function runGetHint() {
   applyHintDeduction(hint, { source: 'hint' });
   highlightDeduction(hint);
   syncAllCellVisuals();
-  setExplain(await phraseDeduction(hint));
+  const text = await phraseDeduction(hint);
+  if (explainRequestId !== myRequestId) return; // stale — something else invalidated it meanwhile
+  setExplain(text);
 }
 
 els.menuHint.addEventListener('click', () => {
@@ -1639,9 +1670,11 @@ els.menuHint.addEventListener('click', () => {
 });
 
 els.btnContradiction.addEventListener('click', async () => {
+  const myRequestId = ++explainRequestId; // see invalidatePendingHintText's comment
   setExplain('Searching…');
   await new Promise((resolve) => setTimeout(resolve, 0)); // let "Searching…" paint first
   const hint = findContradictionHint(board, puzzle);
+  if (explainRequestId !== myRequestId) return; // stale — something else invalidated it meanwhile
   if (!hint) {
     setExplain("Even a deeper search can't find a forced move from here — this may need an outright guess.");
     return;
@@ -1649,7 +1682,9 @@ els.btnContradiction.addEventListener('click', async () => {
   applyHintDeduction(hint, { source: 'hint' });
   highlightDeduction(hint);
   syncAllCellVisuals();
-  setExplain(await phraseDeduction(hint));
+  const text = await phraseDeduction(hint);
+  if (explainRequestId !== myRequestId) return; // stale — something else invalidated it meanwhile
+  setExplain(text);
   els.btnContradiction.classList.add('hidden');
 });
 
