@@ -21,28 +21,13 @@
     <main class="layout">
       <section class="board-panel">
         <div class="toolbar">
-          <!-- Toolbar cleanup (see TODO.md): explicit project-owner-specified order — Library →
-               mode toggle → a visual gap → Stats/Mute/Save/Help (secondary/settings-ish
-               controls). This replaces the older `.library-entry-group` clustering
-               (Library+Stats+Save+Undo together) — Library and Stats/Save are now spread across
-               the row in the order above instead of grouped by "moved out of the Help menu"
-               history, which no longer matches how they're meant to read left-to-right.
-               Undo/Redo/Eraser moved OUT of this toolbar entirely (see the new `.board-controls`
-               row below `#board-root`) — real ergonomic complaint: reaching up here to
-               undo/redo/erase means your hand covers part of the puzzle while doing it, right
-               when you're actively working the board. -->
+          <!-- Further toolbar reorganization (see TODO.md): the Fill/Mark-empty toggle moved down
+               into `.board-controls` below the board, joining Undo/Redo/Eraser — same ergonomic
+               reasoning that already moved Undo/Redo/Eraser out of this row (reaching up here to
+               switch mode means your hand covers part of the puzzle while working it). Library
+               slides into the main-toolbar slot the mode toggle vacated, rather than leaving a
+               gap. The row is centered as a whole now too (see `.toolbar`'s own CSS comment). -->
           <button id="btn-open-library" class="btn btn--primary" type="button">📚 Library</button>
-
-          <!-- Now a plain two-way Fill/Mark-empty toggle — Eraser moved below the board (see
-               .board-controls) once it stopped needing to share this segmented control. Both
-               segments are given equal width (.mode-toggle's own CSS) now that there are only
-               two of them, for visual symmetry, rather than "Fill" (a word) and "✕" (a glyph)
-               implying different-width segments the way three unevenly-sized segments used to. -->
-          <div class="mode-toggle" role="group" aria-label="Marking mode">
-            <button id="mode-fill" class="mode-btn" type="button" aria-pressed="true">Fill</button>
-            <!-- Icon-only now (was "✕ Mark empty") — see the tooltip note below. -->
-            <button id="mode-x" class="mode-btn mode-btn--icon" type="button" aria-pressed="false" aria-label="Mark empty" data-tooltip="Mark empty">✕</button>
-          </div>
 
           <!-- Toolbar cleanup (see TODO.md): a small visual gap, not a divider line — just extra
                horizontal space separating the play controls above from the secondary/settings
@@ -110,8 +95,25 @@
              ergonomic ask, sitting right below the grid so reaching for any of them doesn't
              cover the puzzle the way reaching up to the toolbar did. Same icon-only + tooltip
              pattern as before, just relocated; app.js wires these up by id exactly as it did in
-             the toolbar (DOM position doesn't matter to any of that logic). -->
-        <div class="board-controls" role="group" aria-label="Board history and eraser">
+             the toolbar (DOM position doesn't matter to any of that logic). Further
+             reorganization round (see TODO.md): the Fill/Mark-empty toggle joined this row too,
+             same reasoning — it's now the first cluster, separated from Undo/Redo by the same
+             `.board-controls__gap` spacer Undo/Redo already used before Eraser. -->
+        <div class="board-controls" role="group" aria-label="Marking mode, undo/redo, and eraser">
+          <!-- Now a plain two-way Fill/Mark-empty toggle — Eraser sits standalone further along
+               this same row (see below) once it stopped needing to share this segmented control.
+               Both segments are given equal width (.mode-toggle's own CSS) now that there are
+               only two of them, for visual symmetry, rather than "Fill" (a word) and "✕" (a
+               glyph) implying different-width segments the way three unevenly-sized segments
+               used to. -->
+          <div class="mode-toggle" role="group" aria-label="Marking mode">
+            <button id="mode-fill" class="mode-btn" type="button" aria-pressed="true">Fill</button>
+            <!-- Icon-only now (was "✕ Mark empty") — see the tooltip note below. -->
+            <button id="mode-x" class="mode-btn mode-btn--icon" type="button" aria-pressed="false" aria-label="Mark empty" data-tooltip="Mark empty">✕</button>
+          </div>
+
+          <div class="board-controls__gap" aria-hidden="true"></div>
+
           <!-- Repeatable undo, distinct from the existing mistake-driven "back up to move #N"
                flow — steps back one move (a single click, or a whole drag/hint/auto-X batch) at
                a time, indefinitely. Disabled via app.js whenever board.history is empty (nothing
@@ -178,7 +180,7 @@
 
         <h3>Marking cells</h3>
         <ul class="help-list">
-          <li>Pick <strong>Fill</strong> or <strong>✕ Mark empty</strong> in the toolbar, then click/tap a cell to apply it</li>
+          <li>Pick <strong>Fill</strong> or <strong>✕ Mark empty</strong> below the board, then click/tap a cell to apply it</li>
           <li>Click a cell already in that state to clear it back to blank</li>
           <li>Click-and-drag paints the same mark across cells</li>
           <li>A clue number grays out once its line is satisfied</li>

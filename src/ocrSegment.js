@@ -203,3 +203,59 @@ export function findOversizedClue(clue, lineLength) {
   }
   return null;
 }
+
+// ---- oversized-clue-number split suggestion (Current Objective — see TODO.md) --------------
+//
+// Revisits the "deliberately does not attempt to guess where to split" decision above — the
+// project owner's own reasoning changes what made auto-splitting seem too ambiguous in the
+// first place: the earlier objection was about guessing a split from the FINAL MERGED NUMERIC
+// STRING alone (e.g. "123" could plausibly be "1,23" or "12,3" with no way to tell) — but
+// that's not the only evidence available. `groupGlyphsIntoNumbers` above already measures the
+// real pixel gap between every pair of adjacent glyphs when deciding whether they belong to
+// the same number in the first place; a genuine two-number merge (the exact failure
+// findOversizedClue exists to catch) is likely to leave at least some residual gap between the
+// two numbers' own digits, even if it fell just under DEFAULT_MAX_SAME_NUMBER_GAP — the
+// threshold that caused the incorrect merge — rather than collapsing to a perfectly uniform,
+// gap-free digit sequence. The WIDEST internal gap is a much stronger, better-grounded split
+// signal than any purely string-based guess.
+//
+// Deliberately still not a silent auto-apply — see src/scanUI.js's split-button wiring, which
+// pre-fills this as an EDITABLE suggestion the player confirms or adjusts, never applies it
+// unseen. This function only computes the suggestion; scanUI.js is the one place that decides
+// what to do with it, same "solver only produces facts, a separate layer turns them into
+// player-facing behavior" split this project already follows elsewhere (see CLAUDE.md).
+//
+// `gaps` is the real per-glyph pixel gap list for one merged OCR number: the gap between each
+// pair of ADJACENT digits within it, left-to-right (length === valueText.length - 1). This
+// geometry does NOT survive being flattened into a plain digit string, so it has to be
+// captured at OCR time and threaded through explicitly to whatever later flags the number as
+// oversized (see scanUI.js's recognizeStripSegmented/glyphGapsFor) — it is NOT recoverable from
+// the merged string or the parsed clue value alone.
+//
+// Returns a suggested {left, right} split (both parsed as plain numbers, so a spurious leading
+// zero at the split point is silently normalized away), or null when a confident split isn't
+// possible: fewer than 2 digits (nothing to split), a gap-count mismatch against valueText
+// (stale/inconsistent geometry — safer to say nothing than guess wrong), a degenerate split
+// (either side would be empty or zero), or every gap tied at the same width (no single gap
+// stands out as the genuine separator, so no confident split point exists).
+export function suggestOversizedClueSplit(valueText, gaps) {
+  if (!Array.isArray(gaps) || gaps.length === 0 || gaps.length !== valueText.length - 1) return null;
+  let bestIdx = 0;
+  let bestGap = gaps[0];
+  let tied = false;
+  for (let i = 1; i < gaps.length; i++) {
+    if (gaps[i] > bestGap) {
+      bestGap = gaps[i];
+      bestIdx = i;
+      tied = false;
+    } else if (gaps[i] === bestGap) {
+      tied = true;
+    }
+  }
+  if (tied) return null;
+  const splitAt = bestIdx + 1; // gaps[i] sits between digit i and digit i+1
+  const left = parseInt(valueText.slice(0, splitAt), 10);
+  const right = parseInt(valueText.slice(splitAt), 10);
+  if (!Number.isInteger(left) || !Number.isInteger(right) || left < 1 || right < 1) return null;
+  return { left, right };
+}

@@ -1,5 +1,12 @@
 import { describe, test, assert, assertEqual } from './harness.js';
-import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines, findRepeatedDigitOutlier, findOversizedClue } from '../src/ocrSegment.js';
+import {
+  findRuns,
+  groupGlyphsIntoNumbers,
+  filterNoiseLines,
+  findRepeatedDigitOutlier,
+  findOversizedClue,
+  suggestOversizedClueSplit,
+} from '../src/ocrSegment.js';
 
 describe('findRuns', () => {
   test('finds contiguous true runs as inclusive [start,end] bands', () => {
@@ -215,5 +222,42 @@ describe('findOversizedClue', () => {
     for (const [i, clue] of [...rows, ...cols].entries()) {
       assertEqual(findOversizedClue(clue, 25), null, `line ${i} (${JSON.stringify(clue)}) should not be flagged`);
     }
+  });
+});
+
+describe('suggestOversizedClueSplit', () => {
+  test('picks the widest internal gap as the split point (the motivating real case: "1014" -> 10, 14)', () => {
+    // Gaps between adjacent digit pairs of "1014": (1,0), (0,1), (1,4) — the middle gap (the
+    // real boundary between the two merged numbers) measures widest, matching this feature's
+    // real-measured "within a number ~10-12px, between numbers ~18-27px" thresholds.
+    const result = suggestOversizedClueSplit('1014', [11, 20, 11]);
+    assertEqual(result, { left: 10, right: 14 });
+  });
+
+  test('a single-digit value has no gaps and nothing to split', () => {
+    assertEqual(suggestOversizedClueSplit('5', []), null);
+  });
+
+  test('a gap-count mismatch against the value text is treated as stale/untrustworthy geometry', () => {
+    assertEqual(suggestOversizedClueSplit('123', [5]), null); // expects 2 gaps for 3 digits, got 1
+    assertEqual(suggestOversizedClueSplit('123', [5, 6, 7]), null); // too many, too
+  });
+
+  test('every gap tied at the same width has no confident split point', () => {
+    assertEqual(suggestOversizedClueSplit('1234', [10, 10, 10]), null);
+  });
+
+  test('normalizes a spurious leading zero at the split point', () => {
+    const result = suggestOversizedClueSplit('034', [5, 20]);
+    assertEqual(result, { left: 3, right: 4 });
+  });
+
+  test('rejects a split that would leave a zero-value side (an all-zero digit chunk)', () => {
+    assertEqual(suggestOversizedClueSplit('04', [20]), null);
+  });
+
+  test('no gaps at all (missing geometry) yields no suggestion', () => {
+    assertEqual(suggestOversizedClueSplit('1014', null), null);
+    assertEqual(suggestOversizedClueSplit('1014', undefined), null);
   });
 });

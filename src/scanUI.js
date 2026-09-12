@@ -44,8 +44,15 @@ import {
 import { parseClueText, buildScannedPuzzle } from './scanPuzzle.js';
 import { savePuzzleToLibrary } from './puzzleLibrary.js';
 import { recognizeClueStrip, terminateOcr } from './ocr.js';
-import { findRuns, groupGlyphsIntoNumbers, filterNoiseLines, findRepeatedDigitOutlier, findOversizedClue } from './ocrSegment.js';
-import { classifyGridCells } from './cellStateDetect.js';
+import {
+  findRuns,
+  groupGlyphsIntoNumbers,
+  filterNoiseLines,
+  findRepeatedDigitOutlier,
+  findOversizedClue,
+  suggestOversizedClueSplit,
+} from './ocrSegment.js';
+import { classifyGridCells, suppressAllXNoFillFalsePositive } from './cellStateDetect.js';
 import { isLineConsistent } from './lineSolver.js';
 import { FILLED, EMPTY, UNKNOWN } from './model.js';
 
@@ -520,33 +527,39 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     let done = 0;
     for (let i = 0; i < rowStrips.length; i++) {
       const canvas = cropStripCanvas(rowStrips[i]);
-      const text = await recognizeStripSegmented(canvas);
+      const { text, geoms } = await recognizeStripSegmented(canvas);
       done++;
       els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
+      const originalClue = parseClueText(text);
       const input = buildClueRow(
         els.scanRowClueList,
         `Row ${i + 1}`,
         canvas,
-        parseClueText(text).join(', '),
+        originalClue.join(', '),
         // A live getter, not a snapshot array — Current Objective #1's flip-fill-state fix
         // mutates state.fillMarks in place after these rows already exist, so refreshFlag
         // needs to re-read the CURRENT marks each time it runs, not whatever was true when
         // this row was first built.
-        () => state.fillMarks[i]
+        () => state.fillMarks[i],
+        originalClue,
+        geoms
       );
       state.rowClueInputs.push(input);
     }
     for (let i = 0; i < colStrips.length; i++) {
       const canvas = cropStripCanvas(colStrips[i]);
-      const text = await recognizeStripSegmented(canvas);
+      const { text, geoms } = await recognizeStripSegmented(canvas);
       done++;
       els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
+      const originalClue = parseClueText(text);
       const input = buildClueRow(
         els.scanColClueList,
         `Col ${i + 1}`,
         canvas,
-        parseClueText(text).join(', '),
-        () => state.fillMarks.map((row) => row[i])
+        originalClue.join(', '),
+        () => state.fillMarks.map((row) => row[i]),
+        originalClue,
+        geoms
       );
       state.colClueInputs.push(input);
     }
@@ -809,9 +822,20 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   // THAT still doesn't produce the right digit count for a specific multi-digit number (see
   // recognizeGlyphsIndividually above), one more fallback level OCRs that number's own glyphs
   // one at a time.
+  //
+  // Also returns `geoms`: one entry per recognized number, in the same left-to-right,
+  // line-by-line order `text`'s digit runs will parse in (see parseClueText's plain `\d+`
+  // scan) — the real per-glyph pixel gaps behind that number's own digits (see glyphGapsFor
+  // below), or null when there's nothing usable (a single digit, or a case where the OCR'd
+  // text and the glyph geometry can't be trusted to correspond 1:1). This is the raw evidence
+  // the oversized-clue-number split suggestion (Current Objective — see TODO.md and
+  // ocrSegment.js's suggestOversizedClueSplit) needs; it does NOT survive being flattened into
+  // `text` alone, so it has to be captured here, at the one point this geometry still exists,
+  // and threaded through by the caller rather than re-derived later.
   async function recognizeStripSegmented(canvas) {
     const lines = findStripLines(canvas);
     const lineTexts = [];
+    const geoms = [];
     for (const { y0, y1, numbers } of lines) {
       if (numbers.length === 0) continue;
       const lineCanvas = padCropCanvas(canvas, 0, canvas.width - 1, y0, y1);
@@ -824,6 +848,10 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
         const numberTexts = numbers.map((n) => {
           const chunk = digits.slice(pos, pos + n.glyphCount);
           pos += n.glyphCount;
+          // Safe unconditionally in this branch: every chunk is sliced to exactly
+          // n.glyphCount digits by construction, regardless of where Tesseract itself thought
+          // the boundaries were, so the chunk-to-glyph correspondence always holds here.
+          geoms.push(glyphGapsFor(n));
           return chunk;
         });
         lineTexts.push(numberTexts.join(' '));
@@ -834,15 +862,32 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
           const text = await recognizeClueStrip(numCanvas);
           const numDigits = text.replace(/\D/g, '');
           if (n.glyphCount > 1 && numDigits.length !== n.glyphCount) {
-            numberTexts.push(await recognizeGlyphsIndividually(canvas, n, y0, y1));
+            const glyphText = await recognizeGlyphsIndividually(canvas, n, y0, y1);
+            numberTexts.push(glyphText);
+            // recognizeGlyphsIndividually can emit '?' for a glyph it couldn't read at all —
+            // only trust the geometry when every glyph actually came back as a real digit.
+            geoms.push(/^\d+$/.test(glyphText) ? glyphGapsFor(n) : null);
           } else {
-            numberTexts.push(text.trim());
+            const trimmed = text.trim();
+            numberTexts.push(trimmed);
+            geoms.push(/^\d+$/.test(trimmed) && trimmed.length === n.glyphCount ? glyphGapsFor(n) : null);
           }
         }
         lineTexts.push(numberTexts.join(' '));
       }
     }
-    return lineTexts.join('\n');
+    return { text: lineTexts.join('\n'), geoms };
+  }
+
+  // The real per-glyph pixel gaps behind one merged OCR number, left-to-right — see
+  // ocrSegment.js's suggestOversizedClueSplit, the one consumer of this data. Null for a
+  // single-digit number (glyphCount 1): there's only one glyph, so no internal gap exists and
+  // nothing could ever be split out of it.
+  function glyphGapsFor(n) {
+    if (n.glyphs.length < 2) return null;
+    const gaps = [];
+    for (let i = 1; i < n.glyphs.length; i++) gaps.push(n.glyphs[i].start - n.glyphs[i - 1].end - 1);
+    return gaps;
   }
 
   // Current Objective #1's "reduce correction tedium" idea: cross-check each line's OCR'd
@@ -970,7 +1015,11 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     for (const input of [...state.rowClueInputs, ...state.colClueInputs]) input.refreshFlag();
   });
 
-  function buildClueRow(container, labelText, canvas, prefillText, getFillLine) {
+  // originalClue/numberGeoms (Current Objective — see TODO.md and ocrSegment.js's
+  // suggestOversizedClueSplit): the clue array AND the per-number glyph-gap geometry exactly
+  // as first OCR'd, before any player edits — the raw evidence a later oversized-clue flag can
+  // offer a real split suggestion from, rather than a guess from the merged string alone.
+  function buildClueRow(container, labelText, canvas, prefillText, getFillLine, originalClue, numberGeoms) {
     const row = document.createElement('div');
     row.className = 'scan-clue-row';
     const label = document.createElement('span');
@@ -996,7 +1045,15 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     input.className = 'scan-clue-row__input';
     input.value = prefillText;
     input.setAttribute('aria-label', `${labelText} clue numbers`);
-    row.append(label, img, input);
+    // Oversized-clue-number split suggestion (Current Objective — see TODO.md): a real button,
+    // not a silent auto-apply — per the project owner's own suggested UX, this only PRE-FILLS
+    // the field with the suggested split as an editable starting point the player still
+    // confirms (by seeing the field change and choosing to move on) or adjusts by hand, never
+    // applies unseen. Hidden by default; shown only while refreshFlag has a live suggestion.
+    const splitBtn = document.createElement('button');
+    splitBtn.type = 'button';
+    splitBtn.className = 'scan-clue-row__split-btn hidden';
+    row.append(label, img, input, splitBtn);
     container.appendChild(row);
 
     // Flag on build, and re-check live as the player edits — fixing a misread number should
@@ -1014,13 +1071,44 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
       const oversized = oversizedClueSuspect(clue, fillLine.length);
       const repeated = oversized ? null : repeatedDigitSuspect(clue);
       row.classList.toggle('scan-clue-row--suspect', oversized !== null || repeated !== null);
+
+      const suggestion = oversized ? suggestSplitFor(oversized, clue) : null;
+      splitBtn.classList.toggle('hidden', suggestion === null);
+      if (suggestion) {
+        splitBtn.textContent = `Split into ${suggestion.left}, ${suggestion.right}`;
+        splitBtn.onclick = () => {
+          const next = [...clue.slice(0, oversized.index), suggestion.left, suggestion.right, ...clue.slice(oversized.index + 1)];
+          input.value = next.join(', ');
+          refreshFlag();
+        };
+      }
+
       row.title = oversized
-        ? `"${oversized.value}" is larger than this line itself (${oversized.lineLength} cells) — a single run can never be longer than its own line, so this is almost certainly two numbers merged together (e.g. "10, 11" misread as "1011"). Split it back into two numbers.`
+        ? `"${oversized.value}" is larger than this line itself (${oversized.lineLength} cells) — a single run can never be longer than its own line, so this is almost certainly two numbers merged together (e.g. "10, 11" misread as "1011").` +
+          (suggestion
+            ? ` The widest gap in the original scan suggests ${suggestion.left}, ${suggestion.right} — use the button below to try it, or edit the field directly.`
+            : ' Split it back into two numbers.')
         : repeated
           ? `This might have a misread digit: most numbers here read ${repeated.expectedValue}, but one reads ${repeated.suspectedValue}.`
           : '';
       updateLineHealthWarnings();
     }
+
+    // Only trustworthy when this exact position hasn't drifted from what was actually OCR'd:
+    // if the player has since added/removed a number (length changed) or edited this specific
+    // value by hand, the stored geometry no longer corresponds to what's flagged here, and
+    // guessing from stale geometry would be worse than saying nothing (see
+    // ocrSegment.js's suggestOversizedClueSplit for the actual split-picking logic — this is
+    // just the "is this evidence still valid" gate in front of it).
+    function suggestSplitFor(oversized, clue) {
+      if (!numberGeoms || !originalClue) return null;
+      if (clue.length !== originalClue.length) return null;
+      if (clue[oversized.index] !== originalClue[oversized.index]) return null;
+      const gaps = numberGeoms[oversized.index];
+      if (!gaps) return null;
+      return suggestOversizedClueSplit(String(oversized.value), gaps);
+    }
+
     input.addEventListener('input', refreshFlag);
     refreshFlag();
     // Exposed so code outside this closure (the flip-fill-state fix above) can force a recheck
@@ -1093,11 +1181,17 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   // the synthetic test case, where several different margin widths each made the false-positive
   // count go up, not down, in a non-monotonic way with no obviously-safe value. The resolution
   // increase here has no such failure mode (it doesn't change which pixels are considered, just
-  // how finely), and cut the synthetic test's false positives from 3 to 1 with no downside found
-  // — the remaining case (the single grid corner, contaminated from two directions at once) is a
-  // known residual limitation, not yet fully solved. `cellsRect` arrives in analysis-canvas
-  // coordinates (shared with the clue-band slicing above); scaled by `state.scaleFullOverAnalysis`
-  // into full-canvas coordinates before slicing.
+  // how finely), and cut the synthetic test's false positives from 3 to 1 with no downside found.
+  // The remaining case from that round (the single grid corner, contaminated from two directions
+  // at once) is now handled by a second, sharper fix layered on top —
+  // `suppressAllXNoFillFalsePositive` (see src/cellStateDetect.js for the full reasoning): a
+  // detected grid of zero FILLED cells and at least one EMPTY/X is treated as 100% margin-bleed
+  // false positives and reset to entirely blank, rather than continuing to fight pixel-level
+  // exclusion precision. The two fixes are complementary, not redundant — this one only fires
+  // for an all-X/no-fill grid; the resolution increase above is what still matters for a puzzle
+  // with genuine partial fill progress, where real FILLED cells are present alongside the X's.
+  // `cellsRect` arrives in analysis-canvas coordinates (shared with the clue-band slicing above);
+  // scaled by `state.scaleFullOverAnalysis` into full-canvas coordinates before slicing.
   function detectFillState(cellsRect) {
     const s = state.scaleFullOverAnalysis;
     const fullCellsRect = {
@@ -1117,7 +1211,7 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
       })
     );
     const { states } = classifyGridCells(cellData);
-    state.fillMarks = states.map((row) => row.map((s) => s.state));
+    state.fillMarks = suppressAllXNoFillFalsePositive(states.map((row) => row.map((s) => s.state)));
   }
 
   // Cycles a fill-state review cell's mark on click, the same UNKNOWN -> FILLED -> EMPTY ->

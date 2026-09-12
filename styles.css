@@ -142,6 +142,10 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  /* Further toolbar reorganization (see TODO.md): centered as a whole, matching
+     `.board-controls`' own centering below the board, now that the mode toggle moved out and
+     Library took its slot — a left-flowing row made more sense when it held more controls. */
+  justify-content: center;
   /* Tightened from 0.9rem (space-for-puzzles round — see TODO.md): the project owner asked
      for buttons tight enough to keep the whole toolbar on one line on most platforms, so it
      doesn't cost the puzzle grid below a second row of height by wrapping. Every fixed
@@ -1193,7 +1197,10 @@ body {
 .scan-clue-row {
   display: grid;
   grid-template-columns: 3.2rem 1fr;
-  grid-template-areas: 'label thumb' 'input input';
+  /* 'split split' (see .scan-clue-row__split-btn below) is only occupied while the oversized-
+     clue-number split suggestion is showing — a `hidden` button contributes no size to the
+     grid at all, so this row's own height collapses back to nothing the rest of the time. */
+  grid-template-areas: 'label thumb' 'input input' 'split split';
   align-items: center;
   gap: 0.35rem 0.5rem;
   padding: 0.3rem;
@@ -1307,6 +1314,26 @@ body {
   border-radius: 0.4rem;
   padding: 0.35rem 0.5rem;
   font-size: 0.9rem;
+}
+
+/* Oversized-clue-number split suggestion (Current Objective — see TODO.md and scanUI.js's
+   buildClueRow/suggestSplitFor): styled amber like .scan-clue-row--suspect, since this only
+   ever shows alongside that same oversized-number flag — a real one-click action (like
+   .scan-invert-suspect's flip button) rather than a passive label, but scoped to just this
+   row/this one number, not a whole-photo action. `justify-self: start` keeps it from
+   stretching to the row's full width the way the input above deliberately does. */
+.scan-clue-row__split-btn {
+  grid-area: split;
+  justify-self: start;
+  background: var(--warn);
+  color: var(--felt-darker);
+  border: none;
+  border-radius: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation; /* same double-tap-zoom fix as .btn — see its own comment */
 }
 
 .scan-build-error {

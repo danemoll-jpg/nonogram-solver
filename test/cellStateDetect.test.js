@@ -5,6 +5,7 @@ import {
   classifyCellPixels,
   sampleCellInterior,
   classifyGridCells,
+  suppressAllXNoFillFalsePositive,
 } from '../src/cellStateDetect.js';
 import { FILLED, EMPTY, UNKNOWN } from '../src/model.js';
 
@@ -201,5 +202,42 @@ describe('classifyGridCells', () => {
     const { states } = classifyGridCells(cells);
     assertEqual(states[0][0].state, FILLED);
     assertEqual(states[1][1].state, UNKNOWN);
+  });
+});
+
+describe('suppressAllXNoFillFalsePositive', () => {
+  test('resets an all-X/no-fill grid to entirely blank', () => {
+    const grid = [
+      [UNKNOWN, EMPTY, UNKNOWN],
+      [EMPTY, UNKNOWN, EMPTY],
+    ];
+    const result = suppressAllXNoFillFalsePositive(grid);
+    for (const row of result) {
+      for (const s of row) assertEqual(s, UNKNOWN);
+    }
+  });
+
+  test('leaves a grid with at least one real FILLED cell untouched, X marks included', () => {
+    const grid = [
+      [FILLED, EMPTY],
+      [UNKNOWN, EMPTY],
+    ];
+    const result = suppressAllXNoFillFalsePositive(grid);
+    assertEqual(result, grid);
+  });
+
+  test('leaves an all-UNKNOWN grid (no marks at all) untouched', () => {
+    const grid = [
+      [UNKNOWN, UNKNOWN],
+      [UNKNOWN, UNKNOWN],
+    ];
+    const result = suppressAllXNoFillFalsePositive(grid);
+    assertEqual(result, grid);
+  });
+
+  test('leaves an all-FILLED grid (no X marks at all) untouched', () => {
+    const grid = [[FILLED, FILLED]];
+    const result = suppressAllXNoFillFalsePositive(grid);
+    assertEqual(result, grid);
   });
 });

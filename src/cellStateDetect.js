@@ -231,3 +231,40 @@ export function classifyGridCells(cells, options = {}) {
   );
   return { backgroundColor, states };
 }
+
+// ---- all-X/no-fill implausibility heuristic ----------------------------------------------
+
+// A detected fill state of zero FILLED cells and at least one EMPTY (X) cell isn't a realistic
+// real-world scan result (see TODO.md's Current Objective — a direct proposal from the project
+// owner: "If there are literally no squares filled and just X's, just erase the X's. I would
+// never just put X's in a puzzle and scan it. Either I partially filled it or it will be
+// blank."). The one realistic source of a grid shaped like that is the margin-number bleed bug
+// documented on detectFillState (src/scanUI.js) — every detected X is spurious ink from a
+// reference number printed just outside the grid's own border, misread as an EMPTY mark on the
+// boundary cell it bleeds into. Rather than continuing to chase the "how many pixels of bleed
+// is too many" precision problem the higher-resolution-canvas fix (see that file) is still
+// fighting — including its own documented residual case, the grid's corner cell, contaminated
+// from two directions at once — this sidesteps it with a simple, robust logical signature:
+// when the WHOLE grid comes back with this shape, treat it as 100% false positives and discard
+// every detected mark rather than trying to exclude specific margin pixels case-by-case.
+// Deliberately does NOT replace the higher-resolution-canvas fix — that one still matters for a
+// puzzle with genuine partial fill progress (at least one real FILLED cell present), a
+// different case this heuristic doesn't apply to at all.
+//
+// Known, accepted tradeoff (see TODO.md): a player who marks X's as pure scratch/spacing notes
+// before placing any real fills would, in principle, produce this exact "zero filled, some
+// X's" shape if scanned mid-way through that specific workflow — confirmed with the project
+// owner that this doesn't reflect how they (or realistically most people) actually scan in
+// practice, so this is a deliberate, accepted tradeoff, not an oversight.
+export function suppressAllXNoFillFalsePositive(grid) {
+  let hasFilled = false;
+  let hasEmpty = false;
+  for (const row of grid) {
+    for (const cellState of row) {
+      if (cellState === FILLED) hasFilled = true;
+      else if (cellState === EMPTY) hasEmpty = true;
+    }
+  }
+  if (hasFilled || !hasEmpty) return grid;
+  return grid.map((row) => row.map(() => UNKNOWN));
+}

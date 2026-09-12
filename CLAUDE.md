@@ -669,6 +669,84 @@ Fill/X toggle, and the scan edge-label bug — are DONE, preview-verified.**
   Tasks for the full writeup, including the real-image investigation
   details.
 
+**New: further toolbar reorganization — move Fill/X down to join Undo/Redo/
+Eraser in the existing `.board-controls` row below the board, move Library
+into Fill/X's now-vacated main-toolbar spot, and center both rows.** A gap
+should separate the Fill/X cluster from the Undo/Redo/Eraser cluster within
+`.board-controls`, matching the existing gap pattern used elsewhere; exact
+left-right order between the two clusters isn't strictly specified (Code's
+call). Library takes over the main toolbar position Fill/X used to occupy
+rather than leaving a gap; the rest of that row (Stats/Mute/Save/Help)
+otherwise stays as-is, just centered as a whole. See `TODO.md` for full
+detail.
+
+- **The toolbar reorganization above — done, preview-verified via direct
+  `getBoundingClientRect` measurements.** Fill/X moved into `.board-controls`
+  (Fill/X → gap → Undo → Redo → gap → Eraser, the literal reading of the
+  request order); Library took over the vacated main-toolbar slot; both rows
+  gained `justify-content: center` (`.board-controls` already had it from an
+  earlier round). Verified directly that each row's buttons are centered as a
+  group, not just individually, and that the mode-toggle's click wiring
+  (looked up by id in `app.js`) survived the DOM move unchanged. All 852 tests
+  pass. Not yet real-device-confirmed. See `TODO.md`'s Completed Tasks for
+  the full writeup.
+
+**New: revisit the earlier "flag, don't auto-split" decision for oversized
+clue numbers — better evidence is available than the final merged string
+alone.** `ocrSegment.js` already measures real glyph gap widths to decide
+where numbers separate (~10-12px within a number, ~18-27px between numbers)
+— if that raw data is still recoverable at the point a number gets flagged
+as impossible, the widest internal gap in the merged digits is a much
+stronger signal for the true split than blind string-splitting was. Real
+open question for Code to check directly: is that gap data actually still
+available at the point `findOversizedClue` runs, or does it need to be
+threaded through/re-derived? Suggested UX: pre-fill a suggested split as an
+editable starting point, not a silent auto-apply — keeps player oversight
+while giving a real head start. See `TODO.md` for full detail.
+
+- **The auto-split-suggestion revisit above — done, preview-verified; not yet
+  checked against a real end-to-end OCR scan.** Answering the ask's own "real
+  open question" directly: the raw per-glyph gap data is NOT still available
+  at `findOversizedClue` time — it had to be threaded through explicitly.
+  `recognizeStripSegmented` (`src/scanUI.js`) now also returns `geoms` (the
+  real per-glyph gap list behind each recognized number, or `null` when that
+  correspondence can't be trusted), captured at the one point this geometry
+  still exists. New pure `suggestOversizedClueSplit(valueText, gaps)`
+  (`src/ocrSegment.js`) picks the widest gap as the split point; a new
+  alignment gate (`buildClueRow`'s `suggestSplitFor`) refuses to suggest a
+  split if the player has since edited that value, rather than guessing from
+  stale geometry. UX exactly as suggested: a new amber button pre-fills the
+  field with the suggested split as an editable starting point — never a
+  silent auto-apply. 7 new unit tests; all 852 pass. Verified live via
+  dynamic import and a direct DOM/CSS render check; not yet run against a
+  real photo with a genuine OCR merge (this project's own "prefer real image
+  data" rule). See `TODO.md`'s Completed Tasks for the full writeup.
+
+**A much sharper, decisive fix for the scan margin-numbers bug, directly
+proposed by the project owner.** "If there are literally no squares filled
+and just X's, just erase the X's. I would never just put X's in a puzzle and
+scan it." Sidesteps the pixel-precision problem entirely: a detected fill
+state of zero FILLED cells and only EMPTY/X marks isn't a realistic scan
+result, so treat it as 100% false positives from margin-number bleed and
+reset the whole grid to blank. Keep last round's higher-resolution-canvas fix
+too — it handles puzzles with genuine partial fill progress, a different
+case this new heuristic doesn't cover. See `TODO.md` for full detail,
+including the one theoretical edge case (X's-only scratch marks before any
+fills) the project owner has explicitly accepted as a tradeoff.
+
+- **The scan margin-numbers sharper fix above — done, unit- and
+  preview-verified; not yet re-checked against a real photo.** New pure
+  `suppressAllXNoFillFalsePositive(grid)` (`src/cellStateDetect.js`): a grid
+  with zero FILLED and at least one EMPTY cell resets entirely to UNKNOWN,
+  otherwise passes through unchanged. Wired into `detectFillState`
+  (`src/scanUI.js`) as a post-processing pass over `classifyGridCells`' own
+  output — the higher-resolution-canvas fix from last round is untouched and
+  still active alongside it. 4 new unit tests; all 852 pass. Verified live via
+  dynamic import against both the "all X, no fill" and "genuine partial
+  progress" cases. Not yet re-run against the real ground-truth scan image
+  this fix is meant to resolve the residual corner-cell case for. See
+  `TODO.md`'s Completed Tasks for the full writeup.
+
 **HIGH PRIORITY — new real bug: a hint's actual suggested NEW cell (not the
 reasoning cells shown alongside it) is sometimes already correctly filled
 in** — directly confirmed with the project owner, not a UI-clarity mix-up
