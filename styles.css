@@ -152,8 +152,10 @@ body {
 }
 
 /* Toolbar cleanup (see TODO.md): a plain spacer, not a divider line — separates the first
-   cluster of frequently-used play controls (Library, mode toggle, Undo) from the second
-   cluster of secondary/settings-ish controls (Stats, Mute, Save, Help) that follows it. Adds
+   cluster of frequently-used play controls (Library, mode toggle) from the second cluster of
+   secondary/settings-ish controls (Stats, Mute, Save, Help) that follows it. (Undo/Redo/Eraser
+   used to sit in the first cluster too, before the board-controls round moved them below the
+   puzzle — see TODO.md.) Adds
    to (not replaces) `.toolbar`'s own `gap`, so the visual break reads as noticeably larger
    than the ordinary spacing between any other two toolbar controls. Also tightened (was
    0.9rem) in the same space-for-puzzles pass as `.toolbar`'s own gap above, just kept wider
@@ -163,7 +165,7 @@ body {
 }
 
 .mode-toggle {
-  display: inline-flex;
+  display: flex;
   /* Round 4: matches .btn's own fixed-height treatment (see .btn's comment) — .mode-toggle had
      no explicit height of its own, sizing instead off .mode-btn's padding, which landed a few px
      off from every .btn-based sibling once the margin-top leak above was fixed and exposed it. */
@@ -171,6 +173,13 @@ body {
   border: 1px solid rgba(230, 183, 63, 0.3);
   border-radius: 0.6rem;
   overflow: hidden;
+  /* Board-controls round (see TODO.md): now that Eraser has moved out (below the board — see
+     .board-controls), this is a plain two-segment Fill/Mark-empty switch, and the project owner
+     asked for both segments equal-sized rather than whatever width difference "Fill" (a word)
+     vs. "✕" (a glyph) used to imply. A fixed total width + `flex: 1` on each `.mode-btn` child
+     (below) is simpler and more robust than trying to pad each side to match the other's
+     natural content width — it guarantees equal halves regardless of either label's own size. */
+  width: 6.4rem;
 }
 
 .mode-btn {
@@ -186,13 +195,37 @@ body {
   height: 100%;
   display: inline-flex;
   align-items: center;
+  justify-content: center; /* centers content within the now flex:1 equal-width segment below */
   padding: 0 0.6rem; /* tightened from 0.8rem — space-for-puzzles round, see .toolbar's comment */
   cursor: pointer;
   touch-action: manipulation; /* same double-tap-zoom fix as .btn — see its own comment */
 }
 
+/* Board-controls round (see TODO.md): every direct .mode-btn child of the now-two-segment
+   .mode-toggle splits its fixed width evenly — see .mode-toggle's own comment for why a fixed
+   container width + equal flex-basis, not per-side padding tuning, is what actually guarantees
+   this regardless of "Fill" vs. "✕" having different natural content widths. Scoped to
+   `.mode-toggle .mode-btn` (not the bare `.mode-btn` class) so the below-board standalone
+   Eraser button (`.mode-btn--standalone`) isn't forced into an equal-split flex item of a
+   toggle it no longer belongs to. */
+.mode-toggle .mode-btn {
+  /* An explicit `width: 50%` of the fixed-width `.mode-toggle` container, not `flex: 1` —
+     confirmed directly that flex-grow-based equal distribution (even with `min-width: 0`
+     added to defeat the flex-item automatic-minimum-size clamp) still left "Fill" a few px
+     wider than "✕" in practice. An explicit percentage width sidesteps flex sizing/content
+     interactions entirely: both segments are simply half of `.mode-toggle`'s own fixed width,
+     full stop. */
+  width: 50%;
+}
+
+/* A `box-shadow`, not a `border-left`, on purpose: an actual border adds to this item's own
+   border-box width, which (confirmed directly) skewed the equal-width flex split above —
+   Fill measured ~4px wider than X, because X alone was carrying an extra 1px of border-box
+   width neither its own flex-basis:0 nor its sibling's had to absorb. A box-shadow paints the
+   same visual divider line without occupying any layout box space, so both segments come out
+   pixel-equal. */
 .mode-btn + .mode-btn {
-  border-left: 1px solid rgba(230, 183, 63, 0.3);
+  box-shadow: inset 1px 0 0 rgba(230, 183, 63, 0.3);
 }
 
 .mode-btn[aria-pressed="true"] {
@@ -200,14 +233,25 @@ body {
   color: #241a04;
 }
 
-/* Toolbar cleanup (see TODO.md): X and Eraser dropped their words and went icon-only —
-   narrower, roughly-square padding instead of .mode-btn's default text-shaped padding, so a
-   bare "✕" or the eraser SVG doesn't sit in an oversized text-width box next to "Fill". The
-   eraser's inline SVG uses `fill/stroke: currentColor`, so it already tracks
-   .mode-btn[aria-pressed="true"]'s color swap above for free — no separate active-state rule
-   needed here. */
+/* Toolbar cleanup (see TODO.md): X dropped its word and went icon-only — narrower, roughly-
+   square padding instead of .mode-btn's default text-shaped padding, so a bare "✕" doesn't sit
+   in an oversized text-width box next to "Fill". Doesn't affect the equal-width split above
+   (`.mode-toggle .mode-btn`'s `flex: 1` wins regardless of either segment's own padding). */
 .mode-btn--icon {
   padding: 0 0.45rem; /* tightened from 0.6rem — space-for-puzzles round, see .toolbar's comment */
+}
+
+/* Board-controls round (see TODO.md): Eraser moved out of `.mode-toggle`'s segmented pill to
+   stand alone below the board, alongside Undo/Redo — this gives it back the standalone
+   border/background/radius/height `.mode-toggle`'s wrapper used to provide for free (a bare
+   `.mode-btn` has none of its own; it relied entirely on the pill wrapper). Kept as its own
+   modifier rather than switching the button to plain `.btn` so `.mode-btn[aria-pressed="true"]`'s
+   existing gold active-color swap (shared with Fill/X) still applies unchanged — the eraser's
+   inline SVG already uses `fill/stroke: currentColor` for exactly this reason. */
+.mode-btn--standalone {
+  height: 2.2rem;
+  border: 1px solid rgba(230, 183, 63, 0.35);
+  border-radius: 0.6rem;
 }
 
 /* Persistent mute toggle (item 3) — its own control, separate from the Help dropdown, so
@@ -446,6 +490,32 @@ body {
 
 .hidden {
   display: none !important;
+}
+
+/* New: Undo/Redo/Eraser's row below the puzzle grid (see TODO.md and index.html's own
+   comment) — direct ergonomic ask, moved out of the main toolbar so reaching for any of the
+   three doesn't cover the puzzle the way reaching up to the toolbar did. Centered under the
+   board (unlike the toolbar, which is left-flowing) since it's a small, self-contained cluster
+   rather than a full-width row of controls. */
+.board-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem; /* matches .toolbar's own gap for visual consistency between the two rows */
+  margin-top: 0.6rem;
+}
+
+/* Mirrors .toolbar__gap — a plain spacer (not a divider line) separating Undo/Redo from
+   Eraser within the new row below the board. */
+.board-controls__gap {
+  width: 0.5rem;
+}
+
+/* Same misalignment bug class as `.toolbar > .btn` above (see that rule's own comment for the
+   full history) — `.btn + .btn`'s vertical-stack margin would otherwise leak into this new
+   horizontal `.board-controls` row too. */
+.board-controls > .btn {
+  margin-top: 0;
 }
 
 .board-root {

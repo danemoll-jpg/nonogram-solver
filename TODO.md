@@ -1292,6 +1292,80 @@ Completed Tasks
     errors appear at any point. All 836 tests pass (829 + 7 new); `node
     --check` clean on every edited file.
 
+* **Three items — done, preview-verified: Undo/Redo/Eraser moved below the
+  board, Fill/X made a true equal-width toggle, and a real scan fill-state
+  bug investigated and partially fixed with real-image testing.**
+  - **Undo/Redo/Eraser relocation**: all three moved out of the main
+    toolbar into a new `.board-controls` row directly under `#board-root`
+    (`index.html`/`styles.css`) — direct ergonomic ask ("you are covering
+    the screen when you are undoing/redoing"). Same icon-only + tooltip
+    buttons, same ids, no app.js changes needed at all (every wire-up is by
+    `getElementById`, not DOM position). Eraser's `.mode-btn`/
+    `.mode-btn--icon` classes are kept (not switched to plain `.btn`) so it
+    still tracks the shared `aria-pressed` gold-swap styling Fill/X use —
+    a new `.mode-btn--standalone` modifier gives it back the
+    border/background/height its old `.mode-toggle` wrapper used to
+    provide for free. Verified directly in browser preview with real
+    dispatched clicks: Undo/Redo/Eraser all still work correctly from the
+    new location (a drag-filled cell undoes, redoes, and erases exactly as
+    before).
+  - **Equal-width Fill/X toggle**: real bug found and fixed along the way —
+    the "obvious" CSS fix (`flex: 1` on each segment, even with
+    `min-width: 0` added to defeat the flex-item automatic-minimum-size
+    clamp) still measured "Fill" a few px wider than "✕" in direct
+    `getBoundingClientRect` testing, for reasons that resisted a clean
+    explanation. Switched to a plain `width: 50%` of the now fixed-width
+    `.mode-toggle` container instead — confirmed by direct measurement to
+    produce pixel-identical widths (50.198px each) regardless of either
+    segment's own content. Also replaced the segment divider's
+    `border-left` with an inset `box-shadow` (same visual line, zero
+    layout-box width) after confirming the border itself was contributing
+    to the size mismatch in the first `flex: 1` attempt.
+  - **Scan fill-state bug (spurious X's at every 5th row/column along the
+    bottom/right edges)**: investigated with real image data end-to-end,
+    not guessed at. Confirmed the root cause visually against the
+    project's own real 30x30 ground-truth image
+    (`scratch-images-reference-30x30-legible.png`) at full resolution: the
+    small reference numbers this convention prints do overlap the grid's
+    own last row/column cells, not just the margin outside — direct pixel
+    inspection (Python/PIL) found pink label ink sitting inside a
+    boundary cell's own white interior, confirmed against the true
+    (independently re-derived, not app-reported) grid border position.
+    **The first candidate fix (a wider exclusion margin on just the
+    outward-facing edge of a boundary cell, gated by a new `outerEdges`
+    option) was built, unit-tested, then DELIBERATELY DROPPED after direct
+    A/B testing showed it isn't reliably beneficial** — shrinking a
+    boundary cell's own examined interior can, depending on exactly where
+    the label's ink happens to fall relative to the new smaller box,
+    INCREASE its relative share of that box instead of excluding it;
+    several different margin widths tested against a purpose-built
+    synthetic reproduction (see below) each made the false-positive count
+    go up, not down, non-monotonically, with no value found to be reliably
+    safe. **The fix actually shipped: `detectFillState`
+    (`src/scanUI.js`) now classifies fill state from the already-loaded
+    higher-resolution `state.fullCanvas` (used for OCR strip crops)
+    instead of the coarser `state.analysisCanvas`** — a boundary cell's
+    crop is only ~12px across on the analysis canvas vs. ~37px in the
+    source photo, so a couple of real pixels of label bleed became a much
+    larger fraction of a boundary cell's tiny crop there than the same
+    bleed does at full-canvas resolution. Confirmed on a purpose-built
+    synthetic test image (`scratch-images/synthetic-blank-edge-reference-
+    numbers-20x20.png` — a from-scratch, KNOWN-fully-blank 20x20 grid
+    carrying the same reference-number-overlapping-the-last-cell
+    convention, built because the real ground-truth image turned out to
+    already be a genuine mid-solve puzzle with real marks scattered
+    throughout, not a clean blank-puzzle test case as first assumed): false
+    positives dropped from 3 to 1 (both editions correctly caught the
+    right-column instances; the single remaining false positive is the
+    grid's own bottom-right corner cell, contaminated from both directions
+    at once — a harder, still-unsolved case). **This is a genuine, tested
+    improvement, not a complete fix** — the corner-cell case is a known
+    residual limitation, consistent with this project's existing "accepted
+    diminishing-return residual" precedent for OCR digit noise. All 841
+    tests pass unchanged (this fix only changes which canvas
+    `detectFillState` reads pixels from); `node --check` clean. Not yet
+    real-device-confirmed.
+
 Current Objective (Focus Area)
 
 * **New real bug: a hint's actual suggested NEW cell (not the reasoning cells

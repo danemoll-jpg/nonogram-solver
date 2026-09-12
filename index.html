@@ -22,54 +22,27 @@
       <section class="board-panel">
         <div class="toolbar">
           <!-- Toolbar cleanup (see TODO.md): explicit project-owner-specified order — Library →
-               mode toggle → Undo (the frequently-used play controls) → a visual gap →
-               Stats/Mute/Save/Help (secondary/settings-ish controls). This replaces the older
-               `.library-entry-group` clustering (Library+Stats+Save+Undo together) — Library,
-               Undo, Stats, and Save are now spread across the row in the order above instead of
-               grouped by "moved out of the Help menu" history, which no longer matches how
-               they're meant to read left-to-right. -->
+               mode toggle → a visual gap → Stats/Mute/Save/Help (secondary/settings-ish
+               controls). This replaces the older `.library-entry-group` clustering
+               (Library+Stats+Save+Undo together) — Library and Stats/Save are now spread across
+               the row in the order above instead of grouped by "moved out of the Help menu"
+               history, which no longer matches how they're meant to read left-to-right.
+               Undo/Redo/Eraser moved OUT of this toolbar entirely (see the new `.board-controls`
+               row below `#board-root`) — real ergonomic complaint: reaching up here to
+               undo/redo/erase means your hand covers part of the puzzle while doing it, right
+               when you're actively working the board. -->
           <button id="btn-open-library" class="btn btn--primary" type="button">📚 Library</button>
 
+          <!-- Now a plain two-way Fill/Mark-empty toggle — Eraser moved below the board (see
+               .board-controls) once it stopped needing to share this segmented control. Both
+               segments are given equal width (.mode-toggle's own CSS) now that there are only
+               two of them, for visual symmetry, rather than "Fill" (a word) and "✕" (a glyph)
+               implying different-width segments the way three unevenly-sized segments used to. -->
           <div class="mode-toggle" role="group" aria-label="Marking mode">
             <button id="mode-fill" class="mode-btn" type="button" aria-pressed="true">Fill</button>
             <!-- Icon-only now (was "✕ Mark empty") — see the tooltip note below. -->
             <button id="mode-x" class="mode-btn mode-btn--icon" type="button" aria-pressed="false" aria-label="Mark empty" data-tooltip="Mark empty">✕</button>
-            <!-- Dedicated Eraser mode (see TODO.md), chosen over inferring "erase intent" from
-                 what a drag happens to cross. Clears FILLED/EMPTY back to UNKNOWN; a click/drag
-                 over an already-UNKNOWN cell is a no-op. Icon-only now too (was "🧹 Erase") — the
-                 🧹 broom emoji was always a placeholder, replaced with an inline SVG (no single
-                 emoji reads as "eraser" across platforms). First SVG attempt (a bare rotated
-                 outline rectangle) read as an unidentifiable slanted pill/battery shape per
-                 direct feedback, not as an eraser at all — a rectangle alone isn't enough of a
-                 cue. This version adds the two things that actually make an eraser icon read as
-                 one: a filled (not just outlined) two-tone block, AND a short pencil-mark
-                 scribble trailing out from underneath it being wiped away — the same combination
-                 real icon sets (e.g. Material Symbols' "ink eraser") use, rather than the block
-                 shape alone. `currentColor` throughout, so it still tracks
-                 .mode-btn[aria-pressed="true"]'s color swap for free, same as before. -->
-            <button id="mode-erase" class="mode-btn mode-btn--icon" type="button" aria-pressed="false" aria-label="Eraser" data-tooltip="Eraser">
-              <svg class="icon-eraser" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-                <path d="M3 19c1.2-2.3 2.6-2.3 3.6-1c1 1.3 2.4 1.3 3.4-0.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity="0.55" />
-                <g transform="rotate(-35 15 10.5)">
-                  <rect x="9" y="7" width="12" height="7" rx="1.8" fill="currentColor" fill-opacity="0.25" stroke="currentColor" stroke-width="1.6" />
-                  <line x1="9" y1="10.2" x2="21" y2="10.2" stroke="currentColor" stroke-width="1.3" />
-                </g>
-              </svg>
-            </button>
           </div>
-
-          <!-- Repeatable undo, distinct from the existing mistake-driven "back up to move #N"
-               flow — steps back one move (a single click, or a whole drag/hint/auto-X batch) at
-               a time, indefinitely. Disabled via app.js whenever board.history is empty (nothing
-               left to undo, or a scan-baseline import that predates all real history). Tooltip
-               replaces the old native `title` — see the mode-x/mode-erase comment above. -->
-          <button id="btn-undo" class="btn btn--icon" type="button" aria-label="Undo last move" data-tooltip="Undo last move" disabled>↩️</button>
-
-          <!-- New: Redo, paired with Undo (see TODO.md) — standard redo-stack semantics, all
-               in Board itself (src/model.js): undoing pushes onto board.redoStack, redoing
-               pops/reapplies, and any new move clears it. Disabled via app.js whenever
-               board.redoStack is empty, same pattern as Undo above. -->
-          <button id="btn-redo" class="btn btn--icon" type="button" aria-label="Redo" data-tooltip="Redo" disabled>↪️</button>
 
           <!-- Toolbar cleanup (see TODO.md): a small visual gap, not a divider line — just extra
                horizontal space separating the play controls above from the secondary/settings
@@ -132,6 +105,45 @@
         </div>
 
         <div id="board-root" class="board-root"></div>
+
+        <!-- New: Undo/Redo/Eraser moved here from the main toolbar (see TODO.md) — direct
+             ergonomic ask, sitting right below the grid so reaching for any of them doesn't
+             cover the puzzle the way reaching up to the toolbar did. Same icon-only + tooltip
+             pattern as before, just relocated; app.js wires these up by id exactly as it did in
+             the toolbar (DOM position doesn't matter to any of that logic). -->
+        <div class="board-controls" role="group" aria-label="Board history and eraser">
+          <!-- Repeatable undo, distinct from the existing mistake-driven "back up to move #N"
+               flow — steps back one move (a single click, or a whole drag/hint/auto-X batch) at
+               a time, indefinitely. Disabled via app.js whenever board.history is empty (nothing
+               left to undo, or a scan-baseline import that predates all real history). -->
+          <button id="btn-undo" class="btn btn--icon" type="button" aria-label="Undo last move" data-tooltip="Undo last move" disabled>↩️</button>
+
+          <!-- Redo, paired with Undo (see TODO.md) — standard redo-stack semantics, all in
+               Board itself (src/model.js): undoing pushes onto board.redoStack, redoing
+               pops/reapplies, and any new move clears it. Disabled via app.js whenever
+               board.redoStack is empty, same pattern as Undo above. -->
+          <button id="btn-redo" class="btn btn--icon" type="button" aria-label="Redo" data-tooltip="Redo" disabled>↪️</button>
+
+          <div class="board-controls__gap" aria-hidden="true"></div>
+
+          <!-- Dedicated Eraser mode (see TODO.md), chosen over inferring "erase intent" from
+               what a drag happens to cross. Clears FILLED/EMPTY back to UNKNOWN; a click/drag
+               over an already-UNKNOWN cell is a no-op. `mode-btn`/`mode-btn--icon` kept (not
+               switched to plain `.btn`) so it still tracks the shared aria-pressed active-color
+               swap the mode-toggle's Fill/X buttons use — `.mode-btn--standalone` gives it its
+               own standalone border/background now that it's no longer inside `.mode-toggle`'s
+               segmented pill. `currentColor` throughout the SVG, so it still tracks
+               .mode-btn[aria-pressed="true"]'s color swap for free. -->
+          <button id="mode-erase" class="mode-btn mode-btn--icon mode-btn--standalone" type="button" aria-pressed="false" aria-label="Eraser" data-tooltip="Eraser">
+            <svg class="icon-eraser" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+              <path d="M3 19c1.2-2.3 2.6-2.3 3.6-1c1 1.3 2.4 1.3 3.4-0.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity="0.55" />
+              <g transform="rotate(-35 15 10.5)">
+                <rect x="9" y="7" width="12" height="7" rx="1.8" fill="currentColor" fill-opacity="0.25" stroke="currentColor" stroke-width="1.6" />
+                <line x1="9" y1="10.2" x2="21" y2="10.2" stroke="currentColor" stroke-width="1.3" />
+              </g>
+            </svg>
+          </button>
+        </div>
 
         <p id="status-line" class="status-line" aria-live="polite"></p>
 

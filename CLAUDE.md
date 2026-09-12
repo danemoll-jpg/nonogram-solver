@@ -627,6 +627,48 @@ Current Objective; see `TODO.md`'s Completed Tasks for the full writeup.
   beforeunload-alone reliability mistake — the timer is what actually
   carries the feature.
 
+**The three items above — Undo/Redo/Eraser relocation, the equal-width
+Fill/X toggle, and the scan edge-label bug — are DONE, preview-verified.**
+- **Undo/Redo/Eraser** moved out of the main toolbar into a new
+  `.board-controls` row directly below the puzzle grid, per the direct
+  ergonomic complaint (reaching up to the toolbar covers the puzzle while
+  undoing/redoing/erasing). Pure markup/CSS move — every wire-up in app.js
+  is by `getElementById`, so no JS changes were needed. Verified with real
+  dispatched clicks: all three still work correctly from the new location.
+- **Fill/X equal-width toggle**: a real bug surfaced along the way —
+  `flex: 1` (even with `min-width: 0` to defeat the flex-item automatic-
+  minimum-size clamp) still measured "Fill" a few px wider than "✕" in
+  direct measurement. Fixed with a plain `width: 50%` of the now
+  fixed-width `.mode-toggle` instead, confirmed pixel-identical (50.198px
+  each) by direct `getBoundingClientRect` comparison.
+- **The scan edge-label bug (spurious X's at every 5th row/column along the
+  bottom/right edges) is PARTIALLY fixed, with a real, honestly-scoped
+  result** — investigated end-to-end with real image data, not guessed at.
+  Confirmed visually against the project's own real 30x30 ground-truth
+  image, at full resolution, that these reference numbers really do
+  overlap the grid's own last row/column cells, not just the margin
+  outside. The first candidate fix (widening the exclusion margin on just
+  a boundary cell's outward-facing edge) was built, tested, then
+  DELIBERATELY DROPPED after direct A/B testing showed it can backfire
+  (shrinking a boundary cell's examined interior can, depending on exactly
+  where the label's ink lands, increase its relative share of the smaller
+  box instead of excluding it — confirmed non-monotonic across several
+  margin widths on a purpose-built synthetic test). **The fix actually
+  shipped**: `detectFillState` (`src/scanUI.js`) now classifies from the
+  already-loaded higher-resolution `state.fullCanvas` instead of the
+  coarser `state.analysisCanvas` (roughly doubling pixels per cell, so the
+  same real-world bleed is a much smaller fraction of each boundary cell's
+  crop). Confirmed on a purpose-built synthetic blank grid carrying the
+  same labeling convention (the real ground-truth image turned out to
+  already be a genuine mid-solve puzzle, not the clean blank test case
+  first assumed): false positives dropped from 3 to 1, with the single
+  remaining case (the grid's own corner cell, contaminated from two
+  directions at once) an accepted, documented residual limitation — same
+  precedent as the existing OCR-noise "good enough for now" call. All 841
+  tests pass; not yet real-device-confirmed. See `TODO.md`'s Completed
+  Tasks for the full writeup, including the real-image investigation
+  details.
+
 **HIGH PRIORITY — new real bug: a hint's actual suggested NEW cell (not the
 reasoning cells shown alongside it) is sometimes already correctly filled
 in** — directly confirmed with the project owner, not a UI-clarity mix-up

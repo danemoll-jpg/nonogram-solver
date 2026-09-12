@@ -1059,22 +1059,60 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     });
   }
 
-  // Classifies every confirmed grid cell's fill/X/blank state from the analysis canvas — see
-  // src/cellStateDetect.js for the actual per-cell classification. Runs on the ANALYSIS
-  // canvas (not the higher-resolution full canvas OCR strip crops use, see FULL_MAX_DIM):
-  // unlike OCR, this only needs to tell "a large block of non-background color" from "thin
-  // diagonal strokes" apart, which the analysis canvas's own resolution is already comfortably
-  // enough for — no need to pay for a second higher-res crop pass the way cropStripCanvas
-  // does for legibility-sensitive clue digits. Takes the border-centered cells rect (see
+  // Classifies every confirmed grid cell's fill/X/blank state — see src/cellStateDetect.js for
+  // the actual per-cell classification. Takes the border-centered cells rect (see
   // computeCellsRect) rather than computing its own, so it stays in exact agreement with the
   // clue-band geometry the scan-clues handler slices from the same rect.
+  //
+  // Runs on the higher-resolution FULL canvas now, not the analysis canvas — a real bug found
+  // during the Current Objective's investigation (see TODO.md): a direct report of spurious
+  // X's at every 5th row/column along the bottom/right edges of a freshly-scanned puzzle,
+  // traced to the standard convention of printing small reference numbers there to help count
+  // a large grid by eye. This used to run on the analysis canvas on the theory that telling "a
+  // large block of non-background color" from "thin diagonal strokes" apart doesn't need
+  // OCR-grade resolution the way legible digits do — true for a cell's own genuine content, but
+  // real-image testing (both the project's real 30x30 ground-truth scan,
+  // `scratch-images/scratch-images-reference-30x30-legible.png`, and a purpose-built synthetic
+  // blank grid carrying this exact labeling convention, `scratch-images/synthetic-blank-edge-
+  // reference-numbers-20x20.png` — no automated test covers this, same "no local image decoder
+  // in the plain test harness" limitation as this feature's other real-image verification, see
+  // CLAUDE.md) found the analysis canvas's own resolution working against it specifically for
+  // boundary cells: at that resolution a cell is only ~12px across (vs. ~37px in the source
+  // photo), so even a couple of real pixels of a reference number bleeding across the true
+  // border became a large enough FRACTION of a boundary cell's tiny crop to misread as a mark.
+  // Cropping from `state.fullCanvas` instead
+  // (already decoded and in memory for OCR's own strip crops — see FULL_MAX_DIM/
+  // cropStripCanvas — so this costs nothing extra to load) roughly doubles the pixels per cell,
+  // shrinking that same bleed to a much smaller fraction of each cell.
+  //
+  // A wider per-edge exclusion margin on boundary cells (excluding more of whichever side faces
+  // the grid's own outer perimeter) was also tried and DELIBERATELY DROPPED after direct
+  // testing showed it isn't reliably beneficial: shrinking a boundary cell's own examined
+  // interior can, depending on exactly where the label's ink happens to fall, INCREASE its
+  // relative share of the (now smaller) box instead of excluding it — confirmed directly against
+  // the synthetic test case, where several different margin widths each made the false-positive
+  // count go up, not down, in a non-monotonic way with no obviously-safe value. The resolution
+  // increase here has no such failure mode (it doesn't change which pixels are considered, just
+  // how finely), and cut the synthetic test's false positives from 3 to 1 with no downside found
+  // — the remaining case (the single grid corner, contaminated from two directions at once) is a
+  // known residual limitation, not yet fully solved. `cellsRect` arrives in analysis-canvas
+  // coordinates (shared with the clue-band slicing above); scaled by `state.scaleFullOverAnalysis`
+  // into full-canvas coordinates before slicing.
   function detectFillState(cellsRect) {
-    const cellRects = sliceGridCells(cellsRect, state.rows, state.cols);
+    const s = state.scaleFullOverAnalysis;
+    const fullCellsRect = {
+      left: cellsRect.left * s,
+      top: cellsRect.top * s,
+      right: cellsRect.right * s,
+      bottom: cellsRect.bottom * s,
+    };
+    const fullCtx = state.fullCanvas.getContext('2d');
+    const cellRects = sliceGridCells(fullCellsRect, state.rows, state.cols);
     const cellData = cellRects.map((row) =>
       row.map((r) => {
         const cw = Math.max(1, Math.round(r.right - r.left));
         const ch = Math.max(1, Math.round(r.bottom - r.top));
-        const { data } = state.analysisCtx.getImageData(Math.round(r.left), Math.round(r.top), cw, ch);
+        const { data } = fullCtx.getImageData(Math.round(r.left), Math.round(r.top), cw, ch);
         return { pixels: data, width: cw, height: ch };
       })
     );
