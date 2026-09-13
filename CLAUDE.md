@@ -669,6 +669,61 @@ Fill/X toggle, and the scan edge-label bug — are DONE, preview-verified.**
   Tasks for the full writeup, including the real-image investigation
   details.
 
+**New feature idea, to build AFTER (not alongside) the "1410" bug fix below:
+offer MULTIPLE candidate split buttons for genuinely ambiguous merged
+numbers**, capped at 3 (the project owner's own suggested bound, backed by
+real reasoning: realistic puzzle sizes rarely produce more than a couple of
+plausible multi-number merges at once). Generalizes
+`suggestOversizedClueSplit`'s existing single-widest-gap approach to also
+consider near-tied gaps and genuine 3-way splits (two cut points), not just
+one — a meaningfully more involved algorithm than today's version, exact
+design left to Code. Guiding principle worth remembering for future scan-UX
+work generally: minimize manual typing in favor of tap-to-select options.
+See `TODO.md` for full detail.
+
+**New real bug (NOT a genuinely ambiguous case, per direct correction) in the
+just-shipped oversized-clue-split feature: a confirmed fresh, untouched OCR
+read of "1410" in a 25-wide line was correctly flagged, but no split-
+suggestion button appeared at all.** "1410" has essentially one sensible
+reading ("14, 10") — a real three-way split would need a visible gap between
+the "1" and "4" that isn't there in a cleanly-merged block, so this isn't a
+legitimately low-confidence case declining to guess; something is producing
+a wrong (empty) result. Investigate directly which safety condition is
+firing incorrectly (gap-count mismatch, tied gap widths, untrusted `geoms`
+entry) vs. a plainer indexing/alignment bug between the flagged position and
+its `geoms` entry. See `TODO.md` for full detail.
+
+- **The "1410" bug above — fixed, verified by direct reproduction (a
+  realistic synthetic recreation, not the original photo, which wasn't
+  available this round).** Real cause: a monospaced/tabular digit font
+  renders "1410" with genuinely IDENTICAL pixel gaps between every digit
+  ([7, 7, 7], confirmed by rendering it and measuring — and confirmed
+  against the deployed code directly: `suggestOversizedClueSplit('1410',
+  [7,7,7])` returned `null`) — a real tie with zero signal, not stale/absent
+  geometry. Fix: `suggestOversizedClueSplit` (`src/ocrSegment.js`) now takes
+  an optional `lineLength` and first filters every possible split down to
+  ones where both sides are legal clue values (≤ the line length) — for
+  "1410" in a 25-wide line that leaves only "14, 10", resolved with zero gap
+  data needed; gap evidence only breaks a tie when more than one split
+  survives that filter (a genuinely longer line), which is the real scope
+  for the next queued multi-candidate feature, not every monospaced-font
+  tie. `scanUI.js`'s `suggestSplitFor` passes `oversized.lineLength` through
+  and no longer bails when `gaps` is missing. Fully backward compatible
+  (`lineLength` optional, every existing caller/test unaffected). 9 new/
+  updated tests; all 857 pass. **Deliberately scoped to just this fix** —
+  the multi-candidate feature above was not started this round, per the
+  standing instruction to fix the known-broken single-guess case first.
+
+**New real bug: pressing "Mark empty" opens a tooltip that doesn't
+auto-dismiss — stays stuck until the player switches to Fill.** Concrete
+fix: should auto-dismiss after a second or two like a normal transient
+tooltip, likely a real bug in `src/tooltip.js`'s dismiss logic for this
+specific button. Also worth reconsidering whether a tooltip should show at
+all for Fill/Mark-empty, given they're core high-frequency actions unlike
+the less-frequently-tapped icon buttons a reminder tooltip suits better —
+Code's judgment on suppressing it entirely there vs. just fixing the timing.
+See `TODO.md` for full detail.
+
 **New: further toolbar reorganization — move Fill/X down to join Undo/Redo/
 Eraser in the existing `.board-controls` row below the board, move Library
 into Fill/X's now-vacated main-toolbar spot, and center both rows.** A gap

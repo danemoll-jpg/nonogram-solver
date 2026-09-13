@@ -260,4 +260,48 @@ describe('suggestOversizedClueSplit', () => {
     assertEqual(suggestOversizedClueSplit('1014', null), null);
     assertEqual(suggestOversizedClueSplit('1014', undefined), null);
   });
+
+  // The "1410" bug (TODO.md): reproduced directly by rendering "1410" in a monospaced/
+  // tabular-figure font and measuring its real pixel gaps — a dead 3-way tie ([7, 7, 7],
+  // carrying zero split-point signal), which is exactly why the old gap-only algorithm
+  // declined here even though "14, 10" is the obviously correct (and only legal) reading.
+  test('uses line length to resolve a tied/uninformative gap set (the "1410" bug)', () => {
+    // Gaps alone give no signal at all — every prior test's "tied gaps" case (see above)
+    // correctly returns null here on its own.
+    assertEqual(suggestOversizedClueSplit('1410', [7, 7, 7]), null);
+    // But in a 25-wide line, "1, 410" (410) and "141, 0" (141, and 0 is not a legal clue
+    // value either) are both structurally impossible — "14, 10" is the ONLY split where both
+    // sides could ever fit, so line length alone proves it without needing gap evidence.
+    assertEqual(suggestOversizedClueSplit('1410', [7, 7, 7], 25), { left: 14, right: 10 });
+  });
+
+  test('line length alone resolves a split even with no gap evidence at all', () => {
+    assertEqual(suggestOversizedClueSplit('1410', null, 25), { left: 14, right: 10 });
+    assertEqual(suggestOversizedClueSplit('1410', undefined, 25), { left: 14, right: 10 });
+  });
+
+  test('line length narrows candidates but gap evidence still breaks a remaining tie', () => {
+    // In a wide (99-cell) line, both "1, 410" (410 ≤ 99? no — still too big) ... use a value
+    // where line length leaves TWO legal candidates, so gap evidence is still the deciding
+    // factor exactly as it was before line length was ever considered.
+    // "1234" in a 40-wide line: "1,234" (234 > 40, illegal), "12,34" (both ≤ 40, legal),
+    // "123,4" (123 > 40, illegal) — only one legal candidate here regardless of gaps, so use a
+    // case with two: "1213" in a 40-wide line: "1,213" (213>40 illegal), "12,13" (legal),
+    // "121,3" (121>40 illegal) — still only one. A genuinely two-legal-candidate case needs a
+    // smaller merged number: "123" in a 40-wide line: "1,23" (legal) and "12,3" (legal) both
+    // fit, so gap evidence must still decide between them.
+    assertEqual(suggestOversizedClueSplit('123', [10, 20], 40), { left: 12, right: 3 });
+    assertEqual(suggestOversizedClueSplit('123', [20, 10], 40), { left: 1, right: 23 });
+    assertEqual(suggestOversizedClueSplit('123', [10, 10], 40), null); // still tied — decline
+  });
+
+  test('a line length that rules out every split yields no suggestion', () => {
+    assertEqual(suggestOversizedClueSplit('99', [5], 5), null); // 99 vs 9,9 — both sides > 5
+  });
+
+  test('an omitted line length preserves the exact prior gap-only behavior', () => {
+    // Same inputs as the very first test above, called the old (2-arg) way — must still work
+    // unchanged for any existing caller that hasn't been updated to pass a line length.
+    assertEqual(suggestOversizedClueSplit('1014', [11, 20, 11]), { left: 10, right: 14 });
+  });
 });

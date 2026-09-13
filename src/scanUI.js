@@ -1100,13 +1100,17 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     // guessing from stale geometry would be worse than saying nothing (see
     // ocrSegment.js's suggestOversizedClueSplit for the actual split-picking logic — this is
     // just the "is this evidence still valid" gate in front of it).
+    //
+    // `gaps` being absent/untrustworthy (numberGeoms[oversized.index] is null) is no longer an
+    // automatic bail-out (the "1410" fix, TODO.md): suggestOversizedClueSplit can still resolve
+    // a unique answer from `oversized.lineLength` alone when the line length rules out every
+    // split but one, with no gap evidence needed at all.
     function suggestSplitFor(oversized, clue) {
       if (!numberGeoms || !originalClue) return null;
       if (clue.length !== originalClue.length) return null;
       if (clue[oversized.index] !== originalClue[oversized.index]) return null;
       const gaps = numberGeoms[oversized.index];
-      if (!gaps) return null;
-      return suggestOversizedClueSplit(String(oversized.value), gaps);
+      return suggestOversizedClueSplit(String(oversized.value), gaps, oversized.lineLength);
     }
 
     input.addEventListener('input', refreshFlag);

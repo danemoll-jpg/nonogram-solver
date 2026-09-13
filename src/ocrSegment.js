@@ -232,30 +232,68 @@ export function findOversizedClue(clue, lineLength) {
 // oversized (see scanUI.js's recognizeStripSegmented/glyphGapsFor) — it is NOT recoverable from
 // the merged string or the parsed clue value alone.
 //
-// Returns a suggested {left, right} split (both parsed as plain numbers, so a spurious leading
-// zero at the split point is silently normalized away), or null when a confident split isn't
-// possible: fewer than 2 digits (nothing to split), a gap-count mismatch against valueText
-// (stale/inconsistent geometry — safer to say nothing than guess wrong), a degenerate split
-// (either side would be empty or zero), or every gap tied at the same width (no single gap
-// stands out as the genuine separator, so no confident split point exists).
-export function suggestOversizedClueSplit(valueText, gaps) {
-  if (!Array.isArray(gaps) || gaps.length === 0 || gaps.length !== valueText.length - 1) return null;
-  let bestIdx = 0;
-  let bestGap = gaps[0];
-  let tied = false;
-  for (let i = 1; i < gaps.length; i++) {
-    if (gaps[i] > bestGap) {
-      bestGap = gaps[i];
-      bestIdx = i;
-      tied = false;
-    } else if (gaps[i] === bestGap) {
-      tied = true;
+// The "1410" bug (see TODO.md): a real, confirmed-fresh OCR read of "1410" in a 25-wide line
+// was correctly flagged as oversized, but got NO split suggestion — not a legitimately
+// low-confidence case, per the project owner's direct correction, since "14, 10" is the
+// obviously correct reading to a human. Root cause, reproduced directly (see TODO.md's
+// writeup): a MONOSPACED/tabular-figure digit font — common for exactly the kind of clean,
+// aligned clue-number rendering this feature scans — measures IDENTICAL pixel gaps between
+// every adjacent digit pair regardless of whether they belong to the same merged number or
+// two different ones (confirmed directly: a real "1410" rendered in a monospace font measures
+// gaps of [7, 7, 7], a dead 3-way tie carrying zero split-point information). The old
+// widest-gap-only algorithm had no other evidence to fall back on, so it correctly (per its
+// own conservative design) declined — but a human isn't just reading pixel gaps here: a
+// person immediately rules out "1, 410" and "141, 0" because 410 and 141 plainly can't fit in
+// a 25-cell line, leaving "14, 10" as the ONLY structurally possible reading. That's a genuine
+// logical constraint already available at this point (the line length that made this number
+// "oversized" in the first place) — not a guess — so it belongs alongside the gap evidence,
+// not as a replacement for it: gap evidence still resolves cases where line length alone
+// leaves more than one legal split (e.g. a merge inside a long line, where several splits
+// could plausibly both fit).
+//
+// `lineLength` is optional: every existing caller/test that omits it gets the exact prior
+// gap-only behavior (no line-length bound at all), since a stricter reading of "candidate"
+// below with no bound reduces to "every non-degenerate split", the same set the old code
+// implicitly considered.
+//
+// Algorithm: enumerate every 2-way split point, keep only STRUCTURALLY LEGAL ones (both sides
+// parse to a positive integer that could fit in the line, when a line length is known). If
+// exactly one survives, that's the answer — no gap data even required, since the structural
+// constraint alone already proves it's the only possibility. If more than one survives, only
+// then fall back to the pixel-gap evidence (as before) to break the tie among just those
+// legal candidates; if THAT is unavailable or still tied, decline — a genuinely ambiguous case
+// (see TODO.md's queued follow-up: offering multiple candidate buttons for exactly this
+// situation, once this single-best-guess path is solid).
+export function suggestOversizedClueSplit(valueText, gaps, lineLength) {
+  const digits = valueText.length;
+  if (digits < 2) return null;
+
+  const hasLineLength = Number.isInteger(lineLength) && lineLength > 0;
+  const candidates = [];
+  for (let splitAt = 1; splitAt < digits; splitAt++) {
+    const left = parseInt(valueText.slice(0, splitAt), 10);
+    const right = parseInt(valueText.slice(splitAt), 10);
+    if (!Number.isInteger(left) || !Number.isInteger(right) || left < 1 || right < 1) continue;
+    if (hasLineLength && (left > lineLength || right > lineLength)) continue;
+    candidates.push({ splitAt, left, right });
+  }
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return { left: candidates[0].left, right: candidates[0].right };
+
+  // More than one legal split remains — the gap evidence is the only thing left to break the
+  // tie, exactly as the old algorithm did, just scoped down to only the legal candidates.
+  if (!Array.isArray(gaps) || gaps.length !== digits - 1) return null;
+  let bestGap = -Infinity;
+  let bestCandidates = [];
+  for (const c of candidates) {
+    const gap = gaps[c.splitAt - 1]; // gaps[i] sits between digit i and digit i+1
+    if (gap > bestGap) {
+      bestGap = gap;
+      bestCandidates = [c];
+    } else if (gap === bestGap) {
+      bestCandidates.push(c);
     }
   }
-  if (tied) return null;
-  const splitAt = bestIdx + 1; // gaps[i] sits between digit i and digit i+1
-  const left = parseInt(valueText.slice(0, splitAt), 10);
-  const right = parseInt(valueText.slice(splitAt), 10);
-  if (!Number.isInteger(left) || !Number.isInteger(right) || left < 1 || right < 1) return null;
-  return { left, right };
+  if (bestCandidates.length !== 1) return null; // still tied among the legal candidates
+  return { left: bestCandidates[0].left, right: bestCandidates[0].right };
 }

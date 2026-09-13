@@ -1368,6 +1368,163 @@ Completed Tasks
 
 Current Objective (Focus Area)
 
+* **New feature idea, to build AFTER the "1410" bug below is actually fixed,
+  not alongside it: for genuinely ambiguous merged numbers, offer MULTIPLE
+  candidate split buttons instead of just one.** Direct example, explicitly
+  acknowledged as unlikely to occur in practice but illustrative: "123" could
+  plausibly be "1,2,3" or "12,3" or "1,23" — rather than picking a single
+  best guess (or nothing, as the current "1410" bug shows), show up to a few
+  buttons, each a distinct candidate interpretation, so the player can tap
+  whichever one actually matches the image instead of typing from scratch
+  even in a genuinely uncertain case.
+  - **Practical bound suggested directly, worth keeping as the actual cap,
+    not just a suggestion**: "we could limit it to 3 possible buttons" — the
+    project owner's own reasoning for why this stays bounded in practice
+    ("it would take a puzzle of over 30 rows/columns for you to have more
+    than 2 double numbers") holds up: realistic puzzle sizes rarely produce
+    more than a couple of plausible multi-number merges at once, so 3
+    candidate buttons should comfortably cover the realistic cases without
+    the UI ever needing to show an overwhelming number of options.
+  - **This generalizes the existing single-best-guess approach
+    (`suggestOversizedClueSplit`, currently binary-split-only, picking the
+    single widest gap) rather than replacing its underlying logic** — the
+    same gap-width data already gathered is the right basis for ranking
+    candidates, just extended to: (a) consider more than one plausible cut
+    point when multiple gaps are comparably wide (not just the single
+    widest), and (b) support genuine 3-way splits (two cut points), not only
+    2-way, since the illustrative example itself is a 3-way case. Exact
+    candidate-generation approach (how ties/near-ties get detected, how
+    3-way candidates get generated and ranked alongside 2-way ones, capped
+    and deduplicated at 3 total) is Code's own design call — this is a
+    meaningfully more involved algorithm than the current single-guess
+    version, not a small tweak.
+  - **Explicit sequencing**: fix the "1410" bug below FIRST, so the single-
+    best-case path is reliably correct before building a fancier
+    multi-candidate UI on top of it — building the more complex feature on
+    top of an already-broken simple case would just compound the bugs
+    rather than genuinely improving anything.
+  - **Ties into the broader stated motivation, worth remembering for any
+    future scan-correction UX work too**: "it just isn't a lot of fun
+    entering the numbers, so the more times I can press a button the
+    better" — minimizing manual typing in favor of tap-to-select options is
+    the guiding principle here, not just for this specific feature.
+
+* **New real bug (corrected framing — this is NOT a genuinely ambiguous/
+  lower-confidence case, per the project owner's direct pushback) in the
+  just-shipped oversized-clue-split feature: a confirmed fresh, untouched OCR
+  read of "1410" in a 25-wide line was correctly flagged as impossible, but
+  no "Split into X, Y" button appeared at all.** Directly confirmed with the
+  project owner this was the genuine original OCR output, not a
+  player-edited field — so this isn't the intentional "field was edited,
+  geometry no longer trustworthy" safe-fallback working as designed.
+  **"1410" has essentially one sensible reading, "14, 10" — not a genuinely
+  uncertain case at all**: a real three-way split ("1, 4, 10") would require
+  a visible gap between the "1" and "4" digits that clearly isn't there in a
+  cleanly-merged four-digit block. Whatever caused no suggestion to appear
+  here is a real bug producing a wrong (empty) result, not a legitimately
+  low-confidence scenario declining to guess — treat this as a
+  straightforward bug to find and fix, not a design question about handling
+  genuine ambiguity.
+  - **Investigate directly rather than assuming which safety condition is
+    firing**: `suggestSplitFor`/`suggestOversizedClueSplit` legitimately
+    decline to suggest under several conditions (a gap-count mismatch
+    against the value's digit count, every internal gap tied at the same
+    width with no real signal, a `geoms` entry stored as `null` because the
+    OCR'd digit count didn't confidently match the glyph count for this
+    specific number, or a degenerate split where either side would parse to
+    0) — but for a real four-digit block like "1410" with a clear single
+    likely internal gap, none of those SHOULD legitimately apply, which
+    means one of them is very likely firing incorrectly here. Also directly
+    rule out a plainer bug: an indexing/alignment mismatch between the
+    flagged clue's position and its corresponding `geoms` array entry, which
+    could incorrectly treat real, available geometry as absent. Check with
+    real debugging against this exact scenario, not by assuming which
+    explanation applies.
+
+* **The "1410" bug above — root-caused and fixed, verified via a direct
+  reproduction; not against the actual original photo (unavailable this
+  round), but against a realistic synthetic recreation of the failure
+  mechanism, then confirmed live against the deployed code before fixing.**
+  Neither of the two suspected leads was it: `numberGeoms`/`originalClue`
+  alignment was checked directly and is sound (both are built by iterating
+  the SAME `numbers` list in the SAME order every call site uses), and the
+  `geoms` entry for a clean 4-digit merge with no OCR fallback involved is
+  never null.
+  - **Actual root cause: a genuine, reproducible pixel-gap TIE, not stale/
+    absent geometry.** Rendered "1410" onto a canvas in a monospaced/
+    tabular-figure digit font (common for exactly this feature's own clean,
+    aligned clue-number crops) and measured its real per-glyph gaps using
+    the identical pipeline `scanUI.js`/`ocrSegment.js` use: **[7, 7, 7] — a
+    dead 3-way tie carrying zero split-point signal.** Confirmed live
+    against the deployed `suggestOversizedClueSplit('1410', [7, 7, 7])`
+    before touching any code: returns `null`, exactly reproducing "correctly
+    flagged, no button." A monospaced font makes every adjacent-digit gap
+    identical regardless of whether the two digits belong to the same merged
+    number or two different ones — the widest-gap heuristic has no signal to
+    work with here at all, so it was declining exactly as conservatively
+    designed, not misfiring.
+  - **Fix: use `lineLength` (already known — it's the exact reason this
+    number got flagged in the first place) as a structural filter BEFORE
+    falling back to gap evidence.** `suggestOversizedClueSplit`
+    (`ocrSegment.js`) now takes an optional third `lineLength` argument and
+    enumerates every 2-way split point, keeping only ones where BOTH sides
+    are legal clue values (positive integers, ≤ `lineLength` when known). For
+    "1410" in a 25-wide line, "1, 410" and "141, 0" are both structurally
+    impossible (410 and 141 can't fit in 25 cells; 0 isn't a legal clue
+    value either) — "14, 10" is the ONLY split that could ever be legal, so
+    it's returned directly with NO gap data needed at all. When more than
+    one split survives the structural filter (a genuinely longer line, where
+    several splits could plausibly fit), gap evidence still breaks the tie
+    exactly as before, scoped down to just the surviving candidates — this
+    is the actual "genuinely ambiguous" case the next queued feature (offer
+    up to 3 candidates) is for, now correctly narrowed down to only where
+    real ambiguity remains rather than firing on every monospaced-font tie.
+    `scanUI.js`'s `suggestSplitFor` now passes `oversized.lineLength` through
+    and no longer bails out just because `gaps` is null/untrustworthy — the
+    structural filter can resolve a unique answer on its own even with zero
+    gap evidence.
+  - **Fully backward compatible**: `lineLength` is optional and every
+    existing call site/test that omits it gets the exact prior gap-only
+    behavior unchanged (no upper bound at all is equivalent to "every
+    non-degenerate split is structurally legal").
+  - **9 new/updated unit tests** (`test/ocrSegment.test.js`): the exact
+    "1410"/`[7,7,7]` tie (declines without `lineLength`, resolves with it),
+    resolving from `lineLength` alone with zero gap data, a case where
+    `lineLength` narrows to two legal candidates and gap evidence still
+    correctly picks between them, a `lineLength` that rules out every split
+    (still correctly declines), and confirmation the original "1014" test
+    and every other existing case are unaffected. All 857 tests pass
+    (848 + 9 new); `node --check` clean on both touched files.
+  - **Explicitly scoped to this fix only — the next queued feature (multiple
+    candidate buttons for genuine ambiguity) was deliberately NOT started
+    this round**, per the standing instruction to fix this known-broken
+    single-guess case first rather than build on top of it.
+
+* **New real bug: pressing "Mark empty" (the X mode button) opens a tooltip
+  that doesn't auto-dismiss — it stays stuck on screen until the player
+  presses Fill to switch mode away from it.** Direct report: "Not sure if it
+  is even necessary for the info, but at the very least it should disappear
+  after a second or two." Two things worth addressing, not just one:
+  1. **The concrete, minimum fix**: whatever tooltip is showing for this
+     button needs to auto-dismiss after a short timeout (a second or two, per
+     the project owner's own suggestion) like a normal transient tooltip,
+     rather than staying open indefinitely until an unrelated action
+     (switching to Fill) happens to close it. This sounds like a real bug in
+     `src/tooltip.js`'s dismiss logic specifically for this button, not
+     intended behavior — worth checking whether Fill/X's tooltip wiring
+     differs somehow from other icon buttons (Undo/Redo/Eraser/etc.) that
+     don't have this problem, now that Fill/X sit in the same
+     `.board-controls` row as those after the recent toolbar reorganization.
+  2. **Worth also reconsidering whether a tooltip should show here at all**:
+     Fill and Mark-empty are core, high-frequency actions (unlike Undo/Redo/
+     Eraser or other less-frequently-tapped icon buttons, where a reminder
+     tooltip is more genuinely useful) — a tooltip appearing on every routine
+     mode-switch tap may just be unnecessary friction/noise regardless of how
+     quickly it dismisses. Worth Code's judgment on whether to suppress the
+     tooltip entirely for Fill/Mark-empty specifically while keeping it for
+     the other, less-frequent controls, rather than only fixing the
+     auto-dismiss timing.
+
 * **New: further toolbar reorganization — move Fill/X down to join Undo/Redo/
   Eraser below the board, move Library into Fill/X's now-vacated spot in the
   main toolbar, and center both rows.** Builds directly on the recent
