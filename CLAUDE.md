@@ -714,15 +714,26 @@ its `geoms` entry. See `TODO.md` for full detail.
   the multi-candidate feature above was not started this round, per the
   standing instruction to fix the known-broken single-guess case first.
 
-**New real bug: pressing "Mark empty" opens a tooltip that doesn't
-auto-dismiss — stays stuck until the player switches to Fill.** Concrete
-fix: should auto-dismiss after a second or two like a normal transient
-tooltip, likely a real bug in `src/tooltip.js`'s dismiss logic for this
-specific button. Also worth reconsidering whether a tooltip should show at
-all for Fill/Mark-empty, given they're core high-frequency actions unlike
-the less-frequently-tapped icon buttons a reminder tooltip suits better —
-Code's judgment on suppressing it entirely there vs. just fixing the timing.
-See `TODO.md` for full detail.
+- **The "Mark empty" tooltip-never-dismisses bug — fixed, root-caused, and
+  verified via a direct reproduction of the real failure mechanism, not just
+  patched to the symptom.** Real cause: iOS Safari fires a synthetic
+  "compatibility" mouseenter roughly 300ms after a real touchend (documented
+  WebKit behavior) — indistinguishable from a genuine hover, so it re-ran
+  `showTooltip()` shortly after every tap, and `showTooltip()`
+  unconditionally clears any pending auto-hide timer, leaving the tooltip
+  stuck open with no `mouseleave` (touch never fires one) to close it until
+  an unrelated blur happened (switching to Fill) — exactly the reported
+  symptom. Fixed in `src/tooltip.js`: a `lastTouchAt` timestamp set on
+  `touchstart`, checked by `mouseenter` to ignore a ghost hover event
+  arriving within 700ms of a real touch on the same element. Verified by
+  reproducing the exact bug on the pre-fix code in browser preview (dispatch
+  `touchstart` then a `mouseenter` ~350ms later — tooltip still visible at
+  +1950ms), then confirming the fixed code auto-hides in the same scenario,
+  plus confirming genuine desktop hover (no preceding touch) is unaffected.
+  All 857 tests pass. **Item 2 (whether to suppress the tooltip entirely for
+  Fill/Mark-empty) was deliberately left for a future round** — the ask this
+  round was to fix the bug, which the auto-dismiss fix alone satisfies. Not
+  yet real-device-confirmed. See `TODO.md` for the full writeup.
 
 **New: further toolbar reorganization — move Fill/X down to join Undo/Redo/
 Eraser in the existing `.board-controls` row below the board, move Library

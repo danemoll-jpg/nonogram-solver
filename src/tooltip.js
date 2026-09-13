@@ -13,10 +13,20 @@
 
 const SHOW_DELAY_MS = 300; // hover: avoid flashing a caption on every incidental mouse pass-over
 const TOUCH_AUTOHIDE_MS = 1600; // press: long enough to read a short caption, short enough not to linger
+// iOS Safari fires a synthetic "compatibility" mouseover/mousemove/mousedown/mouseup/click
+// roughly 300ms after touchend, for pages that only wired up mouse handlers (Apple's own docs
+// describe this). That synthetic mouseenter looks identical to a real one, so without this
+// guard it re-runs showTooltip() ~300-400ms after a real tap — and showTooltip() unconditionally
+// clears any pending hideTimer, wiping out the touchstart handler's own auto-hide countdown.
+// Touch never fires a real mouseleave afterward, so the tooltip was then stuck open until some
+// unrelated blur/mouseleave happened to fire (e.g. switching to Fill) — this was the actual
+// "Mark empty" tooltip-never-dismisses bug. Comfortably above the ~300ms typical delay.
+const GHOST_MOUSE_WINDOW_MS = 700;
 
 let bubble = null;
 let showTimer = null;
 let hideTimer = null;
+let lastTouchAt = 0;
 
 function ensureBubble() {
   if (bubble) return bubble;
@@ -63,6 +73,7 @@ export function attachTooltip(el) {
   if (!text) return;
 
   el.addEventListener('mouseenter', () => {
+    if (Date.now() - lastTouchAt < GHOST_MOUSE_WINDOW_MS) return; // ignore iOS's ghost mouseenter after a real tap
     showTimer = setTimeout(() => showTooltip(el, text), SHOW_DELAY_MS);
   });
   el.addEventListener('mouseleave', () => {
@@ -79,6 +90,7 @@ export function attachTooltip(el) {
   el.addEventListener(
     'touchstart',
     () => {
+      lastTouchAt = Date.now();
       showTooltip(el, text);
       clearTimeout(hideTimer);
       hideTimer = setTimeout(hideTooltip, TOUCH_AUTOHIDE_MS);

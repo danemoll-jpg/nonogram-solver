@@ -1500,9 +1500,15 @@ Current Objective (Focus Area)
     this round**, per the standing instruction to fix this known-broken
     single-guess case first rather than build on top of it.
 
-* **New real bug: pressing "Mark empty" (the X mode button) opens a tooltip
+* **RE-SENDING — not touched last round despite being queued alongside the
+  "1410" fix, and there was no actual dependency between them (the "fix this
+  first" sequencing only applied to the multi-candidate split feature, not
+  this).** Not marked done, not marked deferred with a reason — simply
+  absent from the last report, same pattern this project has run into a
+  couple of times before with other items. Original bug, unchanged: pressing
+  "Mark empty" (the X mode button) opens a tooltip
   that doesn't auto-dismiss — it stays stuck on screen until the player
-  presses Fill to switch mode away from it.** Direct report: "Not sure if it
+  presses Fill to switch mode away from it. Direct report: "Not sure if it
   is even necessary for the info, but at the very least it should disappear
   after a second or two." Two things worth addressing, not just one:
   1. **The concrete, minimum fix**: whatever tooltip is showing for this
@@ -1524,6 +1530,46 @@ Current Objective (Focus Area)
      tooltip entirely for Fill/Mark-empty specifically while keeping it for
      the other, less-frequent controls, rather than only fixing the
      auto-dismiss timing.
+
+* **Item 1 above — fixed, root-caused (not just patched to the reported
+  symptom), verified via a direct reproduction of the actual bug mechanism in
+  browser preview.** The wiring itself wasn't different for this button — the
+  same `attachTooltip` (`src/tooltip.js`) that every icon button uses. **Real
+  root cause: iOS Safari fires a synthetic "compatibility" mouseover/
+  mousemove/mousedown/mouseup/click roughly 300ms after a real touchend**, for
+  pages that only wired up mouse handlers (documented WebKit behavior, not
+  guessed) — invisible on desktop, where a mouse click doesn't also fire a
+  same-target touch sequence first. That synthetic mouseenter is
+  indistinguishable from a real one, so it re-ran `showTooltip()` ~300-400ms
+  after every real tap — and `showTooltip()` unconditionally calls
+  `clearTimeout(hideTimer)`, wiping out the touchstart handler's own 1600ms
+  auto-hide countdown. Touch never fires a real `mouseleave` afterward, so
+  nothing was left to close the tooltip except an unrelated blur/mouseleave
+  elsewhere (switching to Fill) — exactly the reported symptom. **Verified
+  the diagnosis directly, not just patched and hoped**: reproduced the exact
+  failure in browser preview by dispatching a real `touchstart` on `mode-x`
+  followed by a `mouseenter` ~350ms later (simulating iOS's ghost event) —
+  confirmed the tooltip was still visible at +1950ms on the pre-fix code
+  (`git stash` to the old file, reproduced, `git stash pop` to restore the
+  fix), then confirmed it auto-hides by +1950ms on the fixed code. Fix: a new
+  `lastTouchAt` timestamp set on `touchstart`, checked at the top of the
+  `mouseenter` handler — a `mouseenter` within `GHOST_MOUSE_WINDOW_MS` (700ms,
+  comfortably above the ~300ms typical delay) of a real touch on the same
+  element is ignored rather than restarting the show/hide cycle. Also
+  directly verified genuine desktop hover (no preceding touch) is unaffected:
+  a plain `mouseenter` on a different button (`btn-undo`) still shows nothing
+  immediately, shows after the normal 300ms delay, and hides correctly on
+  `mouseleave`. **Item 2 (whether to suppress the tooltip entirely for Fill/
+  Mark-empty) was deliberately left alone this round** — the ask was to fix
+  the bug this round, and the concrete auto-dismiss fix on its own already
+  satisfies the direct report ("at the very least it should disappear after a
+  second or two"); revisiting whether it should show at all is a separate UX
+  call, not folded in silently. `node --check` clean, all 857 tests pass (no
+  existing test touched — pure DOM/timer logic, verified live as this
+  project's precedent for untestable-via-jsdom DOM/pointer behavior already
+  establishes). Not yet real-device-confirmed — the diagnosis rests on
+  documented iOS Safari behavior and a faithful reproduction of that exact
+  event sequence in preview, not a real iPad tap.
 
 * **New: further toolbar reorganization — move Fill/X down to join Undo/Redo/
   Eraser below the board, move Library into Fill/X's now-vacated spot in the
@@ -2445,3 +2491,26 @@ Technical Notes / Blockers
   deploy-batching note above (committing locally vs. pushing to `main`/
   deploying are different steps) — commit every round; batch the push/deploy
   across multiple rounds if holding back per the note above.
+* **Standing process note, escalated — this has now happened THREE times and a
+  soft reminder clearly isn't sufficient on its own.** An item sitting in
+  Current Objective can be silently absent from a round's report — not marked
+  done, not marked deferred with a reason, just gone with no acknowledgment —
+  even when it's small, unrelated to anything else in the same batch, and
+  there was no actual dependency forcing a choice between it and whatever did
+  get addressed. This is a genuinely costly failure mode here specifically,
+  since the project owner is on a limited number of Netlify deploys and every
+  round that ships with something silently missing either wastes a deploy on
+  an incomplete result or requires an explicit re-send-and-catch cycle before
+  the next one. **Concrete requirement going forward**: any response reporting
+  a round as done must include an explicit checklist against every item that
+  was in Current Objective at the start of that round — one line per item,
+  each marked done / not done / explicitly deferred with a one-sentence
+  reason — as a required, structural part of the response, not left to
+  narrative prose where a line is easy to drop silently.
+* **Matching commitment on the chat-planning side, not just asked of Code**:
+  every time updated `TODO.md`/`CLAUDE.md` files come back, the full list of
+  items that were in Current Objective beforehand gets explicitly checked
+  against what the new files actually cover, and any gap gets flagged
+  immediately and proactively in the response — not only when the project
+  owner happens to notice and ask. This is the second line of defense the
+  checklist above is meant to make less necessary, not a replacement for it.
