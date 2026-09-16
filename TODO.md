@@ -2633,36 +2633,52 @@ the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
 
 * **Three Current Objective items — done, unit- and preview-verified; not yet
   real-device-confirmed.**
-  - **The "1010" split bug — root-caused and fixed.** Real cause, confirmed
-    directly (not guessed): "1, 10" was never an OCR/geometry artifact — it's
-    a genuinely LEGAL candidate split under the existing structural-legality
+  - **The "1010" split bug — root-caused and fixed, then corrected a second
+    time per direct follow-up questioning.** Real cause, confirmed directly
+    (not guessed): "1, 10" was never an OCR/geometry artifact — it's a
+    genuinely LEGAL candidate split under the existing structural-legality
     filter, because `parseInt("010", 10)` silently discards the leading zero
     and returns 10, a normalization `suggestOversizedClueSplit` already
-    relies on elsewhere (see the pre-existing "034" → "3, 4" test/behavior,
-    which depends on exactly this same discarding). So "1010" legitimately
-    had TWO structurally-legal splits — clean "10, 10" and leading-zero-
-    discarding "1, 10" — and with two candidates present, the tie-break fell
-    to pixel-gap evidence, which real-world gap noise could tip either way,
-    landing on the wrong one in the reported case. Fixed by adding a
-    preference tier ahead of the gap tie-break: a split needing no
-    leading-zero digit-discarding ("10, 10") is now preferred outright over
-    one that does ("1, 10") — no gap evidence needed at all for "1010"/"2020"
-    once this preference narrows the pool to a single clean candidate.
-    Falls back to the dirty (leading-zero) candidates only when EVERY legal
-    split is dirty (still covers the pre-existing "034" case unchanged — the
-    only survivor there is dirty, so the fallback pool is exactly what it
-    always returned). `suggestOversizedClueSplit` (`src/ocrSegment.js`) now
-    tags each candidate `dirty` and filters to the clean subset when any
-    exist, before the existing gap tie-break logic (untouched otherwise). 4
-    new unit tests (`test/ocrSegment.test.js`): "1010"→"10,10" (with and
-    without line length, and with gap evidence that would have favored the
-    wrong split under the old algorithm, confirming the new preference wins
-    regardless), "2020"→"20,20", and a re-assertion that the "034"→"3,4"
-    fallback case is unaffected. All 872 tests pass. Not yet checked against
-    a real photo with a genuine "1010"-shaped OCR merge (this project's own
-    "prefer real image data" rule) — this round's evidence is direct
-    code/math analysis of the reported input plus unit coverage, not a fresh
-    scan.
+    relied on elsewhere (the pre-existing "034" → "3, 4" test/behavior
+    depended on exactly this same discarding). So "1010" legitimately had
+    TWO "legal" splits — clean "10, 10" and leading-zero-discarding "1, 10"
+    — and with two candidates present, the tie-break fell to pixel-gap
+    evidence, which real-world gap noise could tip either way, landing on
+    the wrong one in the reported case. **First pass** just deprioritized
+    leading-zero splits (preferred clean candidates, fell back to
+    leading-zero ones only when no clean candidate existed) — fixed "1010"
+    but left the underlying premise unexamined. **Corrected per direct
+    follow-up ("I don't ever recall there being a leading 0 in any column
+    or row, so why is it considered")**: traced the leading-zero acceptance
+    to its origin (`git show e60b2c4`) and confirmed it was never a
+    validated real-world case — a real printed clue number is never
+    rendered with a leading zero (see this file's own recorded ground-truth
+    clues — none have one), so `parseInt`'s leading-zero discarding was
+    accepted purely as an incidental side effect of the original
+    implementation, then locked in by a synthetic test. A split that only
+    "works" by discarding a leading digit isn't a weaker-but-real reading —
+    that digit is either OCR noise (the same phenomenon as the
+    border-bleed-hallucinated-"7" bug elsewhere in this project) or
+    evidence the split point is wrong. Fixed properly: a leading-zero side
+    is now EXCLUDED outright from the candidate pool, not merely
+    deprioritized. "1010"/"2020" resolve to "10,10"/"20,20" the same as
+    before (now via exclusion rather than preference-ordering — same
+    practical result, sounder mechanism). This DOES change the "034" case:
+    it now correctly declines (returns `null`) instead of suggesting
+    "3, 4", since neither of its two possible splits is legitimate ("0, 34"
+    fails outright — a zero-value side — and "03, 4" is now excluded for
+    its leading zero) — the old "034" → "3, 4" behavior was never backed by
+    a real OCR image and is not missed. `suggestOversizedClueSplit`
+    (`src/ocrSegment.js`) now rejects a leading-zero side inline in the
+    candidate loop, before parsing; the earlier `dirty`-tagging/preference-
+    pool machinery is gone. 3 unit tests updated/added
+    (`test/ocrSegment.test.js`): "034" now asserts `null`, and "1010"/"2020"
+    re-asserted against the new exclusion mechanism. All 871 tests pass
+    (872 minus the one test collapsed into the corrected "034" case). Not
+    yet checked against a real photo with a genuine "1010"-shaped OCR merge
+    (this project's own "prefer real image data" rule) — this round's
+    evidence is direct code/math analysis of the reported input plus unit
+    coverage, not a fresh scan.
   - **The 30×30 hint-panel/board-controls overlap — root-caused and fixed.**
     Real cause, found by direct code reading of `fitBoardToViewport`
     (`app.js`): its own `belowBoardRoot` calculation (everything stacked

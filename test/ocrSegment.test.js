@@ -318,9 +318,14 @@ describe('suggestOversizedClueSplit', () => {
     assertEqual(suggestOversizedClueSplit('1234', [10, 10, 10]), null);
   });
 
-  test('normalizes a spurious leading zero at the split point', () => {
-    const result = suggestOversizedClueSplit('034', [5, 20]);
-    assertEqual(result, { left: 3, right: 4 });
+  // Reverses the ORIGINAL implementation's incidental behavior here (see TODO.md's "1010" bug
+  // writeup): a real printed clue number is never rendered with a leading zero, so a split that
+  // only "works" by silently discarding one (parseInt("03") -> 3) isn't a weaker-but-real
+  // reading — it's evidence the split point is wrong (the "0" is OCR noise or belongs to a
+  // different split). "034" now has no legitimate split at all: "0,34" fails outright (left is
+  // zero), and "03,4" is now excluded for its leading zero, not merely deprioritized.
+  test('declines a split that would require discarding a leading zero', () => {
+    assertEqual(suggestOversizedClueSplit('034', [5, 20]), null);
   });
 
   test('rejects a split that would leave a zero-value side (an all-zero digit chunk)', () => {
@@ -377,32 +382,25 @@ describe('suggestOversizedClueSplit', () => {
   });
 
   // The "1010" bug (TODO.md): a real repeated-digit-pair merge that got offered "1, 10" instead
-  // of the obviously correct "10, 10". Root cause: "1, 010" is a structurally legal split too
-  // (parseInt discards "010"'s leading zero, same normalization the "034" test above relies on
-  // as a feature), so with two legal candidates present, gap-evidence noise alone could tip the
-  // pick toward the wrong one. Fix: a split that needs no leading-zero discarding ("10, 10") is
-  // preferred outright over one that does ("1, 10"), with no gap evidence needed at all here —
-  // both quoted below because a leading-zero split IS still real digit evidence, just weaker.
-  test('prefers the clean "10, 10" split over the leading-zero "1, 10" split for "1010"', () => {
-    // Even with gap evidence that would otherwise favor the dirty split (widest gap at the
-    // first digit boundary), the clean candidate wins because it needs no zero-discarding.
+  // of the obviously correct "10, 10". Root cause: under the OLD algorithm, "1, 010" counted as
+  // a structurally legal split too (parseInt silently discarded "010"'s leading zero), so with
+  // two "legal" candidates present, gap-evidence noise alone could tip the pick toward the wrong
+  // one. Fix: a leading-zero side is no longer accepted as a legal split at all (see the "034"
+  // test above), so "1, 010" is never a candidate in the first place — "10, 10" is the only
+  // survivor, decided with no gap evidence needed.
+  test('excludes the leading-zero "1, 10" split for "1010", leaving only the clean "10, 10"', () => {
+    // Even with gap evidence that would have favored the excluded split under the old algorithm
+    // (widest gap at the first digit boundary), it's never in the candidate pool to begin with.
     assertEqual(suggestOversizedClueSplit('1010', [20, 5, 5]), { left: 10, right: 10 });
     assertEqual(suggestOversizedClueSplit('1010', [20, 5, 5], 25), { left: 10, right: 10 });
-    // No gap evidence at all — the clean-preference rule alone still resolves it.
+    // No gap evidence at all — a single legal candidate resolves it regardless.
     assertEqual(suggestOversizedClueSplit('1010', null, 25), { left: 10, right: 10 });
   });
 
-  test('the same clean-split preference resolves "2020" to "20, 20"', () => {
-    // "202, 0" is excluded outright (a zero-value side); "2, 020" is legal but dirty; "20, 20"
-    // is the only clean candidate, so it wins without needing gap evidence.
+  test('the same leading-zero exclusion resolves "2020" to "20, 20"', () => {
+    // "202, 0" is excluded outright (a zero-value side); "2, 020" is excluded for its leading
+    // zero; "20, 20" is the only legal candidate, so it wins without needing gap evidence.
     assertEqual(suggestOversizedClueSplit('2020', [20, 5, 5]), { left: 20, right: 20 });
     assertEqual(suggestOversizedClueSplit('2020', null), { left: 20, right: 20 });
-  });
-
-  test('clean-split preference does not disturb a case where every legal candidate is dirty', () => {
-    // Same case the "normalizes a spurious leading zero" test above already covers — re-asserted
-    // here to document that the new preference pool falls back to the dirty candidates when no
-    // clean one exists, rather than over-filtering down to nothing.
-    assertEqual(suggestOversizedClueSplit('034', [5, 20]), { left: 3, right: 4 });
   });
 });
