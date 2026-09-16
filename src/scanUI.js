@@ -48,6 +48,7 @@ import {
   findRuns,
   groupGlyphsIntoNumbers,
   filterNoiseLines,
+  filterBorderBleedGlyphs,
   findRepeatedDigitOutlier,
   findOversizedClue,
   suggestOversizedClueSplit,
@@ -527,7 +528,7 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     let done = 0;
     for (let i = 0; i < rowStrips.length; i++) {
       const canvas = cropStripCanvas(rowStrips[i]);
-      const { text, geoms } = await recognizeStripSegmented(canvas);
+      const { text, geoms, hadDroppedNumber } = await recognizeStripSegmented(canvas);
       done++;
       els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
       const originalClue = parseClueText(text);
@@ -542,13 +543,14 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
         // this row was first built.
         () => state.fillMarks[i],
         originalClue,
-        geoms
+        geoms,
+        hadDroppedNumber
       );
       state.rowClueInputs.push(input);
     }
     for (let i = 0; i < colStrips.length; i++) {
       const canvas = cropStripCanvas(colStrips[i]);
-      const { text, geoms } = await recognizeStripSegmented(canvas);
+      const { text, geoms, hadDroppedNumber } = await recognizeStripSegmented(canvas);
       done++;
       els.scanOcrStatus.textContent = `Reading clue numbers… (${done} of ${total})`;
       const originalClue = parseClueText(text);
@@ -559,7 +561,8 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
         originalClue.join(', '),
         () => state.fillMarks.map((row) => row[i]),
         originalClue,
-        geoms
+        geoms,
+        hadDroppedNumber
       );
       state.colClueInputs.push(input);
     }
@@ -720,7 +723,20 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
         for (let y = y0; y <= y1; y++) if (isInk(x, y)) return true;
         return false;
       });
-      const numbers = groupGlyphsIntoNumbers(findRuns(hasInkCol));
+      // Same idea as hasInkCol above, but a fraction (0-1) rather than a boolean — how much of
+      // THIS line's own height has ink at each column, not just whether any does. See
+      // ocrSegment.js's filterBorderBleedGlyphs for why: a real digit glyph and the grid's own
+      // border line bleeding into a strip crop's edge look identical to hasInkCol (both are
+      // "ink present somewhere in this column"), but are clearly distinguishable by how MUCH of
+      // the line height each one covers.
+      const lineHeight = y1 - y0 + 1;
+      const colInkCoverage = Array.from({ length: width }, (_, x) => {
+        let count = 0;
+        for (let y = y0; y <= y1; y++) if (isInk(x, y)) count++;
+        return count / lineHeight;
+      });
+      const rawNumbers = groupGlyphsIntoNumbers(findRuns(hasInkCol));
+      const numbers = filterBorderBleedGlyphs(rawNumbers, colInkCoverage, width);
       return { y0, y1, numbers };
     });
   }
@@ -791,7 +807,11 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
       const padLeft = glyphSidePadding(n.glyphs, gi, 'left');
       const padRight = glyphSidePadding(n.glyphs, gi, 'right');
       const glyphCanvas = padCropCanvasAsym(canvas, g.start, g.end, y0, y1, padLeft, padRight, CROP_PADDING);
-      const text = await recognizeClueStrip(glyphCanvas);
+      // singleWord: true — see ocr.js's own comment on recognizeClueStrip's option; a lone
+      // glyph crop is exactly the isolated-single-token case PSM.SINGLE_WORD was confirmed
+      // against, and outright beat PSM.SINGLE_CHAR (seemingly the more obvious choice for one
+      // character) on this project's own real ground-truth failures.
+      const text = await recognizeClueStrip(glyphCanvas, { singleWord: true });
       const glyphDigit = text.replace(/\D/g, '');
       // A single glyph should read as exactly one digit; if Tesseract still returns something
       // else (empty, or more than one character) there's nothing more localized left to try —
@@ -832,14 +852,36 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   // ocrSegment.js's suggestOversizedClueSplit) needs; it does NOT survive being flattened into
   // `text` alone, so it has to be captured here, at the one point this geometry still exists,
   // and threaded through by the caller rather than re-derived later.
+  //
+  // Also returns `hadDroppedNumber`: true if any line's per-number fallback OCR (below) ever
+  // came back with nothing recognizable as a digit for a number pixel geometry had already
+  // confirmed was really there. Real, confirmed root cause of the "silently drops a digit"
+  // pattern (Current Objective — see TODO.md): dug into the actual OCR calls behind this exact
+  // failure on the real ground-truth image and found the geometry (`numbers` above) was
+  // already correct every time — the number was really there, at the position geometry said —
+  // Tesseract itself just returned empty text for that specific isolated crop (PSM.AUTO's
+  // default page-segmentation mode rejecting a lone small blob as not looking like a text
+  // block). The `singleWord` option on recognizeClueStrip (see ocr.js) fixes the large
+  // majority of these directly, confirmed against every real failing case found this round —
+  // but nothing guarantees it fixes every possible future one, so this flag exists as a
+  // fallback safety net: unlike the existing oversized-clue/repeated-digit checks (both of
+  // which only ever look at the FINAL parsed clue array, where a silently-dropped number has
+  // already left no trace it was ever there), this is captured at the one point a drop is
+  // still directly observable — right where the OCR call for a geometrically-confirmed number
+  // came back empty.
   async function recognizeStripSegmented(canvas) {
     const lines = findStripLines(canvas);
     const lineTexts = [];
     const geoms = [];
+    let hadDroppedNumber = false;
     for (const { y0, y1, numbers } of lines) {
       if (numbers.length === 0) continue;
       const lineCanvas = padCropCanvas(canvas, 0, canvas.width - 1, y0, y1);
-      const rawText = await recognizeClueStrip(lineCanvas);
+      // singleWord: true only when this line has exactly one number — see ocr.js's own
+      // comment on why an isolated single number/character needs a different PSM than a line
+      // of several numbers sharing space (every column-clue line is this case, by
+      // construction: a column stacks one number per line).
+      const rawText = await recognizeClueStrip(lineCanvas, { singleWord: numbers.length === 1 });
       const digits = rawText.replace(/\D/g, '');
       const expectedTotal = numbers.reduce((sum, n) => sum + n.glyphCount, 0);
 
@@ -859,7 +901,9 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
         const numberTexts = [];
         for (const n of numbers) {
           const numCanvas = padCropCanvas(canvas, n.start, n.end, y0, y1);
-          const text = await recognizeClueStrip(numCanvas);
+          // Always an isolated single number by construction (this crop is cropped tight to
+          // just this one number's own glyphs) — same singleWord reasoning as above.
+          const text = await recognizeClueStrip(numCanvas, { singleWord: true });
           const numDigits = text.replace(/\D/g, '');
           if (n.glyphCount > 1 && numDigits.length !== n.glyphCount) {
             const glyphText = await recognizeGlyphsIndividually(canvas, n, y0, y1);
@@ -867,16 +911,21 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
             // recognizeGlyphsIndividually can emit '?' for a glyph it couldn't read at all —
             // only trust the geometry when every glyph actually came back as a real digit.
             geoms.push(/^\d+$/.test(glyphText) ? glyphGapsFor(n) : null);
+            if (!/^\d+$/.test(glyphText)) hadDroppedNumber = true;
           } else {
             const trimmed = text.trim();
             numberTexts.push(trimmed);
             geoms.push(/^\d+$/.test(trimmed) && trimmed.length === n.glyphCount ? glyphGapsFor(n) : null);
+            // Geometry already confirmed a real number sits here (this loop only ever runs
+            // over `numbers`, i.e. confirmed glyph groups) — if OCR came back with nothing
+            // digit-shaped at all, that's a genuine drop, not just a misread.
+            if (!/\d/.test(trimmed)) hadDroppedNumber = true;
           }
         }
         lineTexts.push(numberTexts.join(' '));
       }
     }
-    return { text: lineTexts.join('\n'), geoms };
+    return { text: lineTexts.join('\n'), geoms, hadDroppedNumber };
   }
 
   // The real per-glyph pixel gaps behind one merged OCR number, left-to-right — see
@@ -909,6 +958,14 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   // "not finished yet".
   function lineLooksWrong(clue, fillLine) {
     return !isLineConsistent(fillLine, clue);
+  }
+
+  // Plain array equality — used by hadDroppedNumber's "does this still look unedited" gate in
+  // buildClueRow's refreshFlag, the same "has the player already touched this" question
+  // suggestSplitFor asks below via a length-only check; this one needs full equality since a
+  // player could edit a value without changing the count of numbers.
+  function clueArraysEqual(a, b) {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
   }
 
   // Current Objective #3's repeated-digit consistency check (see ocrSegment.js's
@@ -1019,7 +1076,13 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   // suggestOversizedClueSplit): the clue array AND the per-number glyph-gap geometry exactly
   // as first OCR'd, before any player edits — the raw evidence a later oversized-clue flag can
   // offer a real split suggestion from, rather than a guess from the merged string alone.
-  function buildClueRow(container, labelText, canvas, prefillText, getFillLine, originalClue, numberGeoms) {
+  //
+  // hadDroppedNumber (Current Objective — see TODO.md and recognizeStripSegmented's own
+  // comment): true if this line's original OCR pass ever confirmed a number was really there
+  // (via pixel geometry) but came back with no digit at all for it — a real, observed drop,
+  // not a guess. Like originalClue, this describes the ORIGINAL OCR attempt specifically, so
+  // refreshFlag below only trusts it while the field still looks unedited (see its own gate).
+  function buildClueRow(container, labelText, canvas, prefillText, getFillLine, originalClue, numberGeoms, hadDroppedNumber) {
     const row = document.createElement('div');
     row.className = 'scan-clue-row';
     const label = document.createElement('span');
@@ -1070,7 +1133,12 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
       row.classList.toggle('scan-clue-row--flagged', lineLooksWrong(clue, fillLine));
       const oversized = oversizedClueSuspect(clue, fillLine.length);
       const repeated = oversized ? null : repeatedDigitSuspect(clue);
-      row.classList.toggle('scan-clue-row--suspect', oversized !== null || repeated !== null);
+      // hadDroppedNumber describes the ORIGINAL OCR pass, not something recomputable from the
+      // current text the way oversized/repeated are — only trust it while the field still
+      // looks exactly as first OCR'd (same gate suggestSplitFor below uses for the same
+      // reason: an edit means the player has already seen and addressed whatever was here).
+      const droppedStillApplies = hadDroppedNumber && originalClue && clueArraysEqual(clue, originalClue);
+      row.classList.toggle('scan-clue-row--suspect', droppedStillApplies || oversized !== null || repeated !== null);
 
       const suggestion = oversized ? suggestSplitFor(oversized, clue) : null;
       splitBtn.classList.toggle('hidden', suggestion === null);
@@ -1083,14 +1151,16 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
         };
       }
 
-      row.title = oversized
-        ? `"${oversized.value}" is larger than this line itself (${oversized.lineLength} cells) — a single run can never be longer than its own line, so this is almost certainly two numbers merged together (e.g. "10, 11" misread as "1011").` +
-          (suggestion
-            ? ` The widest gap in the original scan suggests ${suggestion.left}, ${suggestion.right} — use the button below to try it, or edit the field directly.`
-            : ' Split it back into two numbers.')
-        : repeated
-          ? `This might have a misread digit: most numbers here read ${repeated.expectedValue}, but one reads ${repeated.suspectedValue}.`
-          : '';
+      row.title = droppedStillApplies
+        ? 'A number was detected here (from the photo\'s own layout) but couldn\'t be read at all — check this line against the photo; a number may be missing from the text above.'
+        : oversized
+          ? `"${oversized.value}" is larger than this line itself (${oversized.lineLength} cells) — a single run can never be longer than its own line, so this is almost certainly two numbers merged together (e.g. "10, 11" misread as "1011").` +
+            (suggestion
+              ? ` The widest gap in the original scan suggests ${suggestion.left}, ${suggestion.right} — use the button below to try it, or edit the field directly.`
+              : ' Split it back into two numbers.')
+          : repeated
+            ? `This might have a misread digit: most numbers here read ${repeated.expectedValue}, but one reads ${repeated.suspectedValue}.`
+            : '';
       updateLineHealthWarnings();
     }
 

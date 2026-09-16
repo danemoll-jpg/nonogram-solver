@@ -1366,9 +1366,115 @@ Completed Tasks
     `detectFillState` reads pixels from); `node --check` clean. Not yet
     real-device-confirmed.
 
-Current Objective (Focus Area)
+* **All four of last round's Current Objective items are DONE — three fixed/built and
+  preview-verified, one investigated (not fixed) per its own framing. None yet
+  real-device-confirmed.**
+  1. **Drag-Undo regression — CONFIRMED REAL, not just a preference call, via direct code
+     trace (not guessed), then fixed.** Read `app.js`'s actual pointermove/paintCell path
+     directly: every dragStep cell called `applyMoveWithSound` → `board.setBatch`
+     individually, one history entry PER PAINTED CELL, contradicting the standing comment
+     that a drag-paint batch already "undoes as one unit." Confirmed live in browser preview
+     on the pre-fix code too: a 4-cell drag, then one Undo click, left 3 of the 4 cells still
+     filled — the literal regression described.
+     - **Fix**: new `Board.recordBatch(cells, opts)` (`src/model.js`) records a set of
+       already-applied cell changes as ONE history entry without touching `grid` (the
+       caller already mutated it). `app.js`'s `paintCell` now applies every gesture step
+       live with `recordHistory:false` (real-time visuals/sound/mistake-checking completely
+       unaffected — same code paths, same behavior) while accumulating each applied cell
+       into a per-gesture `dragging.batch` Map (`mergeIntoBatch`, deduped by cell so a
+       cell touched twice in one gesture keeps its original `prev` and latest `next`);
+       `endDrag` commits the whole Map as one `recordBatch` call once the gesture is
+       genuinely over. A plain tap's batch is just one cell, so single-tap Undo behavior is
+       unchanged.
+     - **A real bug was found while building this, not just while verifying it**: `endDrag`
+       never called `syncAllCellVisuals()` after the new commit, so the Undo button's
+       `disabled` state (driven by `board.history.length === 0`) stayed stale from the last
+       mid-drag sync (when history was still empty by design) — cells painted correctly on
+       screen, but the Undo button still read disabled. Fixed by moving the
+       `syncAllCellVisuals()` call to run unconditionally at the end of `endDrag`.
+     - **Verified with real dispatched `PointerEvent` sequences in browser preview** (not
+       synthetic unit calls): a 4-cell horizontal drag, one Undo click → all 4 cells revert
+       to blank in that single click, Undo then correctly disables; one Redo click restores
+       all 4 at once; a plain single tap (no drag) still undoes in one cell per Undo click,
+       confirming no regression to existing behavior. 5 new tests in `test/model.test.js`
+       covering `Board.recordBatch` directly (records without touching grid, whole-gesture
+       undo, redo, empty-list no-op, redo-stack clearing). All 862 tests pass.
+  2. **OCR "hallucinates 7s, drops 2s" report — investigated against the real 25×25
+     ground-truth image (`scratch-images/sample-mid-solve.jpg`), per this project's own
+     established practice and this item's own framing ("confirm... rather than guessing
+     blind") — not fixed this round, deliberately, since the ask was to confirm first.**
+     Ran the actual scan wizard end-to-end in browser preview (grid detection through OCR)
+     by fetching the real file from the dev server and injecting it into
+     `#scan-file-input` via a synthetic `File`/`DataTransfer` (no manual file-picker
+     needed), then diffed the raw pre-correction OCR text against this project's own
+     recorded ground truth for this exact image.
+     - **Both reported patterns are real and reproduced**: row 4 got a spurious extra "7"
+       inserted (ground truth `3,1,1,3` → OCR read `3,1,1,7,3`), and "2" was the single
+       most commonly DROPPED digit across columns — 3 separate columns (11, 14, 15) each
+       lost a real "2" (e.g. column 11's true `1,4,3,1,2` read back as `1,4,3,1`), versus 2
+       columns (6, 23) that lost a "1" and zero columns that lost any other digit. 1 row
+       mistake + 5 column mistakes out of 50 lines total.
+     - **Neither existing safety net caught any of these** — the oversized-clue check
+       didn't fire (every misread clue is still numerically plausible for a 25-wide line),
+       and the repeated-digit "suspect" flag lit up on 4 DIFFERENT, unrelated rows
+       (15/23/24/25, all actually correct) rather than the real mistakes — so today, a
+       player would have to catch these purely by eye against the source photo.
+     - **Likely mechanism, read directly off `recognizeStripSegmented`'s own logic**
+       (`src/scanUI.js`): its fast path only trusts Tesseract's whole-line digit stream
+       when the digit COUNT matches the geometry-derived expected glyph count for that
+       line; an extra or missing digit in the final result means the pixel-level glyph-
+       blob segmentation itself over- or under-counted for these specific lines, not that
+       Tesseract read one clearly-segmented glyph as the wrong character. This points at a
+       different area of the pipeline (blob detection/grouping) than a simple "7 and 2
+       look alike to the OCR" character-confusion theory.
+     - **Deliberately scoped to investigation only** — no fix attempted, per this item's
+       own explicit framing. A real fix would need to look at the actual pixel-level glyph
+       geometry behind row 4 and columns 6/11/14/15/23 specifically (this exact image, at
+       these exact locations) to see why blob-detection miscounted there — a separate,
+       larger task than confirming the pattern was real. No code changed for this
+       investigation; all 862 tests pass (unrelated to this item, from item 1's fix above).
+  3. **X (Mark-empty) tooltip removed entirely**, per direct request answering the
+     question left open when the tooltip auto-dismiss bug was fixed. Just dropped
+     `data-tooltip="Mark empty"` from `#mode-x` in `index.html` — its `aria-label` stays
+     for screen readers, and `src/tooltip.js`'s `attachTooltip` is already a no-op without
+     that attribute, so no JS changes were needed. Verified directly: dispatching a real
+     `mouseenter` on the button produces no tooltip bubble at all (not even a transient
+     one); Eraser's own tooltip (a different button, unaffected) still shows correctly;
+     mode toggling still works.
+  4. **New tap-mismatch diagnostic tool** (`initTapDiagnostics`, `app.js`) — built per this
+     item's own recommendation, the same "gate behind a URL flag, log real events for the
+     project owner to capture off their own device" approach that eventually cracked the
+     scroll bug. Gated behind `?debug=taps` (a different flag from `?debug=scroll`, so the
+     two tools' floating panels can never both be on screen — new `.tap-diag-btn`/
+     `.tap-diag-panel` CSS classes mirror `.scroll-diag-btn`/`.scroll-diag-panel`'s shape,
+     anchored bottom-LEFT instead of bottom-right). Deliberately purely observational —
+     every call site only ever calls `tapDiag.log(...)`, never changes what mark gets
+     applied. Logs, per gesture: a pointerdown that misses every `.nono-cell` entirely
+     (the touch-target-imprecision hypothesis — what it actually hit instead, e.g. a grid
+     line), the mode/cell-state/decision made at pointerdown including the opposite-mark
+     tap-to-erase deferred-clear case by name (the tap-to-erase-confusion hypothesis), the
+     gesture's actual final committed cells at pointerup (tying the decision to what
+     really landed), and any mistake charged (`onCellChanged`) so a real mismatch report
+     shows the full chain from tap to charge. Verified end-to-end with real dispatched
+     pointer events in browser preview: a miss, a plain fill tap, an X-mode opposite-mark
+     deferred-clear tap, and a 4-cell drag (reusing item 1's own test sequence) all
+     produced correct, readable log lines matching the real DOM state; "Copy log"/"Clear
+     log"/"Close" all work; the button/panel are completely absent with no `?debug` flag
+     at all (confirmed alongside `?debug=scroll`'s own button, neither present by
+     default). Not yet used for a real on-device capture — needs the actual mismatch to
+     recur with this flag on to produce a usable report; that's the next step whenever it
+     next happens.
 
-* **New feature idea, to build AFTER the "1410" bug below is actually fixed,
+**No current objective is queued right now.**
+
+* **ON HOLD, per the project owner directly — not being built right now.** The
+  "1410" bug (below) is fixed, and a real scan since then confirmed the
+  single-suggestion approach works correctly in practice. Rather than build
+  the multi-candidate extension immediately, the project owner wants to see
+  how the single-suggestion approach holds up across more real use first —
+  revisit only if that turns out to be insufficient, not as a default next
+  step. Original idea, unchanged, for whenever it's picked back up:
+* **Feature idea, to build AFTER the "1410" bug below is actually fixed,
   not alongside it: for genuinely ambiguous merged numbers, offer MULTIPLE
   candidate split buttons instead of just one.** Direct example, explicitly
   acknowledged as unlikely to occur in practice but illustrative: "123" could
@@ -1499,6 +1605,15 @@ Current Objective (Focus Area)
     candidate buttons for genuine ambiguity) was deliberately NOT started
     this round**, per the standing instruction to fix this known-broken
     single-guess case first rather than build on top of it.
+  - **Real-world confirmation from actual use**: the project owner's next real
+    scan produced a genuine merged-number case and the single-suggestion
+    button correctly handled it, matching the earlier synthetic verification.
+    **The multi-candidate-buttons feature is deliberately ON HOLD for now**
+    — the project owner wants to see how the single-suggestion approach
+    performs across more real use before deciding whether the added
+    complexity of multiple candidates is actually needed. Not being built
+    right now; revisit only if single-suggestion proves insufficient in
+    practice.
 
 * **RE-SENDING — not touched last round despite being queued alongside the
   "1410" fix, and there was no actual dependency between them (the "fix this
@@ -1567,9 +1682,9 @@ Current Objective (Focus Area)
   call, not folded in silently. `node --check` clean, all 857 tests pass (no
   existing test touched — pure DOM/timer logic, verified live as this
   project's precedent for untestable-via-jsdom DOM/pointer behavior already
-  establishes). Not yet real-device-confirmed — the diagnosis rests on
-  documented iOS Safari behavior and a faithful reproduction of that exact
-  event sequence in preview, not a real iPad tap.
+  establishes). **CONFIRMED on the real device by the project owner** — the
+  ghost-mouse-event diagnosis holds up on an actual iPad tap, not just the
+  simulated event sequence in preview.
 
 * **New: further toolbar reorganization — move Fill/X down to join Undo/Redo/
   Eraser below the board, move Library into Fill/X's now-vacated spot in the
@@ -2403,6 +2518,122 @@ the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
     itself, but it would finally make it possible to reliably CONFIRM the
     height-diverged state is actually occurring and capture its exact timing,
     which is the prerequisite every attempt so far has been missing.
+
+* **OCR "hallucinates 7s, drops 2s" pattern — root-caused for real (not the
+  speculative "blob-counting" mechanism last round guessed at) and fixed;
+  verified end-to-end against the real scan wizard and the real 25×25
+  ground-truth image, not a guess.** Built a standalone pixel-geometry
+  harness (loading `sample-mid-solve.jpg` directly, calling the same
+  exported `gridDetect.js`/`ocrSegment.js` functions the real wizard uses)
+  to inspect the actual glyph geometry and actual Tesseract output behind
+  row 4 and columns 6/11/14/15/23 — the exact lines last round confirmed
+  were wrong. This directly disproved last round's own "likely mechanism"
+  guess and found two DIFFERENT real bugs, one for each symptom:
+  - **The extra "7" (row 4: "3,1,1,3" → "3,1,1,7,3") — the grid's own
+    border line, not a miscounted blob.** Row 4's strip crop right edge
+    sits next to the grid's own left border; `STRIP_MARGIN_PX` (a few px
+    of margin added to every strip crop so real digit ink isn't starved of
+    OCR padding — see its own comment) is just enough, on this real photo,
+    to also pull in a sliver of that border stroke. Confirmed by direct
+    pixel inspection: this sliver renders as a solid vertical bar spanning
+    ~100% of the line's own height, while every genuine digit in the same
+    line measured only 61-68% coverage (digits have curves/counters/gaps;
+    a border stroke doesn't) — a clean, well-separated signal with real
+    measured margin on both sides, not a knife-edge threshold.
+    `groupGlyphsIntoNumbers` had no way to know this isolated blob wasn't a
+    digit, so it became its own "clue number," and — confirmed directly by
+    OCRing the actual crop — Tesseract genuinely read that solid vertical
+    stroke back as a real "7" character once digit-whitelisted, reproducing
+    the exact reported symptom. **Fix**: new `filterBorderBleedGlyphs`
+    (`src/ocrSegment.js`) discards any lone (`glyphCount === 1`) detected
+    glyph that BOTH touches the strip crop's own outer edge AND covers
+    ≥90% of its line's height — comfortably outside the real measured range
+    of every genuine digit tested. Deliberately a different, more specific
+    signal than the "does a glyph touch its own crop edge" check this
+    project already tried and dropped (see `findStripLines`'s own
+    comment) — that one only checked the TOP edge and fired on nearly every
+    row (row-clue text renders top-anchored, so genuine text already
+    touches it); this one checks the edge the numbers are actually laid out
+    along AND requires near-total height coverage on top of that, a
+    combination no real digit in this project's own ground-truth data ever
+    produces. 8 new unit tests (`test/ocrSegment.test.js`), using the real
+    measured coverage values from this exact image.
+  - **The dropped "2"s and "1"s (columns 6, 11, 14, 15, 23) — Tesseract
+    failing outright on an isolated single-digit crop, not a geometry
+    miscount at all.** Direct inspection (this round's harness, then
+    confirmed against the real Tesseract worker) showed the glyph/line
+    geometry was ALREADY CORRECT in every one of these columns — the right
+    number of numbers, at the right positions, every time. The actual
+    failure: Tesseract's default page-segmentation mode (`PSM.AUTO`, tuned
+    for a page/block of normal text) returned completely empty text for the
+    crop behind a real, perfectly legible digit — and since EVERY
+    column-clue line is, by construction, exactly one isolated number (a
+    column stacks one number per line, unlike a row which shares a line
+    across several numbers), this isolated-crop weakness — already known
+    and documented elsewhere in this file, in `recognizeGlyphsIndividually`'s
+    own top comment — turned out to apply to the entire column-clue OCR
+    path by default, not just as a rare last-resort fallback. A silently-
+    empty OCR result for a single-glyph line has no fallback beneath it (the
+    per-glyph tier only exists for MULTI-digit numbers), so it was joined in
+    as an empty string and vanished from the final clue with no trace.
+    **Fix, confirmed directly against the real failing crops before
+    shipping**: tried `PSM.SINGLE_CHAR` (seemingly the more obvious choice
+    for one digit) and `PSM.SINGLE_WORD` side by side against every real
+    failing crop from this image — `SINGLE_WORD` correctly read every single
+    one (20/20 digit-lines tested, across both previously-failing and
+    previously-working cases), including several where `SINGLE_CHAR` STILL
+    came back empty. New `singleWord` option on `recognizeClueStrip`
+    (`src/ocr.js`), applied to: the per-number OCR call in
+    `recognizeStripSegmented`'s slow path (always an isolated number by
+    construction), the per-glyph fallback in `recognizeGlyphsIndividually`
+    (replacing an implicit `PSM.AUTO` there too — same isolated-crop
+    problem, one glyph at a time), and the whole-line fast-path call
+    specifically when a line has exactly one number (every column-clue
+    line). Deliberately NOT applied to a multi-number whole-line call (a
+    typical row clue like "3, 1, 1, 3") — that path already works correctly
+    with genuine multi-token context, which is exactly what `PSM.AUTO` is
+    suited for; no evidence it needed changing, so left untouched. Resets
+    back to `PSM.AUTO` after each single-word call so the shared,
+    session-long Tesseract worker doesn't stay stuck in single-word mode
+    for later multi-number lines.
+  - **Also directly answers this round's other ask — whether the existing
+    oversized-clue/repeated-digit safety nets should be tightened.** Neither
+    was tightened, because neither COULD ever have caught a silently-dropped
+    number: both only ever look at the FINAL parsed clue array, where a
+    dropped number has already left no trace it was ever there. Added a
+    genuinely new, complementary safety net instead:
+    `recognizeStripSegmented` now also returns `hadDroppedNumber` — true if
+    any line's OCR ever came back with no digit at all for a number pixel
+    geometry had already confirmed was really there, captured at the one
+    point a drop is still directly observable (right where the OCR call
+    failed), not reconstructed after the fact. Surfaced through the same
+    amber "suspect" mechanism as the two existing checks, with its own
+    specific message; like `originalClue`'s split-suggestion gate, only
+    trusted while the field still looks exactly as first OCR'd — an edit
+    means the player has already seen and addressed it.
+  - **Verified end-to-end, twice.** First, a standalone harness confirmed
+    the row-4 border-bleed geometry and coverage numbers by direct pixel
+    inspection, and confirmed the PSM hypothesis against the real failing
+    crops via the real Tesseract worker before writing any production
+    code. Then, after shipping the fix, ran the ACTUAL scan wizard
+    end-to-end in browser preview against the real 25×25 ground-truth image
+    (`scratch-images/sample-mid-solve.jpg`, injected via a synthetic
+    `File`/`DataTransfer`, same technique the original investigation used) —
+    **every single one of the 25 row clues and 25 column clues came back
+    reading EXACTLY the confirmed ground truth, zero mismatches**,
+    including row 4 ("3, 1, 1, 3", no phantom "7") and all five previously
+    digit-dropping columns (6, 11, 14, 15, 23). The only `--flagged` lines
+    afterward (rows 15, 23, 24, 25) are the exact same pre-existing,
+    already-documented fill-state false positives from a separate,
+    unrelated subsystem (`isLineConsistent`/fill detection, not clue-text
+    OCR) that last round's investigation also saw and traced — confirming
+    nothing else changed. All 869 tests pass (7 new). Not yet
+    real-device-confirmed — this round's verification was preview-only,
+    same status as most other scan-wizard work in this project.
+
+Current Objective (Focus Area)
+
+**No current objective is queued right now.**
 
 Next Steps (Do Not Start Yet)
 

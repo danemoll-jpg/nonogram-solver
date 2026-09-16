@@ -1788,3 +1788,76 @@ body {
   justify-content: center;
   flex-shrink: 0;
 }
+
+/* Tap-mismatch diagnostics (Current Objective — see app.js's initTapDiagnostics comment for
+   why this exists). Same floating button + panel shape as .scroll-diag-btn/.scroll-diag-panel
+   above (a different, unrelated debug tool), just anchored bottom-LEFT instead of bottom-right
+   — `?debug=scroll` and `?debug=taps` are mutually exclusive (one URL, one `debug` value), but
+   keeping the two tools' fixed positions distinct means they'd never visually collide even if
+   that ever changed. */
+.tap-diag-btn {
+  position: fixed;
+  bottom: 0.5rem;
+  left: 0.5rem;
+  z-index: 99999;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  border: 2px solid var(--gold);
+  background: var(--panel-bg-raised);
+  color: var(--text);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.4);
+}
+
+.tap-diag-panel {
+  position: fixed;
+  bottom: 0.5rem;
+  left: 0.5rem;
+  right: 0.5rem;
+  max-height: min(80vh, 80dvh);
+  z-index: 99998;
+  background: var(--panel-bg-raised);
+  border: 2px solid var(--gold);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.5);
+}
+
+.tap-diag-panel__heading {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.tap-diag-panel__text {
+  flex: 1;
+  min-height: 4rem;
+  margin: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.tap-diag-panel__actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  flex-shrink: 0;
+}

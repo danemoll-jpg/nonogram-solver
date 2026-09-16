@@ -3,6 +3,7 @@ import {
   findRuns,
   groupGlyphsIntoNumbers,
   filterNoiseLines,
+  filterBorderBleedGlyphs,
   findRepeatedDigitOutlier,
   findOversizedClue,
   suggestOversizedClueSplit,
@@ -130,6 +131,76 @@ describe('groupGlyphsIntoNumbers', () => {
     assertEqual(groupGlyphsIntoNumbers([{ start: 5, end: 12 }]), [
       { start: 5, end: 12, glyphCount: 1, glyphs: [{ start: 5, end: 12 }] },
     ]);
+  });
+});
+
+describe('filterBorderBleedGlyphs', () => {
+  // Real measurements taken directly from the real 25x25 ground-truth image's own row 4 clue
+  // strip (see TODO.md's Current Objective writeup): canvas width 278px, four genuine digit
+  // glyphs ("3,1,1,3") each covering 61-68% of the line's own height, plus a fifth "glyph" at
+  // x=[275,277] — the grid's own left border line bleeding into the strip crop's right edge —
+  // covering 100% of the line's height and sitting flush against the crop's own right edge.
+  // This exact geometry, fed to Tesseract unfiltered, read back as "3,1,1,7,3": the real bug
+  // this function exists to catch before OCR ever sees it.
+  function coverageArray(width, entries) {
+    const arr = new Array(width).fill(0);
+    for (const [start, end, value] of entries) for (let x = start; x <= end; x++) arr[x] = value;
+    return arr;
+  }
+
+  test('drops a full-height glyph flush against the crop edge (the real row-4 border-bleed case)', () => {
+    const numbers = [
+      { start: 88, end: 107, glyphCount: 1, glyphs: [{ start: 88, end: 107 }] }, // "3"
+      { start: 133, end: 145, glyphCount: 1, glyphs: [{ start: 133, end: 145 }] }, // "1"
+      { start: 179, end: 191, glyphCount: 1, glyphs: [{ start: 179, end: 191 }] }, // "1"
+      { start: 225, end: 244, glyphCount: 1, glyphs: [{ start: 225, end: 244 }] }, // "3"
+      { start: 275, end: 277, glyphCount: 1, glyphs: [{ start: 275, end: 277 }] }, // border bleed
+    ];
+    const coverage = coverageArray(278, [
+      [88, 107, 0.673], [133, 145, 0.673], [179, 191, 0.673], [225, 244, 0.673], [275, 277, 1.0],
+    ]);
+    assertEqual(filterBorderBleedGlyphs(numbers, coverage, 278), numbers.slice(0, 4));
+  });
+
+  test('keeps a real digit even at typical ~65% coverage, well clear of the threshold', () => {
+    const numbers = [{ start: 10, end: 30, glyphCount: 1, glyphs: [{ start: 10, end: 30 }] }];
+    const coverage = coverageArray(50, [[10, 30, 0.68]]);
+    assertEqual(filterBorderBleedGlyphs(numbers, coverage, 50), numbers);
+  });
+
+  test('keeps a full-height glyph that does NOT touch either crop edge — coverage alone is not enough', () => {
+    const numbers = [{ start: 20, end: 30, glyphCount: 1, glyphs: [{ start: 20, end: 30 }] }];
+    const coverage = coverageArray(100, [[20, 30, 1.0]]);
+    assertEqual(filterBorderBleedGlyphs(numbers, coverage, 100), numbers);
+  });
+
+  test('keeps an edge-touching glyph with ordinary digit coverage — edge alone is not enough', () => {
+    const numbers = [{ start: 0, end: 12, glyphCount: 1, glyphs: [{ start: 0, end: 12 }] }];
+    const coverage = coverageArray(50, [[0, 12, 0.65]]);
+    assertEqual(filterBorderBleedGlyphs(numbers, coverage, 50), numbers);
+  });
+
+  test('never discards a multi-glyph number, even if somehow edge-touching and full-coverage', () => {
+    const numbers = [
+      { start: 0, end: 20, glyphCount: 2, glyphs: [{ start: 0, end: 8 }, { start: 12, end: 20 }] },
+    ];
+    const coverage = coverageArray(30, [[0, 20, 1.0]]);
+    assertEqual(filterBorderBleedGlyphs(numbers, coverage, 30), numbers);
+  });
+
+  test('an empty numbers list stays empty', () => {
+    assertEqual(filterBorderBleedGlyphs([], [], 50), []);
+  });
+
+  test('a column-strip glyph (always full-height by construction, since its line band is fit exactly to it) survives when it does not also touch the crop edge', () => {
+    // Real column-clue glyphs (see this project's own real ground-truth column strips) are
+    // always ~100% coverage — their own line band IS their own ink extent — which is exactly
+    // why edge-touching is required as a SECOND, independent condition rather than relying on
+    // coverage alone: real column digits normally sit with real crop margin on both sides
+    // (STRIP_MARGIN_PX plus CROP_PADDING), not flush against the edge.
+    const numbers = [{ start: 16, end: 27, glyphCount: 1, glyphs: [{ start: 16, end: 27 }] }];
+    const coverage = coverageArray(52, [[16, 27, 1.0]]);
+    assertEqual(filterBorderBleedGlyphs(numbers, coverage, 52), numbers);
   });
 });
 

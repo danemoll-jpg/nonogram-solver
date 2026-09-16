@@ -176,6 +176,19 @@ export class Board {
     return applied;
   }
 
+  // Record a set of cell changes that were already applied to `grid` (via set/setBatch with
+  // recordHistory:false) as one atomic history entry — does NOT touch `grid` itself, since
+  // the caller already mutated it. Used by app.js to collapse a whole drag gesture (many
+  // individual paints, each applied live for real-time visuals/sound/mistake-checking) into
+  // a single undo/redo unit, the same way a hint/auto-X batch already is (see class comment)
+  // — see TODO.md's Current Objective for why per-drag-step setBatch calls couldn't do this
+  // on their own: each one is its own history entry regardless of how the caller uses it.
+  recordBatch(cells, { source = 'player', clearRedo = true } = {}) {
+    if (cells.length === 0 || !this.hasHistory) return;
+    this.history.push({ cells: cells.map((c) => ({ ...c })), source });
+    if (clearRedo) this.redoStack = [];
+  }
+
   getRow(r) { return getRow(this.grid, r); }
   getCol(c) { return getCol(this.grid, c); }
 

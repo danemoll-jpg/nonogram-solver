@@ -110,6 +110,71 @@ export function groupGlyphsIntoNumbers(
   return groups;
 }
 
+// ---- border-bleed glyph filter (Current Objective — see TODO.md) ---------------------
+
+// Real, confirmed root cause of the "hallucinates a spurious digit" pattern (the "7" in a
+// "3,1,1,3" row read back as "3,1,1,7,3"): dug into the actual glyph geometry behind this
+// exact failure on the real 25x25 ground-truth image (see TODO.md) and found it's the grid's
+// own border line, not a misread digit at all. A row-clue strip crop's right edge sits right
+// next to the grid's own left border; STRIP_MARGIN_PX (scanUI.js) adds a few px of margin on
+// every side of every strip crop (needed so real digit ink already touching its own slice
+// boundary isn't starved of OCR padding — see that constant's own comment), and that same
+// margin is just enough, on this image, to also pull in a sliver of the grid's own border
+// stroke. `groupGlyphsIntoNumbers` has no way to know that one particular ink column-run isn't
+// a digit — it just sees "an isolated blob more than DEFAULT_MAX_SAME_NUMBER_GAP away from its
+// neighbor" and (correctly, given only that evidence) treats it as its own clue number, which
+// then gets handed to OCR and — as measured directly against this real image — actually read
+// back as a genuine "7" character (a solid vertical stroke is a plausible glyph shape to
+// misclassify once digit-whitelisted).
+//
+// Measured directly against the real image (see TODO.md): every genuine digit glyph in this
+// puzzle's row-clue strips has ink across 61-68% of its own line's height (digits have curves/
+// counters/gaps — no real digit fills its own text line edge-to-edge); the border-line
+// artifact measured 100% coverage, every single row of the strip's height, both times it
+// showed up (rows 1 and 6, this project's own real ground-truth image). It also always sits
+// with its own right edge at (or within 1px of) the crop's own right edge, since it's bleed
+// from OUTSIDE the intended crop, not real content drawn within it. No genuine digit in any of
+// the ground-truth lines checked came anywhere close to either signal alone, let alone both at
+// once — this is why both are required together (a real digit that happens to render flush
+// against a line's own right-hand crop boundary, if that combination is ever possible, would
+// still show the normal ~65% coverage, not 100%).
+//
+// Deliberately different from the "does a glyph touch its own crop's edge" truncation signal
+// this project already tried and DROPPED (see scanUI.js's findStripLines comment and CLAUDE.md):
+// that idea only checked the TOP edge and fired on nearly every row (row-clue text renders
+// top-anchored in this app, so genuinely correct text already touches that edge) — a signal
+// that flags almost everything isn't useful. This one checks the RIGHT edge (the axis clue
+// numbers are actually laid out along) AND requires near-total height coverage on top of that,
+// a combination no genuine digit in this project's own real ground-truth data ever produces.
+const BORDER_BLEED_MIN_COVERAGE = 0.9;
+const BORDER_BLEED_EDGE_MARGIN = 2;
+
+// `numbers` is groupGlyphsIntoNumbers' own output for one text line. `colInkCoverage` is a
+// plain array, one entry per pixel column of that same line's crop, giving the FRACTION (0-1)
+// of that line's own height with ink present at that column — a numeric generalization of the
+// boolean `hasInkCol` findStripLines already computes (scanUI.js is the one place with real
+// pixel access to build it; this function stays pure/DOM-free per this module's own rule).
+// `canvasWidth` is the full strip crop's width, needed to test "touches the crop's own edge".
+// Only ever filters a lone glyph (glyphCount === 1) — the border-bleed artifact this exists to
+// catch has always been observed as its own isolated blob, never merged with a real digit's
+// glyph (see the module comment above); a real multi-glyph NUMBER is never at risk of being
+// discarded whole by this check.
+export function filterBorderBleedGlyphs(
+  numbers,
+  colInkCoverage,
+  canvasWidth,
+  { minCoverage = BORDER_BLEED_MIN_COVERAGE, edgeMargin = BORDER_BLEED_EDGE_MARGIN } = {}
+) {
+  return numbers.filter((n) => {
+    if (n.glyphCount !== 1) return true;
+    const touchesEdge = n.start <= edgeMargin || n.end >= canvasWidth - 1 - edgeMargin;
+    if (!touchesEdge) return true;
+    let maxCoverage = 0;
+    for (let x = n.start; x <= n.end; x++) maxCoverage = Math.max(maxCoverage, colInkCoverage[x]);
+    return maxCoverage < minCoverage;
+  });
+}
+
 // ---- repeated-digit consistency check (Current Objective — see TODO.md) ---------------
 
 // Minimum number of matching single-digit clue numbers required before a differing one among

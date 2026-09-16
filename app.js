@@ -68,6 +68,14 @@ let hintsUsedFloor = 0;
 // of the solver-facing data model (see withAutoXTracked / revertUnsatisfiedLines below).
 let autoXCells = new Set();
 
+// Current Objective (TODO.md item 4) — set once by initTapDiagnostics() (bottom of file) if
+// `?debug=taps` is present in the URL, else stays null; every real tap/mark call site below
+// checks `tapDiag?.log(...)` so the cost is a single null-check per event when the flag is
+// absent. Same "gate behind a URL flag, log real events for the project owner to capture off
+// their own device" shape as the existing `?debug=scroll` tooling — see initTapDiagnostics'
+// own header comment for why a diagnostic-logging approach was chosen over guessing further.
+let tapDiag = null;
+
 const cellEls = new Map(); // "r,c" -> element
 const rowClueEls = [];
 const colClueEls = [];
@@ -1318,8 +1326,9 @@ function applyUnfillWithSound(r, c, opts) {
 //
 // Distinct from the mistake-driven "back up to move #N" flow above (runOnDemandCheck): this
 // steps back exactly one move at a time, on demand, with no need to run a mistake check
-// first. "One move" already matches this app's history-batching unit (Board.setBatch) — a
-// drag-paint or a hint/auto-X batch undoes as one unit — so Board.undoLast() (model.js),
+// first. "One move" already matches this app's history-batching unit (Board.setBatch, or
+// Board.recordBatch for a whole drag gesture — see TODO.md's Current Objective) — a drag-paint
+// or a hint/auto-X batch undoes as one unit — so Board.undoLast() (model.js),
 // which just calls undoToMove(history.length - 1), is exactly the right primitive; no new
 // undo logic needed in model.js. Repeatable simply by not disabling itself after one use —
 // syncAllCellVisuals disables the button only once board.history is genuinely empty (either
@@ -1389,9 +1398,38 @@ function hideDragCountBadge() {
 }
 
 function attachPointerHandlers(grid) {
-  let dragging = null; // { paintState, touched: Set<string>, count: number, pendingClearEl }
+  let dragging = null; // { paintState, touched: Set<string>, count: number, pendingClearEl, batch }
 
   grid.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // Current Objective (TODO.md item 1) — a whole press/drag gesture is one history entry, not
+  // one per cell. Every paintCell call during a gesture applies its change live (recordHistory:
+  // false — see below) but only *accumulates* into dragging.batch; endDrag() commits the whole
+  // batch as a single Board.recordBatch call once the gesture is over. This was previously
+  // assumed already-true ("a drag-paint batch... undoes as one unit, same as undo-to-point
+  // already treats these" — see the old Redo comment this replaces), but wasn't: each dragStep
+  // call went through its own separate board.setBatch, so Undo right after a drag only reverted
+  // the single most-recently-painted cell. Confirmed as a genuine regression from the intended
+  // design, not a preference call, via direct code trace — see TODO.md for the full writeup.
+  //
+  // A plain tap (no real drag) still ends up as a batch of exactly one cell, so its behavior is
+  // unchanged from before this fix.
+  function mergeIntoBatch(batch, applied) {
+    for (const cell of applied) {
+      const key = `${cell.row},${cell.col}`;
+      const existing = batch.get(key);
+      // Keep the ORIGINAL prev (the state before this gesture touched the cell at all) but the
+      // LATEST next/auto — the only way a gesture can revisit the same cell is auto-X extras
+      // being recomputed across steps (see computeAutoXExtras), never the drag's own swept path
+      // (dragging.touched already dedupes that at the call site).
+      if (existing) {
+        existing.next = cell.next;
+        existing.auto = cell.auto;
+      } else {
+        batch.set(key, { ...cell });
+      }
+    }
+  }
 
   // One user press/drag-step is one move: the pressed cell's mark plus any auto-X cells it
   // triggers are batched into a single history entry (see Board.setBatch) so undo-to-point
@@ -1440,10 +1478,15 @@ function attachPointerHandlers(grid) {
     const isUnfill = current !== UNKNOWN && state === UNKNOWN;
     if (!isUnfill && (rowLockedNow(r) || colLockedNow(c))) return false;
 
+    // recordHistory:false — see this section's header comment. The change is still applied to
+    // the live grid immediately (real-time visuals/sound/mistake-checking, all unaffected by
+    // this), just not pushed to board.history yet; dragging.batch accumulates it instead, for
+    // endDrag() to commit as one entry.
     const applied = isUnfill
-      ? applyUnfillWithSound(r, c, undefined)
-      : applyMoveWithSound([{ row: r, col: c, state }], undefined);
+      ? applyUnfillWithSound(r, c, { recordHistory: false })
+      : applyMoveWithSound([{ row: r, col: c, state }], { recordHistory: false });
     if (applied.length === 0) return false;
+    mergeIntoBatch(dragging.batch, applied);
     for (const cell of applied) {
       const cellEl = cellEls.get(`${cell.row},${cell.col}`);
       cellEl.classList.toggle('filled', cell.next === FILLED);
@@ -1487,6 +1530,16 @@ function attachPointerHandlers(grid) {
 
   grid.addEventListener('pointerdown', (e) => {
     const el = e.target.closest('.nono-cell');
+    // Current Objective (TODO.md item 4) — logged BEFORE the early return below, specifically
+    // to catch the "touch-target imprecision" hypothesis: a tap that misses every .nono-cell
+    // entirely (lands on a grid line, border, or clue label) produces no mark and no mistake,
+    // but the player may still perceive it as a tap that "didn't register."
+    if (tapDiag && !el) {
+      tapDiag.log(
+        `pointerdown MISSED — no .nono-cell under (${Math.round(e.clientX)},${Math.round(e.clientY)}), ` +
+        `actual target=${e.target?.tagName?.toLowerCase() || '?'}${e.target?.className ? `.${String(e.target.className).replace(/\s+/g, '.')}` : ''}`
+      );
+    }
     if (!el) return;
     e.preventDefault();
     clearHighlights();
@@ -1511,6 +1564,16 @@ function attachPointerHandlers(grid) {
     // unaffected, still applied immediately exactly as before.
     const deferClear = activeMode !== 'erase' && current === paintState;
     const newState = deferClear ? current : targetStateFor(current);
+    // Current Objective (TODO.md item 4) — the other hypothesis under test: the opposite-mark
+    // tap-to-erase behavior (targetStateFor) meaning a tap on a cell already carrying a mark
+    // clears it rather than applying the new mode's mark. deferClear=true is the specific case
+    // most likely to surprise a player expecting their tap to place a mark outright.
+    if (tapDiag) {
+      tapDiag.log(
+        `pointerdown at (${r},${c}) mode=${activeMode} cellState=${current} → ` +
+        `${deferClear ? `deferred clear (opposite-mark tap-to-erase; resolves at pointerup if no drag follows)` : `target=${newState}`}`
+      );
+    }
     dragging = {
       paintState,
       touched: new Set([`${r},${c}`]),
@@ -1527,6 +1590,9 @@ function attachPointerHandlers(grid) {
       startClientY: e.clientY,
       lockAxis: null, // 'row' (horizontal drag, row fixed, col varies) | 'col' (vertical, col fixed) | null
       pendingClearEl: deferClear ? el : null,
+      // Current Objective (TODO.md item 1): accumulates every cell this whole gesture applies
+      // (this press plus any drag steps), keyed by "row,col" — see mergeIntoBatch and endDrag.
+      batch: new Map(),
     };
     const changed = deferClear ? false : paintCell(el, newState);
     // Only show/count for a genuine fill or X paint — not a plain click-to-clear (newState
@@ -1615,16 +1681,39 @@ function attachPointerHandlers(grid) {
   });
 
   function endDrag() {
+    const wasDrag = dragging?.lockAxis != null;
+    const hadPendingClear = !!dragging?.pendingClearEl;
     if (dragging?.pendingClearEl) {
       // Current Objective (TODO.md item 1): axis-lock never engaged during this gesture — it
       // was a plain tap, not a drag — so the deferred same-state toggle-to-clear applies after
       // all, exactly as a plain tap always has (see pointerdown).
       paintCell(dragging.pendingClearEl, UNKNOWN);
-      syncAllCellVisuals();
+    }
+    // Current Objective (TODO.md item 4): the actual final outcome of the whole gesture (after
+    // the pendingClear resolution above, so this reflects what really landed, not an
+    // intermediate state) — ties back to the pointerdown decision line above via matching
+    // (row,col) entries, so a real report shows both "what was decided" and "what actually
+    // landed on the board."
+    if (tapDiag && dragging) {
+      const committed = Array.from(dragging.batch.values())
+        .map((cell) => `(${cell.row},${cell.col}):${cell.prev}→${cell.next}${cell.auto ? '[auto]' : ''}`)
+        .join(', ') || '(none)';
+      tapDiag.log(`pointerup — wasDrag=${wasDrag} resolvedPendingClear=${hadPendingClear} committed=[${committed}]`);
+    }
+    // Current Objective (TODO.md item 1): commit this whole gesture's accumulated cells as one
+    // history entry now that it's genuinely over — see mergeIntoBatch's header comment. A plain
+    // tap's batch has exactly one cell, so this is a no-op behavior change for that case. Every
+    // paint during the gesture ran with recordHistory:false (board.history untouched, so e.g.
+    // the Undo button's disabled state went stale mid-drag) — syncAllCellVisuals() below, always
+    // called now regardless of which branch above ran, is what catches it back up.
+    if (dragging?.batch.size > 0) {
+      board.recordBatch(Array.from(dragging.batch.values()), { source: 'player' });
+      autoXCells = deriveAutoXCells(board.history);
     }
     dragging = null;
     hideDragCountBadge(); // transient in-stroke feedback only — see this section's header comment
     clearCrosshairHighlight();
+    syncAllCellVisuals();
   }
   grid.addEventListener('pointerup', endDrag);
   grid.addEventListener('pointercancel', endDrag);
@@ -1634,6 +1723,10 @@ function onCellChanged(r, c) {
   if (autoCheckEnabled && puzzle.solution) {
     const mistake = autoCheckMark(board, puzzle.solution, r, c);
     if (mistake) {
+      // Current Objective (TODO.md item 4): the actual signal this diagnostic tool exists to
+      // catch — a mistake charged on a cell, tied back to whichever pointerdown/pointerup lines
+      // immediately precede it in the same history log.
+      if (tapDiag) tapDiag.log(`MISTAKE CHARGED at (${r},${c}) — board=${board.get(r, c)}`);
       playSound('error'); // shared with the contradiction (red clue) trigger — see syncAllCellVisuals
       highlightDeduction(mistake);
       showMistakePopup(mistake);
@@ -3165,3 +3258,96 @@ function initScrollDiagnostics() {
   logHistory('page load');
 }
 initScrollDiagnostics();
+
+// ---- tap-mismatch diagnostics (Current Objective — see TODO.md item 4) ----
+//
+// Real report: "I think I select the fill in or the X but for some reason I didn't and get
+// charged a mistake." Genuinely uncertain root cause, with two live hypotheses — touch-target
+// imprecision (a tap landing on the wrong adjacent cell, or missing every cell entirely) and
+// the recent opposite-mark tap-to-erase behavior not being obvious enough (a tap on a cell
+// already carrying the OPPOSITE mark clears it rather than applying the new mark, so a player
+// expecting their tap to place a mark could walk away thinking they had, when the cell is
+// actually still UNKNOWN or now holds something they didn't intend). Rather than guess further,
+// this instruments the real event path with the same "gate behind a URL flag, log real events
+// for the project owner to capture off their own device" approach that eventually cracked the
+// long-running scroll bug (see `?debug=scroll`/initScrollDiagnostics above) — a real capture
+// during an actual mismatch would very plausibly settle which hypothesis (or something else
+// entirely) is the real cause.
+//
+// Deliberately purely observational: every call site below only ever calls tapDiag.log(...),
+// never changes what mark gets applied or how — this cannot mask or be masked by any of the
+// actual marking logic it's observing. Gated behind `?debug=taps` (a different flag from
+// `?debug=scroll`, so the two tools' floating panels can never both be on screen at once) rather
+// than a normal Help-menu item, for the same reason the scroll tool is: this is investigative
+// instrumentation for a specific open bug, not a player-facing feature.
+function initTapDiagnostics() {
+  if (new URLSearchParams(location.search).get('debug') !== 'taps') return;
+
+  const HISTORY_MAX = 200; // a tap-mismatch report needs more lines of normal play around the
+  // one bad tap than the scroll tool's 60-line cap allows for — mismatches are sparse, ordinary
+  // taps are frequent, so the buffer needs enough headroom that a real occurrence isn't scrolled
+  // out by routine play before the project owner gets a chance to open the panel.
+  const history = [];
+  let historyPre = null; // set once the panel exists; log() below is safe to call before that
+
+  function log(line) {
+    history.push(`${new Date().toLocaleTimeString()} — ${line}`);
+    if (history.length > HISTORY_MAX) history.shift();
+    if (historyPre) historyPre.textContent = history.join('\n');
+  }
+  tapDiag = { log };
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'tap-diag-btn';
+  btn.textContent = '👆';
+  btn.setAttribute('aria-label', 'Tap diagnostics');
+  document.body.appendChild(btn);
+
+  const panel = document.createElement('div');
+  panel.className = 'tap-diag-panel hidden';
+
+  const heading = document.createElement('h3');
+  heading.className = 'tap-diag-panel__heading';
+  heading.textContent = 'Tap/mark history (this page load, oldest first)';
+  historyPre = document.createElement('pre');
+  historyPre.className = 'tap-diag-panel__text';
+  historyPre.textContent = history.length ? history.join('\n') : '(nothing captured yet this page load)';
+
+  const actions = document.createElement('div');
+  actions.className = 'tap-diag-panel__actions';
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'btn';
+  copyBtn.textContent = 'Copy log';
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'btn';
+  clearBtn.textContent = 'Clear log';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'btn btn--primary';
+  closeBtn.textContent = 'Close';
+  actions.append(copyBtn, clearBtn, closeBtn);
+  panel.append(heading, historyPre, actions);
+  document.body.appendChild(panel);
+
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard?.writeText(historyPre.textContent).then(
+      () => { copyBtn.textContent = 'Copied!'; setTimeout(() => { copyBtn.textContent = 'Copy log'; }, 1500); },
+      () => { copyBtn.textContent = 'Copy failed — select text manually'; }
+    );
+  });
+  clearBtn.addEventListener('click', () => {
+    history.length = 0;
+    historyPre.textContent = '(nothing captured since clearing)';
+  });
+  closeBtn.addEventListener('click', () => panel.classList.add('hidden'));
+  btn.addEventListener('click', () => {
+    historyPre.textContent = history.length ? history.join('\n') : '(nothing captured yet this page load)';
+    panel.classList.remove('hidden');
+  });
+
+  log('page load');
+}
+initTapDiagnostics();

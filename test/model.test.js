@@ -109,6 +109,75 @@ describe('Board.setBatch (atomic multi-cell moves)', () => {
   });
 });
 
+describe('Board.recordBatch (Current Objective — see TODO.md: a whole drag gesture as one ' +
+  'undo/redo unit)', () => {
+  test('records precomputed cells as one history entry without touching grid', () => {
+    const board = new Board(1, 3);
+    board.grid[0][0] = FILLED; // simulate app.js having already applied these live
+    board.grid[0][1] = EMPTY;
+    board.recordBatch([
+      { row: 0, col: 0, prev: UNKNOWN, next: FILLED },
+      { row: 0, col: 1, prev: UNKNOWN, next: EMPTY },
+    ]);
+    assertEqual(board.history.length, 1);
+    assertEqual(board.history[0].cells.length, 2);
+    assertEqual(board.get(0, 0), FILLED); // unchanged — recordBatch never touches grid
+    assertEqual(board.get(0, 1), EMPTY);
+  });
+
+  test('undoLast reverts a whole recordBatch-ed gesture at once, not cell by cell', () => {
+    const board = new Board(1, 3);
+    // Simulate a 3-cell drag: app.js applies each cell live, then commits once at drag end.
+    board.grid[0][0] = FILLED;
+    board.grid[0][1] = FILLED;
+    board.grid[0][2] = FILLED;
+    board.recordBatch([
+      { row: 0, col: 0, prev: UNKNOWN, next: FILLED },
+      { row: 0, col: 1, prev: UNKNOWN, next: FILLED },
+      { row: 0, col: 2, prev: UNKNOWN, next: FILLED },
+    ]);
+    assertEqual(board.history.length, 1);
+    board.undoLast();
+    assertEqual(board.get(0, 0), UNKNOWN);
+    assertEqual(board.get(0, 1), UNKNOWN);
+    assertEqual(board.get(0, 2), UNKNOWN);
+    assertEqual(board.history.length, 0);
+  });
+
+  test('a no-op empty cell list pushes no history entry', () => {
+    const board = new Board(1, 1);
+    board.recordBatch([]);
+    assertEqual(board.history.length, 0);
+  });
+
+  test('clears the redo stack by default, same as set/setBatch', () => {
+    const board = new Board(1, 2);
+    board.set(0, 0, FILLED);
+    board.undoLast();
+    assertEqual(board.redoStack.length, 1);
+    board.grid[0][1] = FILLED;
+    board.recordBatch([{ row: 0, col: 1, prev: UNKNOWN, next: FILLED }]);
+    assertEqual(board.redoStack.length, 0);
+  });
+
+  test('redo() reapplies a recordBatch-ed gesture as one unit', () => {
+    const board = new Board(1, 2);
+    board.grid[0][0] = FILLED;
+    board.grid[0][1] = FILLED;
+    board.recordBatch([
+      { row: 0, col: 0, prev: UNKNOWN, next: FILLED },
+      { row: 0, col: 1, prev: UNKNOWN, next: FILLED },
+    ]);
+    board.undoLast();
+    assertEqual(board.get(0, 0), UNKNOWN);
+    assertEqual(board.get(0, 1), UNKNOWN);
+    board.redo();
+    assertEqual(board.get(0, 0), FILLED);
+    assertEqual(board.get(0, 1), FILLED);
+    assertEqual(board.history.length, 1);
+  });
+});
+
 describe('Board.fromGrid baseline survives undo (real bug, found via a drag-placed run ' +
   'of X marks on a resumed puzzle — see TODO.md)', () => {
   // undoToMove used to rebuild the grid from scratch and replay only `history` onto it —
