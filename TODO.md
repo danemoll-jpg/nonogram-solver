@@ -2631,9 +2631,95 @@ the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
     real-device-confirmed — this round's verification was preview-only,
     same status as most other scan-wizard work in this project.
 
+* **Three Current Objective items — done, unit- and preview-verified; not yet
+  real-device-confirmed.**
+  - **The "1010" split bug — root-caused and fixed.** Real cause, confirmed
+    directly (not guessed): "1, 10" was never an OCR/geometry artifact — it's
+    a genuinely LEGAL candidate split under the existing structural-legality
+    filter, because `parseInt("010", 10)` silently discards the leading zero
+    and returns 10, a normalization `suggestOversizedClueSplit` already
+    relies on elsewhere (see the pre-existing "034" → "3, 4" test/behavior,
+    which depends on exactly this same discarding). So "1010" legitimately
+    had TWO structurally-legal splits — clean "10, 10" and leading-zero-
+    discarding "1, 10" — and with two candidates present, the tie-break fell
+    to pixel-gap evidence, which real-world gap noise could tip either way,
+    landing on the wrong one in the reported case. Fixed by adding a
+    preference tier ahead of the gap tie-break: a split needing no
+    leading-zero digit-discarding ("10, 10") is now preferred outright over
+    one that does ("1, 10") — no gap evidence needed at all for "1010"/"2020"
+    once this preference narrows the pool to a single clean candidate.
+    Falls back to the dirty (leading-zero) candidates only when EVERY legal
+    split is dirty (still covers the pre-existing "034" case unchanged — the
+    only survivor there is dirty, so the fallback pool is exactly what it
+    always returned). `suggestOversizedClueSplit` (`src/ocrSegment.js`) now
+    tags each candidate `dirty` and filters to the clean subset when any
+    exist, before the existing gap tie-break logic (untouched otherwise). 4
+    new unit tests (`test/ocrSegment.test.js`): "1010"→"10,10" (with and
+    without line length, and with gap evidence that would have favored the
+    wrong split under the old algorithm, confirming the new preference wins
+    regardless), "2020"→"20,20", and a re-assertion that the "034"→"3,4"
+    fallback case is unaffected. All 872 tests pass. Not yet checked against
+    a real photo with a genuine "1010"-shaped OCR merge (this project's own
+    "prefer real image data" rule) — this round's evidence is direct
+    code/math analysis of the reported input plus unit coverage, not a fresh
+    scan.
+  - **The 30×30 hint-panel/board-controls overlap — root-caused and fixed.**
+    Real cause, found by direct code reading of `fitBoardToViewport`
+    (`app.js`): its own `belowBoardRoot` calculation (everything stacked
+    below `#board-root` that the grid must NOT be sized into) already
+    accounted for the status line and board-panel/page padding, but never
+    learned about `.board-controls` — the Fill/X/Undo/Redo/Eraser row that
+    an earlier toolbar-reorganization round moved to sit directly between
+    `#board-root` and the status line. The grid was therefore sized as if
+    that row took zero vertical space, an unambiguous omission (not a
+    tuning issue) confirmed by reading the function's own stated purpose
+    ("minus everything stacked below it") against what it actually summed.
+    Harmless whenever the board doesn't use its full available height
+    anyway; on a large puzzle where height is the binding constraint, the
+    board could end up sized enough taller that the controls row lands
+    behind the fixed `#explain-panel` once a hint/mistake explanation grew
+    it. Fixed by measuring `.board-controls`' own real rendered height +
+    `margin-top` (added `id="board-controls"` in `index.html` and
+    `els.boardControls` in `app.js` so it can be read directly) and folding
+    that into `belowBoardRoot`, the same "read the actual element, don't
+    hand-keep a constant" approach every other term in that sum already
+    uses. This can only ever shrink the computed board size relative to the
+    old (buggy) calculation for the same inputs — a strictly positive term
+    that used to be missing is now subtracted — so the fix cannot make any
+    overlap worse, only reduce or eliminate it. Verified directly in browser
+    preview: built a real, played, unsolved test puzzle and also reused an
+    existing real 30×30 library puzzle, opened a hint/mistake explanation to
+    grow `#explain-panel`, and confirmed via direct `getBoundingClientRect`
+    measurement that `.board-controls` and `#explain-panel` never overlap at
+    the bottom of a fully-scrolled `#page-root` (a consistent gap between
+    them in every scenario checked). Could not reliably reproduce the
+    PRE-fix overlap itself in this environment's emulated-viewport preview
+    tooling (the emulation's own scaling/threshold behavior made it hard to
+    land exactly on the non-clamped cell-size regime where the missing
+    term's error would have mattered — cellPx kept landing on either the
+    `MIN_CELL_PX` or `MAX_CELL_PX` clamp instead of the regime in between) —
+    the fix is grounded in direct code-reading of a genuine, unambiguous
+    omission rather than an empirical before/after repro. All 872 tests
+    pass (a markup/DOM-measurement change only, nothing solver-related).
+    Not yet real-device-confirmed.
+  - **Scan size-entry auto-fill — done.** `src/scanUI.js`'s size step: typing
+    into Rows now mirrors the same value into Columns live, via a plain
+    `input` listener, matching the project owner's own confirmed field order
+    (Rows first, Columns second, verified directly in preview before
+    implementing rather than assumed). Mirroring stops the moment the player
+    types into Columns directly (a `colsManuallyEdited` flag on the wizard's
+    `state`, set by a separate `input` listener on Columns, reset alongside
+    the rest of the size step in `resetWizard`) — a deliberate non-square
+    entry is never silently overwritten by a later edit to Rows, and setting
+    `.value` programmatically (the mirroring itself) doesn't fire a real
+    `input` event, so there's no feedback loop. Verified directly in browser
+    preview: typing "25" into Rows live-updates Columns to "25"; then typing
+    "15" into Columns and "30" into Rows afterward leaves Columns at "15"
+    (mirroring correctly stopped). All 872 tests pass.
+
 Current Objective (Focus Area)
 
-**No current objective is queued right now.**
+No current objective is queued right now.
 
 Next Steps (Do Not Start Yet)
 

@@ -89,6 +89,7 @@ const els = {
   btnUndo: document.getElementById('btn-undo'),
   btnRedo: document.getElementById('btn-redo'),
   boardRoot: document.getElementById('board-root'),
+  boardControls: document.getElementById('board-controls'),
   statusLine: document.getElementById('status-line'),
   modeFill: document.getElementById('mode-fill'),
   modeX: document.getElementById('mode-x'),
@@ -435,7 +436,22 @@ function fitBoardToViewport() {
   // ~18px after fixing the --explain-panel-space sync bug elsewhere in this same
   // investigation, traced to exactly this missing term.
   const pagePaddingBottom = parseFloat(getComputedStyle(els.pageRoot).paddingBottom);
+  // Bug fix (Current Objective — see TODO.md): the toolbar reorganization that moved
+  // Fill/X/Undo/Redo/Eraser into `.board-controls` below the board (out of the main toolbar)
+  // never taught this function about that row's existence — `belowBoardRoot` only ever
+  // accounted for the status line and board-panel/page padding below board-root, so the grid
+  // was sized as if `.board-controls` took zero vertical space. Harmless on a puzzle small
+  // enough that the board never used its full available height anyway, but on a large one
+  // (30x30 called out directly) the board (plus the now-unaccounted-for controls row) could
+  // render tall enough to push the controls row down behind the fixed #explain-panel once a
+  // hint/mistake explanation opened it — exactly the reported overlap. Fixed by measuring
+  // `.board-controls`' own real height + margin-top, same "read the actual element" approach
+  // every other term here already uses rather than a second hand-kept constant.
+  const boardControlsRect = els.boardControls.getBoundingClientRect();
+  const boardControlsStyle = getComputedStyle(els.boardControls);
   const belowBoardRoot =
+    boardControlsRect.height +
+    parseFloat(boardControlsStyle.marginTop) +
     statusLineRect.height +
     parseFloat(statusLineStyle.marginTop) +
     parseFloat(panelStyle.paddingBottom) +

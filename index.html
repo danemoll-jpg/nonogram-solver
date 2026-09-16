@@ -99,7 +99,7 @@
              reorganization round (see TODO.md): the Fill/Mark-empty toggle joined this row too,
              same reasoning — it's now the first cluster, separated from Undo/Redo by the same
              `.board-controls__gap` spacer Undo/Redo already used before Eraser. -->
-        <div class="board-controls" role="group" aria-label="Marking mode, undo/redo, and eraser">
+        <div id="board-controls" class="board-controls" role="group" aria-label="Marking mode, undo/redo, and eraser">
           <!-- Now a plain two-way Fill/Mark-empty toggle — Eraser sits standalone further along
                this same row (see below) once it stopped needing to share this segmented control.
                Both segments are given equal width (.mode-toggle's own CSS) now that there are

@@ -375,4 +375,34 @@ describe('suggestOversizedClueSplit', () => {
     // unchanged for any existing caller that hasn't been updated to pass a line length.
     assertEqual(suggestOversizedClueSplit('1014', [11, 20, 11]), { left: 10, right: 14 });
   });
+
+  // The "1010" bug (TODO.md): a real repeated-digit-pair merge that got offered "1, 10" instead
+  // of the obviously correct "10, 10". Root cause: "1, 010" is a structurally legal split too
+  // (parseInt discards "010"'s leading zero, same normalization the "034" test above relies on
+  // as a feature), so with two legal candidates present, gap-evidence noise alone could tip the
+  // pick toward the wrong one. Fix: a split that needs no leading-zero discarding ("10, 10") is
+  // preferred outright over one that does ("1, 10"), with no gap evidence needed at all here —
+  // both quoted below because a leading-zero split IS still real digit evidence, just weaker.
+  test('prefers the clean "10, 10" split over the leading-zero "1, 10" split for "1010"', () => {
+    // Even with gap evidence that would otherwise favor the dirty split (widest gap at the
+    // first digit boundary), the clean candidate wins because it needs no zero-discarding.
+    assertEqual(suggestOversizedClueSplit('1010', [20, 5, 5]), { left: 10, right: 10 });
+    assertEqual(suggestOversizedClueSplit('1010', [20, 5, 5], 25), { left: 10, right: 10 });
+    // No gap evidence at all — the clean-preference rule alone still resolves it.
+    assertEqual(suggestOversizedClueSplit('1010', null, 25), { left: 10, right: 10 });
+  });
+
+  test('the same clean-split preference resolves "2020" to "20, 20"', () => {
+    // "202, 0" is excluded outright (a zero-value side); "2, 020" is legal but dirty; "20, 20"
+    // is the only clean candidate, so it wins without needing gap evidence.
+    assertEqual(suggestOversizedClueSplit('2020', [20, 5, 5]), { left: 20, right: 20 });
+    assertEqual(suggestOversizedClueSplit('2020', null), { left: 20, right: 20 });
+  });
+
+  test('clean-split preference does not disturb a case where every legal candidate is dirty', () => {
+    // Same case the "normalizes a spurious leading zero" test above already covers — re-asserted
+    // here to document that the new preference pool falls back to the dirty candidates when no
+    // clean one exists, rather than over-filtering down to nothing.
+    assertEqual(suggestOversizedClueSplit('034', [5, 20]), { left: 3, right: 4 });
+  });
 });

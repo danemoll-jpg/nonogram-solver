@@ -108,6 +108,11 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     dragOrigRect: null, // gridRect snapshot at drag start, for 'move'/'resize' deltas
     rows: 0, // set from the size step (Current Objective — see TODO.md), before any photo/grid work
     cols: 0,
+    // Current Objective (see TODO.md): tracks whether the player has directly typed into the
+    // Columns box THIS time through the size step — once true, Rows no longer mirrors into it
+    // (see the size-step auto-fill listeners below). Reset alongside the rest of the size step
+    // in resetWizard so a fresh wizard open (or Cancel-and-reopen) starts mirroring again.
+    colsManuallyEdited: false,
     rowClueInputs: [],
     colClueInputs: [],
     pendingPuzzle: null,
@@ -152,6 +157,7 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     state.fillMarks = null;
     els.scanRowsInput.value = '10';
     els.scanColsInput.value = '10';
+    state.colsManuallyEdited = false;
     els.scanSizeError.classList.add('hidden');
     els.scanFileInput.value = '';
     els.scanBtnPlay.disabled = false;
@@ -180,6 +186,20 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     const n = parseInt(inputEl.value, 10);
     return Number.isInteger(n) && n >= MIN_SIZE && n <= MAX_SIZE ? n : null;
   }
+
+  // Current Objective (see TODO.md): "most real puzzles are square" — mirror Rows into Columns
+  // as the player types, since re-typing an identical value on the very next field is pure
+  // friction for the common case. Columns stops mirroring the moment the player types into it
+  // directly (tracked via `colsManuallyEdited`, set below), so a deliberate non-square entry is
+  // never silently overwritten by a later edit to Rows — mirroring only ever flows one direction
+  // (Rows -> Columns), matching the fields' own top-to-bottom order in the form.
+  els.scanColsInput.addEventListener('input', () => {
+    state.colsManuallyEdited = true;
+  });
+  els.scanRowsInput.addEventListener('input', () => {
+    if (state.colsManuallyEdited) return;
+    els.scanColsInput.value = els.scanRowsInput.value;
+  });
 
   els.scanBtnSizeContinue.addEventListener('click', () => {
     const rows = parseSize(els.scanRowsInput);

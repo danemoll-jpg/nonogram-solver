@@ -454,6 +454,26 @@
     unrelated subsystem the original investigation also saw. 7 new unit tests; all 869 pass.
     Not yet real-device-confirmed.
 
+**The three Current Objective items above are all done, preview-verified;
+not yet real-device-confirmed.** (1) The "1010" split bug: root cause was
+that "1, 10" is a genuinely legal candidate split (`parseInt("010")` drops
+the leading zero, a normalization the pre-existing "034"→"3,4" behavior
+already relies on), so two legal splits existed and gap-evidence noise
+picked the wrong one — fixed by preferring a split needing no leading-zero
+discarding whenever one exists. (2) The 30×30 hint-panel overlap:
+`fitBoardToViewport`'s `belowBoardRoot` sum never accounted for
+`.board-controls`' own height after it moved below the board in an earlier
+toolbar-reorg round — fixed by measuring its real height and margin, same
+"read the actual element" pattern every other term in that sum uses; could
+not reliably reproduce the pre-fix overlap in this environment's emulated
+preview viewport (kept landing on `MIN_CELL_PX`/`MAX_CELL_PX` clamps
+instead of the regime in between), so this one is grounded in direct
+code-reading of a genuine omission rather than an empirical before/after
+repro. (3) Scan size auto-fill: confirmed Rows is first, Columns second;
+typing into Rows now mirrors into Columns until the player edits Columns
+directly. All 872 tests pass. See `TODO.md`'s Completed Tasks for the full
+writeup of all three.
+
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
 - Build: none — it's static files, nothing to build

@@ -322,13 +322,20 @@ export function findOversizedClue(clue, lineLength) {
 // implicitly considered.
 //
 // Algorithm: enumerate every 2-way split point, keep only STRUCTURALLY LEGAL ones (both sides
-// parse to a positive integer that could fit in the line, when a line length is known). If
-// exactly one survives, that's the answer — no gap data even required, since the structural
-// constraint alone already proves it's the only possibility. If more than one survives, only
-// then fall back to the pixel-gap evidence (as before) to break the tie among just those
-// legal candidates; if THAT is unavailable or still tied, decline — a genuinely ambiguous case
-// (see TODO.md's queued follow-up: offering multiple candidate buttons for exactly this
-// situation, once this single-best-guess path is solid).
+// parse to a positive integer that could fit in the line, when a line length is known). Each
+// legal candidate is also tagged CLEAN or DIRTY: dirty means one of its sides is a multi-digit
+// string with a leading zero (e.g. "010"), which only parses to a real number by silently
+// discarding that leading digit — a real reading, but a strictly weaker one than a split that
+// needs no such discarding. Among the legal candidates, clean ones are preferred outright: if
+// at least one clean candidate exists, every dirty one is dropped before anything else runs (no
+// gap evidence needed to prefer "10,10" over "1,10" for "1010" — the clean split needs no
+// digit-discarding, the dirty one does). Only when EVERY legal candidate is dirty (e.g. "034",
+// where the only survivor is "03,4") does a dirty candidate get used at all. If exactly one
+// candidate survives after that preference filter, that's the answer. If more than one
+// survives, only then fall back to the pixel-gap evidence (as before) to break the tie; if THAT
+// is unavailable or still tied, decline — a genuinely ambiguous case (see TODO.md's queued
+// follow-up: offering multiple candidate buttons for exactly this situation, once this
+// single-best-guess path is solid).
 export function suggestOversizedClueSplit(valueText, gaps, lineLength) {
   const digits = valueText.length;
   if (digits < 2) return null;
@@ -336,21 +343,27 @@ export function suggestOversizedClueSplit(valueText, gaps, lineLength) {
   const hasLineLength = Number.isInteger(lineLength) && lineLength > 0;
   const candidates = [];
   for (let splitAt = 1; splitAt < digits; splitAt++) {
-    const left = parseInt(valueText.slice(0, splitAt), 10);
-    const right = parseInt(valueText.slice(splitAt), 10);
+    const leftStr = valueText.slice(0, splitAt);
+    const rightStr = valueText.slice(splitAt);
+    const left = parseInt(leftStr, 10);
+    const right = parseInt(rightStr, 10);
     if (!Number.isInteger(left) || !Number.isInteger(right) || left < 1 || right < 1) continue;
     if (hasLineLength && (left > lineLength || right > lineLength)) continue;
-    candidates.push({ splitAt, left, right });
+    const dirty = (leftStr.length > 1 && leftStr[0] === '0') || (rightStr.length > 1 && rightStr[0] === '0');
+    candidates.push({ splitAt, left, right, dirty });
   }
   if (candidates.length === 0) return null;
-  if (candidates.length === 1) return { left: candidates[0].left, right: candidates[0].right };
 
-  // More than one legal split remains — the gap evidence is the only thing left to break the
-  // tie, exactly as the old algorithm did, just scoped down to only the legal candidates.
+  const cleanCandidates = candidates.filter((c) => !c.dirty);
+  const pool = cleanCandidates.length > 0 ? cleanCandidates : candidates;
+  if (pool.length === 1) return { left: pool[0].left, right: pool[0].right };
+
+  // More than one candidate remains — the gap evidence is the only thing left to break the
+  // tie, exactly as the old algorithm did, just scoped down to only the preferred pool.
   if (!Array.isArray(gaps) || gaps.length !== digits - 1) return null;
   let bestGap = -Infinity;
   let bestCandidates = [];
-  for (const c of candidates) {
+  for (const c of pool) {
     const gap = gaps[c.splitAt - 1]; // gaps[i] sits between digit i and digit i+1
     if (gap > bestGap) {
       bestGap = gap;
@@ -359,6 +372,6 @@ export function suggestOversizedClueSplit(valueText, gaps, lineLength) {
       bestCandidates.push(c);
     }
   }
-  if (bestCandidates.length !== 1) return null; // still tied among the legal candidates
+  if (bestCandidates.length !== 1) return null; // still tied among the preferred candidates
   return { left: bestCandidates[0].left, right: bestCandidates[0].right };
 }
