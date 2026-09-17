@@ -1467,13 +1467,15 @@ Completed Tasks
 
 **No current objective is queued right now.**
 
-* **ON HOLD, per the project owner directly — not being built right now.** The
-  "1410" bug (below) is fixed, and a real scan since then confirmed the
+* **Feature spec — the multi-way-split feature was put on hold here, then
+  reactivated (see Current Objective for the reactivation and a real trigger
+  case).** Originally: "1410" bug (below) is fixed, and a real scan since
+  then confirmed the
   single-suggestion approach works correctly in practice. Rather than build
-  the multi-candidate extension immediately, the project owner wants to see
-  how the single-suggestion approach holds up across more real use first —
-  revisit only if that turns out to be insufficient, not as a default next
-  step. Original idea, unchanged, for whenever it's picked back up:
+  the multi-candidate extension immediately, the project owner wanted to see
+  how the single-suggestion approach held up across more real use first —
+  revisit only if that turned out to be insufficient. Full original spec,
+  unchanged, preserved here for reference:
 * **Feature idea, to build AFTER the "1410" bug below is actually fixed,
   not alongside it: for genuinely ambiguous merged numbers, offer MULTIPLE
   candidate split buttons instead of just one.** Direct example, explicitly
@@ -2733,9 +2735,88 @@ the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
     "15" into Columns and "30" into Rows afterward leaves Columns at "15"
     (mirroring correctly stopped). All 872 tests pass.
 
+* **The multi-way-split feature, reactivated off hold — built, unit- and
+  preview-verified; not yet checked against a real photo with a genuine
+  multi-number merge.** Real trigger case: "4102, 2, 7" — "4102" genuinely
+  needs a THREE-way split ("4, 10, 2"), which the old binary-split-only
+  feature (one cut point, always exactly two numbers out) structurally could
+  not produce.
+  - **`suggestOversizedClueSplit` (`src/ocrSegment.js`) now generates 3-way
+    (two-cut-point) candidates, not just 2-way, and its return shape
+    generalized from `{left, right} | null` to `{candidates: [{parts:
+    [...]}, ...]} | null`** — each candidate 2 or 3 numbers, up to
+    `MAX_SPLIT_CANDIDATES` (3, the project owner's own suggested cap) when
+    genuine ambiguity remains, a single-element array when filtering leaves
+    exactly one legal reading.
+  - **Candidates are generated in TIERS by cut count — every 2-way split is
+    tried first, and the 3-way tier is only even considered when the 2-way
+    tier comes back completely empty.** This is the key design decision that
+    makes the feature safe to reactivate without regressing the "1410" fix:
+    a naive "generate every legal 2-way AND 3-way split, then let gap
+    evidence pick" approach was tried first and directly disproven — "1410"
+    in a 25-wide line has both a legal 2-way reading ("14, 10") and a legal
+    3-way reading ("1, 4, 10"), and a monospaced font's real gap data
+    ([7, 7, 7], the exact case this project's own ground-truth investigation
+    measured) ties between them with zero signal to prefer one over the
+    other, which would have made "1410" ambiguous again — exactly the
+    regression the project owner's direct confirmation on this file's
+    Completed Tasks explicitly guards against ("1410 has essentially one
+    sensible reading... a real three-way split would require a visible gap
+    that isn't there"). Tiering by cut count sidesteps this entirely: since
+    "14, 10" is legal, the 3-way tier is never even generated for "1410",
+    so there's nothing to tie against. Confirmed directly (unit test
+    `'line length resolves the "1410" tie...'`) that this exact case still
+    resolves to the single certain answer it did before this round.
+  - **Refined confirmation model, direct feedback ("I don't even understand
+    really why I even need to verify something like this case"): a
+    structurally-single candidate is now applied directly, no confirm click
+    required — reserved for genuine remaining ambiguity only.** Implemented
+    in `src/scanUI.js`'s `buildClueRow`/`refreshFlag`: when
+    `suggestSplitFor` returns exactly one candidate, `refreshFlag` writes it
+    straight into the field and recursively re-runs itself (which naturally
+    terminates — the split number is no longer oversized on the next pass)
+    rather than showing a button at all. This applies uniformly to both
+    2-way and 3-way results, and to every existing single-candidate case
+    ("1410" w/ line length, "1010", "2020") — not just the new 3-way ones —
+    per the explicit instruction that this refinement isn't scoped to just
+    the new feature.
+  - **UI generalized from one `scan-clue-row__split-btn` to a
+    `scan-clue-row__split-group` holding 1-3 buttons**, one per genuinely
+    ambiguous candidate (each showing all of that candidate's parts, e.g.
+    "Split into 4, 10, 2"), styled as a small flex-wrap row so up to 3
+    buttons can wrap on a narrow screen; empty/hidden whenever there's
+    nothing to show (including the now-common single-candidate case, where
+    no button ever appears at all). `styles.css`'s `.scan-clue-row__split-btn`
+    dropped its own `grid-area`, now a flex child of the new group.
+  - **Verified**: 17 unit tests in `test/ocrSegment.test.js` (several
+    rewritten for the new return shape and tiering, several new — including
+    the real "4102" trigger case resolving via the empty-2-way-tier
+    fallback, and a capped-at-3 case for a 5-digit merge with no
+    disambiguating evidence at all). Also verified live in browser preview:
+    ran the actual scan wizard end-to-end against the real 25×25
+    ground-truth image through OCR and into the correction step (confirming
+    nothing regressed for a real scan), then — since that real image no
+    longer contains any oversized merge after the earlier OCR-hallucination
+    fixes, so it can't itself exercise this feature — verified the exact
+    `refreshFlag` split-suggestion logic (copied faithfully from the real
+    `src/scanUI.js` source, driven by the real exported
+    `suggestOversizedClueSplit`) in a detached DOM harness: the "4102"
+    single-candidate case applied directly with zero buttons rendered, and
+    the ambiguous "1234"-tied case rendered exactly 2 correctly-labeled
+    buttons that each apply their own split and collapse the group when
+    clicked. All 874 tests pass. Not yet checked against a real photo
+    containing a genuine multi-number merge (this project's own "prefer
+    real image data" rule) or real-device-confirmed — same standing
+    limitation the original single-suggestion feature shipped with.
+  - **Full original multi-way-split spec** (candidate-generation approach,
+    the 3-button cap, sequencing) **lives earlier in this file's Completed
+    Tasks section**, in the entry beginning "Feature spec — the multi-way-
+    split feature was put on hold here, then reactivated" — preserved there
+    unchanged.
+
 Current Objective (Focus Area)
 
-No current objective is queued right now.
+**No current objective is queued right now.**
 
 Next Steps (Do Not Start Yet)
 

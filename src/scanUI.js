@@ -1128,15 +1128,19 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
     input.className = 'scan-clue-row__input';
     input.value = prefillText;
     input.setAttribute('aria-label', `${labelText} clue numbers`);
-    // Oversized-clue-number split suggestion (Current Objective — see TODO.md): a real button,
-    // not a silent auto-apply — per the project owner's own suggested UX, this only PRE-FILLS
-    // the field with the suggested split as an editable starting point the player still
-    // confirms (by seeing the field change and choosing to move on) or adjusts by hand, never
-    // applies unseen. Hidden by default; shown only while refreshFlag has a live suggestion.
-    const splitBtn = document.createElement('button');
-    splitBtn.type = 'button';
-    splitBtn.className = 'scan-clue-row__split-btn hidden';
-    row.append(label, img, input, splitBtn);
+    // Oversized-clue-number split suggestion (Current Objective — see TODO.md), now generalized
+    // to a MULTI-way-split feature (up to 3 candidate buttons for genuinely ambiguous merges,
+    // e.g. "4102" -> 4, 10, 2). Refined confirmation model, per direct feedback: when structural
+    // filtering (ocrSegment.js's suggestOversizedClueSplit) leaves exactly ONE legal reading,
+    // applying it costs the player nothing real to skip confirming — refreshFlag below applies
+    // it to the field directly, no button shown at all. This group of buttons is reserved for
+    // when genuine ambiguity remains (2-3 still-viable candidates): each button PRE-FILLS the
+    // field with that one candidate as an editable starting point the player still confirms (by
+    // seeing the field change and choosing to move on) or adjusts by hand, never applies unseen.
+    // Empty/hidden by default; populated only while refreshFlag has live candidates to offer.
+    const splitGroup = document.createElement('div');
+    splitGroup.className = 'scan-clue-row__split-group hidden';
+    row.append(label, img, input, splitGroup);
     container.appendChild(row);
 
     // Flag on build, and re-check live as the player edits — fixing a misread number should
@@ -1161,23 +1165,45 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
       row.classList.toggle('scan-clue-row--suspect', droppedStillApplies || oversized !== null || repeated !== null);
 
       const suggestion = oversized ? suggestSplitFor(oversized, clue) : null;
-      splitBtn.classList.toggle('hidden', suggestion === null);
-      if (suggestion) {
-        splitBtn.textContent = `Split into ${suggestion.left}, ${suggestion.right}`;
-        splitBtn.onclick = () => {
-          const next = [...clue.slice(0, oversized.index), suggestion.left, suggestion.right, ...clue.slice(oversized.index + 1)];
-          input.value = next.join(', ');
-          refreshFlag();
-        };
+      const candidates = suggestion ? suggestion.candidates : null;
+
+      function applySplit(parts) {
+        const next = [...clue.slice(0, oversized.index), ...parts, ...clue.slice(oversized.index + 1)];
+        input.value = next.join(', ');
+        refreshFlag();
+      }
+
+      // Refined confirmation model (Current Objective — see TODO.md): structural filtering (and
+      // gap evidence, when available) leaving exactly one candidate means there's no real
+      // ambiguity to ask the player about — apply it directly and re-run refreshFlag on the
+      // now-updated field, same as any other programmatic edit. This recursive call sees the new
+      // clue text, so it naturally terminates (the split number is no longer oversized) rather
+      // than looping.
+      if (candidates && candidates.length === 1) {
+        applySplit(candidates[0].parts);
+        return;
+      }
+
+      splitGroup.replaceChildren();
+      splitGroup.classList.toggle('hidden', !candidates || candidates.length === 0);
+      if (candidates) {
+        for (const candidate of candidates) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'scan-clue-row__split-btn';
+          btn.textContent = `Split into ${candidate.parts.join(', ')}`;
+          btn.onclick = () => applySplit(candidate.parts);
+          splitGroup.appendChild(btn);
+        }
       }
 
       row.title = droppedStillApplies
         ? 'A number was detected here (from the photo\'s own layout) but couldn\'t be read at all — check this line against the photo; a number may be missing from the text above.'
         : oversized
-          ? `"${oversized.value}" is larger than this line itself (${oversized.lineLength} cells) — a single run can never be longer than its own line, so this is almost certainly two numbers merged together (e.g. "10, 11" misread as "1011").` +
-            (suggestion
-              ? ` The widest gap in the original scan suggests ${suggestion.left}, ${suggestion.right} — use the button below to try it, or edit the field directly.`
-              : ' Split it back into two numbers.')
+          ? `"${oversized.value}" is larger than this line itself (${oversized.lineLength} cells) — a single run can never be longer than its own line, so this is almost certainly two or more numbers merged together (e.g. "10, 11" misread as "1011").` +
+            (candidates && candidates.length > 1
+              ? ' More than one split still looks plausible — use one of the buttons below to try it, or edit the field directly.'
+              : ' Split it back into separate numbers.')
           : repeated
             ? `This might have a misread digit: most numbers here read ${repeated.expectedValue}, but one reads ${repeated.suspectedValue}.`
             : '';

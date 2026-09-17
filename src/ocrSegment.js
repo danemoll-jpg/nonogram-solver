@@ -321,10 +321,10 @@ export function findOversizedClue(clue, lineLength) {
 // below with no bound reduces to "every non-degenerate split", the same set the old code
 // implicitly considered.
 //
-// Algorithm: enumerate every 2-way split point, keep only STRUCTURALLY LEGAL ones (both sides
-// parse to a positive integer that could fit in the line, when a line length is known) AND
-// LEGITIMATELY WRITTEN ones — a side is rejected outright if it's a multi-digit string with a
-// leading zero (e.g. "010"). A real printed clue number is never rendered with a leading zero
+// Algorithm: enumerate split candidates, keep only STRUCTURALLY LEGAL ones (every resulting
+// part parses to a positive integer that could fit in the line, when a line length is known)
+// AND LEGITIMATELY WRITTEN ones — a part is rejected outright if it's a multi-digit string with
+// a leading zero (e.g. "010"). A real printed clue number is never rendered with a leading zero
 // (see CLAUDE.md's own recorded ground-truth clues — none of them have one), so a split that
 // only "works" by silently discarding a leading digit via parseInt isn't a weaker-but-real
 // reading of the image, it's evidence the split point is WRONG: that digit is either OCR noise
@@ -332,45 +332,90 @@ export function findOversizedClue(clue, lineLength) {
 // or it belongs to a different split entirely. (Confirmed this wasn't a validated real-world
 // case: `parseInt`'s leading-zero discarding was accepted here purely as an incidental side
 // effect of the original implementation, never backed by a real OCR image showing a genuine
-// leading-zero merge — see TODO.md's writeup of the "1010" bug for the full trace.) If exactly
-// one candidate survives this filter, that's the answer — no gap data even required. If more
-// than one survives, only then fall back to the pixel-gap evidence (as before) to break the
-// tie; if THAT is unavailable or still tied, decline — a genuinely ambiguous case (see TODO.md's
-// queued follow-up: offering multiple candidate buttons for exactly this situation, once this
-// single-best-guess path is solid).
+// leading-zero merge — see TODO.md's writeup of the "1010" bug for the full trace.)
+//
+// Multi-way splits (TODO.md's Current Objective — reactivating the on-hold multi-candidate
+// feature, motivated by a real "4102, 2, 7" scan where "4102" genuinely needs a THREE-way split,
+// "4, 10, 2", that a single-cut-point algorithm can structurally never produce): candidates are
+// generated in TIERS by cut count, 2-way (one cut point) before 3-way (two cut points), and the
+// 3-way tier is only even considered when the 2-way tier is completely empty. This is a
+// deliberate bias toward the simplest explanation, not an oversight — the "1410" bug fix (see
+// TODO.md) established that a 3-way reading ("1, 4, 10") can be JUST AS structurally legal as a
+// simpler 2-way one ("14, 10") whenever the digits happen to tie on gap evidence (e.g. a
+// monospaced font's uniform inter-digit spacing), yet the project owner directly confirmed
+// "1410" has essentially one sensible reading and a genuine extra cut needs the image to
+// actually rule out every simpler reading, not just tie with it. Tiering by cut count enforces
+// exactly that without needing gap evidence to already be trustworthy before the algorithm even
+// starts — it falls out of candidate generation itself.
+//
+// Within one tier, if exactly one candidate survives structural filtering, that's the answer —
+// no gap data required, and (per TODO.md's confirmation-model refinement) the caller applies it
+// directly with no confirm click, since there's no real ambiguity to ask the player about. If
+// more than one candidate survives, the pixel-gap evidence (the widest gap at each of a
+// candidate's cut points, scored by its WEAKEST cut — a candidate is only as trustworthy as its
+// least-confident cut) narrows further when available; if that still leaves more than one (or no
+// gap evidence exists at all), this is genuine remaining ambiguity — return up to 3 ranked
+// candidates (the project owner's own suggested cap: realistic puzzle sizes rarely produce more
+// than a couple of plausible multi-number merges at once) for the caller to offer as buttons,
+// rather than silently declining the way the original single-guess version did.
+function legalCluePart(str, hasLineLength, lineLength) {
+  if (str.length > 1 && str[0] === '0') return null;
+  const n = parseInt(str, 10);
+  if (!Number.isInteger(n) || n < 1) return null;
+  if (hasLineLength && n > lineLength) return null;
+  return n;
+}
+
+function generateSplitCandidates(valueText, cutCount, hasLineLength, lineLength) {
+  const digits = valueText.length;
+  const results = [];
+  if (cutCount === 1) {
+    for (let c1 = 1; c1 < digits; c1++) {
+      const left = legalCluePart(valueText.slice(0, c1), hasLineLength, lineLength);
+      const right = legalCluePart(valueText.slice(c1), hasLineLength, lineLength);
+      if (left === null || right === null) continue;
+      results.push({ cuts: [c1], parts: [left, right] });
+    }
+  } else if (cutCount === 2) {
+    for (let c1 = 1; c1 < digits - 1; c1++) {
+      for (let c2 = c1 + 1; c2 < digits; c2++) {
+        const left = legalCluePart(valueText.slice(0, c1), hasLineLength, lineLength);
+        const mid = legalCluePart(valueText.slice(c1, c2), hasLineLength, lineLength);
+        const right = legalCluePart(valueText.slice(c2), hasLineLength, lineLength);
+        if (left === null || mid === null || right === null) continue;
+        results.push({ cuts: [c1, c2], parts: [left, mid, right] });
+      }
+    }
+  }
+  return results;
+}
+
+const MAX_SPLIT_CANDIDATES = 3;
+
 export function suggestOversizedClueSplit(valueText, gaps, lineLength) {
   const digits = valueText.length;
   if (digits < 2) return null;
 
   const hasLineLength = Number.isInteger(lineLength) && lineLength > 0;
-  const candidates = [];
-  for (let splitAt = 1; splitAt < digits; splitAt++) {
-    const leftStr = valueText.slice(0, splitAt);
-    const rightStr = valueText.slice(splitAt);
-    if ((leftStr.length > 1 && leftStr[0] === '0') || (rightStr.length > 1 && rightStr[0] === '0')) continue;
-    const left = parseInt(leftStr, 10);
-    const right = parseInt(rightStr, 10);
-    if (!Number.isInteger(left) || !Number.isInteger(right) || left < 1 || right < 1) continue;
-    if (hasLineLength && (left > lineLength || right > lineLength)) continue;
-    candidates.push({ splitAt, left, right });
+
+  let candidates = generateSplitCandidates(valueText, 1, hasLineLength, lineLength);
+  if (candidates.length === 0) {
+    candidates = generateSplitCandidates(valueText, 2, hasLineLength, lineLength);
   }
   if (candidates.length === 0) return null;
-  if (candidates.length === 1) return { left: candidates[0].left, right: candidates[0].right };
+  if (candidates.length === 1) return { candidates: [{ parts: candidates[0].parts }] };
 
-  // More than one candidate remains — the gap evidence is the only thing left to break the
-  // tie, exactly as the old algorithm did.
-  if (!Array.isArray(gaps) || gaps.length !== digits - 1) return null;
-  let bestGap = -Infinity;
-  let bestCandidates = [];
-  for (const c of candidates) {
-    const gap = gaps[c.splitAt - 1]; // gaps[i] sits between digit i and digit i+1
-    if (gap > bestGap) {
-      bestGap = gap;
-      bestCandidates = [c];
-    } else if (gap === bestGap) {
-      bestCandidates.push(c);
+  // More than one candidate remains within this tier — gap evidence (when it actually
+  // corresponds to this value's own digits) is the only thing left to narrow further.
+  const hasGaps = Array.isArray(gaps) && gaps.length === digits - 1;
+  if (hasGaps) {
+    let bestScore = -Infinity;
+    for (const c of candidates) {
+      c.score = Math.min(...c.cuts.map((cut) => gaps[cut - 1]));
+      if (c.score > bestScore) bestScore = c.score;
     }
+    candidates = candidates.filter((c) => c.score === bestScore);
   }
-  if (bestCandidates.length !== 1) return null; // still tied among the legal candidates
-  return { left: bestCandidates[0].left, right: bestCandidates[0].right };
+
+  return { candidates: candidates.slice(0, MAX_SPLIT_CANDIDATES).map((c) => ({ parts: c.parts })) };
 }

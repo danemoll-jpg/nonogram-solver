@@ -296,26 +296,46 @@ describe('findOversizedClue', () => {
   });
 });
 
+// Return-shape note (Current Objective — the multi-way-split feature, see TODO.md): the
+// function now always returns either null (no legal split at all) or { candidates: [...] },
+// each candidate a { parts: [...] } of 2 or 3 numbers. A single-element candidates array is the
+// "certain" case — the caller (scanUI.js) applies it directly with no confirm click, per the
+// reactivated feature's own confirmation-model refinement. More than one element means genuine
+// remaining ambiguity, capped at 3 — the caller shows one button per candidate instead of
+// silently declining the way the original single-guess version did.
 describe('suggestOversizedClueSplit', () => {
   test('picks the widest internal gap as the split point (the motivating real case: "1014" -> 10, 14)', () => {
     // Gaps between adjacent digit pairs of "1014": (1,0), (0,1), (1,4) — the middle gap (the
     // real boundary between the two merged numbers) measures widest, matching this feature's
     // real-measured "within a number ~10-12px, between numbers ~18-27px" thresholds.
     const result = suggestOversizedClueSplit('1014', [11, 20, 11]);
-    assertEqual(result, { left: 10, right: 14 });
+    assertEqual(result, { candidates: [{ parts: [10, 14] }] });
   });
 
   test('a single-digit value has no gaps and nothing to split', () => {
     assertEqual(suggestOversizedClueSplit('5', []), null);
   });
 
-  test('a gap-count mismatch against the value text is treated as stale/untrustworthy geometry', () => {
-    assertEqual(suggestOversizedClueSplit('123', [5]), null); // expects 2 gaps for 3 digits, got 1
-    assertEqual(suggestOversizedClueSplit('123', [5, 6, 7]), null); // too many, too
+  // A gap-count mismatch against the value text means the gap evidence itself can't be trusted
+  // — but structural legality (leading-zero/positivity/line-length filtering) is independent of
+  // gaps, so this is treated the same as having no gap evidence at all (see the "no gaps at all"
+  // test below), not as a reason to decline outright: both structurally-legal 2-way readings of
+  // "123" are offered as candidates rather than nothing.
+  test('a gap-count mismatch against the value text falls back to structural-only candidates', () => {
+    const expected = { candidates: [{ parts: [1, 23] }, { parts: [12, 3] }] };
+    assertEqual(suggestOversizedClueSplit('123', [5]), expected); // expects 2 gaps for 3 digits, got 1
+    assertEqual(suggestOversizedClueSplit('123', [5, 6, 7]), expected); // too many, too
   });
 
-  test('every gap tied at the same width has no confident split point', () => {
-    assertEqual(suggestOversizedClueSplit('1234', [10, 10, 10]), null);
+  // Every gap tied at the same width gives gap evidence no way to break the tie — but that's no
+  // longer a reason to decline (the original single-guess version's behavior): all 3 structurally
+  // legal 2-way readings of "1234" survive as genuinely ambiguous candidates, capped at 3 — this
+  // is the same "up to 3 buttons for a genuinely uncertain merge" shape as this feature's own
+  // motivating "123" example.
+  test('every gap tied at the same width offers all tied candidates rather than declining', () => {
+    assertEqual(suggestOversizedClueSplit('1234', [10, 10, 10]), {
+      candidates: [{ parts: [1, 234] }, { parts: [12, 34] }, { parts: [123, 4] }],
+    });
   });
 
   // Reverses the ORIGINAL implementation's incidental behavior here (see TODO.md's "1010" bug
@@ -323,7 +343,8 @@ describe('suggestOversizedClueSplit', () => {
   // only "works" by silently discarding one (parseInt("03") -> 3) isn't a weaker-but-real
   // reading — it's evidence the split point is wrong (the "0" is OCR noise or belongs to a
   // different split). "034" now has no legitimate split at all: "0,34" fails outright (left is
-  // zero), and "03,4" is now excluded for its leading zero, not merely deprioritized.
+  // zero), "03,4" is excluded for its leading zero, and every 3-way reading also fails (either a
+  // zero-value part or a leading zero), so there's nothing left in any tier.
   test('declines a split that would require discarding a leading zero', () => {
     assertEqual(suggestOversizedClueSplit('034', [5, 20]), null);
   });
@@ -332,28 +353,40 @@ describe('suggestOversizedClueSplit', () => {
     assertEqual(suggestOversizedClueSplit('04', [20]), null);
   });
 
-  test('no gaps at all (missing geometry) yields no suggestion', () => {
-    assertEqual(suggestOversizedClueSplit('1014', null), null);
-    assertEqual(suggestOversizedClueSplit('1014', undefined), null);
+  // No gap evidence at all, but structural filtering still leaves 2 legal 2-way readings of
+  // "1014" ("10,14" and "101,4" — "1,014" is excluded for its leading zero) — genuine ambiguity,
+  // offered as candidates rather than declined.
+  test('no gaps at all (missing geometry) falls back to structural-only candidates', () => {
+    const expected = { candidates: [{ parts: [10, 14] }, { parts: [101, 4] }] };
+    assertEqual(suggestOversizedClueSplit('1014', null), expected);
+    assertEqual(suggestOversizedClueSplit('1014', undefined), expected);
   });
 
   // The "1410" bug (TODO.md): reproduced directly by rendering "1410" in a monospaced/
-  // tabular-figure font and measuring its real pixel gaps — a dead 3-way tie ([7, 7, 7],
-  // carrying zero split-point signal), which is exactly why the old gap-only algorithm
-  // declined here even though "14, 10" is the obviously correct (and only legal) reading.
-  test('uses line length to resolve a tied/uninformative gap set (the "1410" bug)', () => {
-    // Gaps alone give no signal at all — every prior test's "tied gaps" case (see above)
-    // correctly returns null here on its own.
-    assertEqual(suggestOversizedClueSplit('1410', [7, 7, 7]), null);
-    // But in a 25-wide line, "1, 410" (410) and "141, 0" (141, and 0 is not a legal clue
-    // value either) are both structurally impossible — "14, 10" is the ONLY split where both
-    // sides could ever fit, so line length alone proves it without needing gap evidence.
-    assertEqual(suggestOversizedClueSplit('1410', [7, 7, 7], 25), { left: 14, right: 10 });
+  // tabular-figure font and measuring its real pixel gaps — a dead tie ([7, 7, 7], carrying zero
+  // split-point signal) between the two legal 2-way readings ("1,410" and "14,10" — "141,0" is
+  // excluded for its zero-value side). With no line length, both remain genuinely ambiguous
+  // candidates (no longer a silent decline).
+  test('a tied/uninformative gap set with no line length offers both legal 2-way candidates', () => {
+    assertEqual(suggestOversizedClueSplit('1410', [7, 7, 7]), {
+      candidates: [{ parts: [1, 410] }, { parts: [14, 10] }],
+    });
+  });
+
+  test('line length resolves the "1410" tie: "1,410" no longer fits, leaving one certain answer', () => {
+    // In a 25-wide line, "1, 410" (410) is structurally impossible — "14, 10" is the only 2-way
+    // reading left, so it's certain (one candidate) with no gap evidence even needed. Crucially,
+    // this also means the 3-way tier ("1, 4, 10", itself legal in a 25-wide line) is never even
+    // considered — per the project owner's direct confirmation that "1410" has essentially one
+    // sensible reading, a genuine 3-way split should only be entertained when NO 2-way reading
+    // survives at all, not offered as an equally-plausible alternative just because it also fits.
+    assertEqual(suggestOversizedClueSplit('1410', [7, 7, 7], 25), { candidates: [{ parts: [14, 10] }] });
   });
 
   test('line length alone resolves a split even with no gap evidence at all', () => {
-    assertEqual(suggestOversizedClueSplit('1410', null, 25), { left: 14, right: 10 });
-    assertEqual(suggestOversizedClueSplit('1410', undefined, 25), { left: 14, right: 10 });
+    const expected = { candidates: [{ parts: [14, 10] }] };
+    assertEqual(suggestOversizedClueSplit('1410', null, 25), expected);
+    assertEqual(suggestOversizedClueSplit('1410', undefined, 25), expected);
   });
 
   test('line length narrows candidates but gap evidence still breaks a remaining tie', () => {
@@ -366,9 +399,15 @@ describe('suggestOversizedClueSplit', () => {
     // "121,3" (121>40 illegal) — still only one. A genuinely two-legal-candidate case needs a
     // smaller merged number: "123" in a 40-wide line: "1,23" (legal) and "12,3" (legal) both
     // fit, so gap evidence must still decide between them.
-    assertEqual(suggestOversizedClueSplit('123', [10, 20], 40), { left: 12, right: 3 });
-    assertEqual(suggestOversizedClueSplit('123', [20, 10], 40), { left: 1, right: 23 });
-    assertEqual(suggestOversizedClueSplit('123', [10, 10], 40), null); // still tied — decline
+    assertEqual(suggestOversizedClueSplit('123', [10, 20], 40), { candidates: [{ parts: [12, 3] }] });
+    assertEqual(suggestOversizedClueSplit('123', [20, 10], 40), { candidates: [{ parts: [1, 23] }] });
+    // Still tied even after gap evidence — genuine ambiguity, both offered as candidates. This
+    // is this feature's own motivating "123" example (see TODO.md: "could plausibly be... '12,3'
+    // or '1,23'") made real — the 3-way "1,2,3" reading is also legal in a 40-wide line, but
+    // never even generated here since the (non-empty) 2-way tier takes priority.
+    assertEqual(suggestOversizedClueSplit('123', [10, 10], 40), {
+      candidates: [{ parts: [1, 23] }, { parts: [12, 3] }],
+    });
   });
 
   test('a line length that rules out every split yields no suggestion', () => {
@@ -378,7 +417,7 @@ describe('suggestOversizedClueSplit', () => {
   test('an omitted line length preserves the exact prior gap-only behavior', () => {
     // Same inputs as the very first test above, called the old (2-arg) way — must still work
     // unchanged for any existing caller that hasn't been updated to pass a line length.
-    assertEqual(suggestOversizedClueSplit('1014', [11, 20, 11]), { left: 10, right: 14 });
+    assertEqual(suggestOversizedClueSplit('1014', [11, 20, 11]), { candidates: [{ parts: [10, 14] }] });
   });
 
   // The "1010" bug (TODO.md): a real repeated-digit-pair merge that got offered "1, 10" instead
@@ -391,16 +430,40 @@ describe('suggestOversizedClueSplit', () => {
   test('excludes the leading-zero "1, 10" split for "1010", leaving only the clean "10, 10"', () => {
     // Even with gap evidence that would have favored the excluded split under the old algorithm
     // (widest gap at the first digit boundary), it's never in the candidate pool to begin with.
-    assertEqual(suggestOversizedClueSplit('1010', [20, 5, 5]), { left: 10, right: 10 });
-    assertEqual(suggestOversizedClueSplit('1010', [20, 5, 5], 25), { left: 10, right: 10 });
+    const expected = { candidates: [{ parts: [10, 10] }] };
+    assertEqual(suggestOversizedClueSplit('1010', [20, 5, 5]), expected);
+    assertEqual(suggestOversizedClueSplit('1010', [20, 5, 5], 25), expected);
     // No gap evidence at all — a single legal candidate resolves it regardless.
-    assertEqual(suggestOversizedClueSplit('1010', null, 25), { left: 10, right: 10 });
+    assertEqual(suggestOversizedClueSplit('1010', null, 25), expected);
   });
 
   test('the same leading-zero exclusion resolves "2020" to "20, 20"', () => {
     // "202, 0" is excluded outright (a zero-value side); "2, 020" is excluded for its leading
     // zero; "20, 20" is the only legal candidate, so it wins without needing gap evidence.
-    assertEqual(suggestOversizedClueSplit('2020', [20, 5, 5]), { left: 20, right: 20 });
-    assertEqual(suggestOversizedClueSplit('2020', null), { left: 20, right: 20 });
+    const expected = { candidates: [{ parts: [20, 20] }] };
+    assertEqual(suggestOversizedClueSplit('2020', [20, 5, 5]), expected);
+    assertEqual(suggestOversizedClueSplit('2020', null), expected);
+  });
+
+  // The real trigger case that reactivated this feature (TODO.md): a genuine scan of "4102, 2,
+  // 7" needed "4102" split three ways, "4, 10, 2" — every 2-way reading is structurally
+  // impossible in any reasonably-sized line ("1,102"/"410,2" etc. all exceed realistic clue
+  // sizes once wide enough for "102"/"410" to even be considered, and the ones that don't still
+  // fail some other way), so the empty 2-way tier falls through to the 3-way tier, where exactly
+  // one candidate survives — certain, no gap evidence or confirm click needed.
+  test('a genuine 3-way merge with no legal 2-way reading resolves via the 3-way tier', () => {
+    assertEqual(suggestOversizedClueSplit('4102', undefined, 30), { candidates: [{ parts: [4, 10, 2] }] });
+    // Still resolves the same way even in a tight line where only "4,10,2" (not "41,0,2" etc.)
+    // fits at all.
+    assertEqual(suggestOversizedClueSplit('4102', undefined, 12), { candidates: [{ parts: [4, 10, 2] }] });
+  });
+
+  test('caps genuinely ambiguous candidates at 3, dropping the rest', () => {
+    // "12345" with no line length: every 2-way split is structurally legal (no leading zeros,
+    // every side positive) — 4 candidates ("1,2345" / "12,345" / "123,45" / "1234,5") with no
+    // gap evidence to narrow them, capped to the first 3 in left-to-right cut order.
+    assertEqual(suggestOversizedClueSplit('12345', undefined, undefined), {
+      candidates: [{ parts: [1, 2345] }, { parts: [12, 345] }, { parts: [123, 45] }],
+    });
   });
 });

@@ -477,6 +477,24 @@ repro. (3) Scan size auto-fill: confirmed Rows is first, Columns second;
 typing into Rows now mirrors into Columns until the player edits Columns
 directly. All 871 tests pass. See `TODO.md`'s Completed Tasks for the full
 writeup of all three.
+- **The multi-way-split feature — reactivated off hold and built, per a real trigger case
+  ("4102, 2, 7" needs a genuine 3-way split, "4, 10, 2") the old binary-split-only feature
+  structurally couldn't produce.** `suggestOversizedClueSplit` (`src/ocrSegment.js`) now
+  generates 2-way AND 3-way split candidates, but in TIERS — 3-way is only even considered
+  when zero 2-way splits are legal — which is what keeps this safe against the "1410" fix's
+  own lesson: "1410" has both a legal 2-way ("14, 10") and legal 3-way ("1, 4, 10") reading
+  that a monospaced font's real gap data ties at zero signal, and naively treating both tiers
+  as equally competing candidates would have reintroduced the exact ambiguity that fix closed.
+  Also implements the refined confirmation model requested alongside it: when filtering leaves
+  exactly one legal candidate (2-way or 3-way), `src/scanUI.js`'s `buildClueRow` now applies it
+  directly with no confirm click, reserving the (now up-to-3-button) `scan-clue-row__split-group`
+  UI for genuine remaining ambiguity only — applies to every existing single-candidate case, not
+  just new 3-way ones. 17 unit tests updated/added; verified live against the real 25×25
+  ground-truth scan (no regression) plus a detached-DOM harness driving the real exported
+  split function (since that real image no longer contains any oversized merge to naturally
+  exercise this feature) confirming both the zero-button auto-apply case and a genuinely
+  ambiguous 2-button case render and apply correctly. All 874 tests pass. Not yet checked
+  against a real photo with a genuine multi-number merge or real-device-confirmed.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
@@ -1077,6 +1095,20 @@ page-segmentation-mode issue (the "2"s/"1"s), both root-caused against the
 real ground-truth image and confirmed fixed by re-running the actual scan
 wizard end-to-end — every row and column clue now reads exactly correct.
 No current objective is queued on this front.
+
+**Taking the multi-way-split feature OFF HOLD, plus a refinement to when
+confirmation is required.** Real trigger: "4102, 2, 7" — "4102" needs a
+THREE-way split ("4, 10, 2"), which the current binary-split-only feature
+structurally cannot produce. Reactivating the original on-hold spec (see
+`TODO.md`'s Completed Tasks for the full original spec, preserved
+unchanged). New refinement per direct feedback ("I don't even understand
+really why I even need to verify something like this case"): when
+structural filtering narrows a case down to exactly ONE legal candidate
+(2-way or 3-way), apply it directly with no confirm click — reserve the
+"show buttons, let the player choose" UX specifically for cases where
+genuine ambiguity remains after filtering. Applies to the existing
+binary-split path too, not just new multi-way cases. See `TODO.md` for full
+detail.
 
 The scroll bug's original scan-wizard trigger remains genuinely fixed and
 confirmed, and the library-rename trigger is now ALSO confirmed on the real

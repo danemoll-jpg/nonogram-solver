@@ -1197,9 +1197,11 @@ body {
 .scan-clue-row {
   display: grid;
   grid-template-columns: 3.2rem 1fr;
-  /* 'split split' (see .scan-clue-row__split-btn below) is only occupied while the oversized-
-     clue-number split suggestion is showing — a `hidden` button contributes no size to the
-     grid at all, so this row's own height collapses back to nothing the rest of the time. */
+  /* 'split split' (see .scan-clue-row__split-group below) is only occupied while the oversized-
+     clue-number split suggestion is showing genuinely ambiguous candidates — a `hidden` group
+     contributes no size to the grid at all, so this row's own height collapses back to nothing
+     the rest of the time (including the now-common case where a single certain candidate is
+     applied directly with no button shown). */
   grid-template-areas: 'label thumb' 'input input' 'split split';
   align-items: center;
   gap: 0.35rem 0.5rem;
@@ -1317,14 +1319,25 @@ body {
 }
 
 /* Oversized-clue-number split suggestion (Current Objective — see TODO.md and scanUI.js's
-   buildClueRow/suggestSplitFor): styled amber like .scan-clue-row--suspect, since this only
-   ever shows alongside that same oversized-number flag — a real one-click action (like
-   .scan-invert-suspect's flip button) rather than a passive label, but scoped to just this
-   row/this one number, not a whole-photo action. `justify-self: start` keeps it from
-   stretching to the row's full width the way the input above deliberately does. */
-.scan-clue-row__split-btn {
+   buildClueRow/suggestSplitFor), now a GROUP of 1-3 buttons (the multi-way-split feature): one
+   per genuinely ambiguous candidate reading. A single-candidate suggestion is applied directly
+   by refreshFlag with no button shown at all (the refined confirmation model — see TODO.md), so
+   this group only ever renders when real ambiguity remains. `justify-self: start` plus `flex`
+   keeps the row of buttons from stretching to the row's full width the way the input above
+   deliberately does, while letting it wrap on a narrow screen if 3 buttons don't fit one line. */
+.scan-clue-row__split-group {
   grid-area: split;
   justify-self: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* Styled amber like .scan-clue-row--suspect, since this only ever shows alongside that same
+   oversized-number flag — a real one-click action (like .scan-invert-suspect's flip button)
+   rather than a passive label, but scoped to just this row/this one number, not a whole-photo
+   action. */
+.scan-clue-row__split-btn {
   background: var(--warn);
   color: var(--felt-darker);
   border: none;
