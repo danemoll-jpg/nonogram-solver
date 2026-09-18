@@ -2814,6 +2814,70 @@ the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
     split feature was put on hold here, then reactivated" — preserved there
     unchanged.
 
+* **Two items — contradiction feedback now respects Auto-check, and mid-drag
+  backtrack un-paints/restores cells — done, preview-verified via real
+  dispatched `PointerEvent` sequences; not yet real-device-confirmed.**
+  - **Contradiction feedback gated behind Auto-check.** Direct report: dinging
+    too much both from a suspected Fill/X mode-selection miss and from
+    deliberately placing scratch X's to gauge remaining space in a line — in
+    both cases the player never wanted automatic error flagging, since
+    Auto-check was off. Root cause wasn't a bug in Auto-check itself
+    (`onCellChanged`, `src/mistakes.js`, was already correctly gated) but a
+    second, entirely independent, always-on mechanism: a row/column turning
+    logically unsatisfiable (`isLineConsistent`) already turned its clue red
+    and played `error` regardless of the Auto-check toggle, since it's a
+    structural check against the clue, not the puzzle's solution. Per direct
+    follow-up request ("I'd rather it match the auto-check feature"), both the
+    red `.contradiction` class (`syncAllCellVisuals`) and its `error` sound
+    (`applyMoveWithSound`, both `app.js`) are now suppressed unless
+    `autoCheckEnabled` is true. `isLineConsistent`'s real result is still
+    computed and used unconditionally for `applyAnchoredClasses`' per-number
+    gray-out, which is a genuine deduction, not a "you're wrong" signal, and
+    stays correct either way. Verified directly: filling two adjacent cells in
+    a `[1,1]`-clued row (an unmistakable contradiction) produced no red clue
+    and no `error` sound with Auto-check off, then produced both (plus the
+    expected solution-based mistake sound) once re-tested with Auto-check on.
+  - **Drag backtrack now un-paints/restores cells.** Direct request: "if I
+    accidentally go further than I want, if I go back it should remove the
+    cell painted or X'd" — the existing live drag-count badge already tracks
+    the gesture's span, but overshooting and pulling back left every
+    over-painted cell stuck. `dragging` (`app.js`'s `attachPointerHandlers`)
+    gains `paintedPath`, a `"row,col" → priorState` map populated only by the
+    drag's own sweep-painted cells (never the pressed start cell, which is
+    always a span endpoint and so can never fall outside it). Each
+    `pointermove`, once axis-locked, recomputes the valid span (start cell to
+    current position, inclusive — the same range the count badge measures)
+    and reverts any `paintedPath` entry that's fallen outside it back to its
+    pre-drag state via the existing `paintCell` path (so it gets the same
+    auto-X-revert/lock handling a manual erase already has), then drops it
+    from `paintedPath`/`touched` so extending the drag forward over it again
+    repaints fresh. Symmetric for Eraser mode (restores a mark backtracked out
+    of an erase-drag's span) since the mechanism doesn't special-case which
+    direction the mode paints. A cell painted then reverted within the same
+    gesture nets to a no-op (`prev === next`) in `dragging.batch` and is
+    dropped rather than committed as a spurious history cell.
+    `mergeIntoBatch`'s comment (claiming a drag's own path could never revisit
+    a cell) was updated — this feature is precisely a case where it now can.
+    Verified directly: a Fill-mode drag from column 0 through an overshoot to
+    column 3, backtracked to column 1, left exactly columns 0-1 filled (2 and
+    3 correctly reverted to blank) both mid-gesture and after `pointerup`;
+    Undo/Redo afterward each treated the whole trimmed gesture as one unit
+    (matching the existing whole-drag-is-one-history-entry design); a
+    parallel Eraser-mode test on an already-filled, locked row confirmed a
+    backtracked-out cell correctly came back `filled`. All 874 tests pass
+    (pure `app.js` DOM/pointer change, same "no jsdom in this project" reason
+    the axis-lock feature also shipped without a new automated test).
+  - **Not investigated this round, flagged for awareness rather than guessed
+    at**: whether the Fill/X mode toggle can itself occasionally fail to
+    register a click was raised as color for why the contradiction dinging
+    felt unearned, but no separate mode-toggle bug was found or fixed —
+    `setMode`/the toggle's click handlers (`app.js`) read cleanly with no
+    obvious race. If this keeps happening even with contradiction feedback
+    now silent under Auto-check-off, it's the same shape of hard-to-pin-down
+    input bug as the existing tap-mismatch report — worth capturing with the
+    existing `?debug=taps` diagnostic tool (see the tap-mismatch investigation
+    above) rather than guessing further.
+
 Current Objective (Focus Area)
 
 **No current objective is queued right now.**

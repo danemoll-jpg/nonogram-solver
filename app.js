@@ -603,14 +603,21 @@ function syncAllCellVisuals() {
     const row = board.getRow(r);
     const consistent = isLineConsistent(row, puzzle.rowClues[r]);
     rowClueEls[r].classList.toggle('satisfied', isLineSatisfied(row, puzzle.rowClues[r]));
-    rowClueEls[r].classList.toggle('contradiction', !consistent);
+    // Direct feedback: contradiction feedback (the red clue + its 'error' sound, applyMoveWithSound
+    // below) should match Auto-check's own on/off state, same as the solution-based mistake popup
+    // — a player using X's to scratch out remaining space, or one who fat-fingered Fill/X, doesn't
+    // want either kind of automatic error flagging while Auto-check is off. `consistent` itself is
+    // still computed unconditionally, since applyAnchoredClasses' per-number gray-out below is a
+    // real deduction (not a "you're wrong" signal) and depends on knowing the line's true
+    // consistency regardless of this display gate.
+    rowClueEls[r].classList.toggle('contradiction', !consistent && autoCheckEnabled);
     applyAnchoredClasses(rowClueEls[r], row, puzzle.rowClues[r], consistent);
   }
   for (let c = 0; c < puzzle.cols; c++) {
     const col = board.getCol(c);
     const consistent = isLineConsistent(col, puzzle.colClues[c]);
     colClueEls[c].classList.toggle('satisfied', isLineSatisfied(col, puzzle.colClues[c]));
-    colClueEls[c].classList.toggle('contradiction', !consistent);
+    colClueEls[c].classList.toggle('contradiction', !consistent && autoCheckEnabled);
     applyAnchoredClasses(colClueEls[c], col, puzzle.colClues[c], consistent);
   }
   applyHighlightClasses();
@@ -1322,7 +1329,10 @@ function applyMoveWithSound(changes, opts) {
   // lock/batchCompleteChime above already being exactly-one-sound-per-move.
   if (!justLocked && anyNewlyAnchored(anchoredBefore, allAnchoredSnapshot())) playSound('anchor');
 
-  if (anyNewlyTrue(contradictionBefore, allContradictionSnapshot())) playSound('error');
+  // Direct feedback: gated behind Auto-check, same as the red clue highlight above (syncAllCellVisuals)
+  // and the solution-based mistake popup (onCellChanged) — all three are "automatic error flagging"
+  // from the player's point of view, so Auto-check off means none of them fire.
+  if (autoCheckEnabled && anyNewlyTrue(contradictionBefore, allContradictionSnapshot())) playSound('error');
   return applied;
 }
 
@@ -1435,9 +1445,12 @@ function attachPointerHandlers(grid) {
       const key = `${cell.row},${cell.col}`;
       const existing = batch.get(key);
       // Keep the ORIGINAL prev (the state before this gesture touched the cell at all) but the
-      // LATEST next/auto — the only way a gesture can revisit the same cell is auto-X extras
-      // being recomputed across steps (see computeAutoXExtras), never the drag's own swept path
-      // (dragging.touched already dedupes that at the call site).
+      // LATEST next/auto. A gesture can revisit the same cell two ways: auto-X extras being
+      // recomputed across steps (see computeAutoXExtras), or the drag's own swept path via the
+      // backtrack-erase revert above (dragging.touched/paintedPath deliberately un-dedupe a
+      // cell once it's reverted, so extending the drag back over it re-enters here) — either
+      // way, keeping the true original prev is what lets a paint-then-revert net out to a
+      // no-op (prev === next) instead of misreporting the gesture's real starting state.
       if (existing) {
         existing.next = cell.next;
         existing.auto = cell.auto;
@@ -1593,6 +1606,13 @@ function attachPointerHandlers(grid) {
     dragging = {
       paintState,
       touched: new Set([`${r},${c}`]),
+      // Backtrack-erase (Current Objective): the board state each cell had immediately BEFORE
+      // this drag painted it, keyed by "row,col" — only cells this gesture's own sweep actually
+      // changed, never the pressed start cell or an auto-X side effect (see the pointermove
+      // loop below, the only writer). Used to revert a cell back to that prior state the moment
+      // the pointer backs up past it, so overshooting a drag and pulling back removes the
+      // unwanted marks instead of leaving them stuck.
+      paintedPath: new Map(),
       count: 0,
       lastRow: r,
       lastCol: c,
@@ -1676,10 +1696,48 @@ function attachPointerHandlers(grid) {
       dragging.touched.add(key);
       const cellEl = cellEls.get(key);
       if (!cellEl) continue;
-      paintCell(cellEl, dragging.paintState, { dragStep: true });
+      const prevState = board.get(r, c);
+      if (paintCell(cellEl, dragging.paintState, { dragStep: true })) {
+        dragging.paintedPath.set(key, prevState);
+      }
     }
     dragging.lastRow = r1;
     dragging.lastCol = c1;
+
+    // Backtrack-erase (Current Objective — direct request: "if I accidentally go further than
+    // I want, if I go back it should remove the cell painted or X'd"). Once the drag is
+    // axis-locked, its valid span is exactly the run from the start cell to the current
+    // position (the same span the count badge below measures) — any cell this gesture itself
+    // painted that now falls outside that shrunken span gets reverted to whatever it was right
+    // before this gesture touched it, and dropped from `touched`/`paintedPath` so extending the
+    // drag forward over it again repaints it fresh. Only ever touches this gesture's own
+    // sweep-painted cells (paintedPath's one writer, above) — never the pressed start cell
+    // (always a span endpoint, so never excluded) or an auto-X side effect (mergeIntoBatch nets
+    // those out to the same result regardless of how many times a cell is revisited).
+    if (dragging.lockAxis && dragging.paintedPath.size > 0) {
+      const spanKeys = new Set();
+      if (dragging.lockAxis === 'row') {
+        const lo = Math.min(dragging.startCol, c1);
+        const hi = Math.max(dragging.startCol, c1);
+        for (let cc = lo; cc <= hi; cc++) spanKeys.add(`${dragging.startRow},${cc}`);
+      } else {
+        const lo = Math.min(dragging.startRow, r1);
+        const hi = Math.max(dragging.startRow, r1);
+        for (let rr = lo; rr <= hi; rr++) spanKeys.add(`${rr},${dragging.startCol}`);
+      }
+      for (const [key, prevState] of dragging.paintedPath) {
+        if (spanKeys.has(key)) continue;
+        const cellEl = cellEls.get(key);
+        const [rr, cc] = key.split(',').map(Number);
+        if (cellEl && board.get(rr, cc) !== prevState) paintCell(cellEl, prevState);
+        dragging.paintedPath.delete(key);
+        dragging.touched.delete(key);
+        // A cell painted then reverted within the same gesture nets to no real change — drop it
+        // from the batch entirely rather than committing a no-op history cell (prev === next).
+        const entry = dragging.batch.get(key);
+        if (entry && entry.prev === entry.next) dragging.batch.delete(key);
+      }
+    }
 
     // Current Objective (TODO.md item 2): the badge counts the drag's actual SPAN along its
     // locked axis (start to current position), not how many cells it happened to newly paint —

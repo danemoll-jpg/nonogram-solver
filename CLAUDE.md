@@ -495,6 +495,38 @@ writeup of all three.
   exercise this feature) confirming both the zero-button auto-apply case and a genuinely
   ambiguous 2-button case render and apply correctly. All 874 tests pass. Not yet checked
   against a real photo with a genuine multi-number merge or real-device-confirmed.
+- **Two direct-feedback items — contradiction feedback now respects Auto-check, and
+  mid-drag backtrack un-paints/restores cells — done, preview-verified via real dispatched
+  `PointerEvent` sequences; not yet real-device-confirmed.** (1) The "why do I get dinged
+  with Auto-check off" report traced to a second, entirely independent, always-on
+  mechanism: a row/column becoming logically unsatisfiable (`isLineConsistent`) already
+  turned its clue red and played `error` regardless of the Auto-check toggle, since it's a
+  structural check against the clue rather than the puzzle's known solution — Auto-check's
+  own gating (`onCellChanged`, `src/mistakes.js`) was already correct. Per direct request,
+  both the red `.contradiction` class (`syncAllCellVisuals`) and its `error` sound
+  (`applyMoveWithSound`, both `app.js`) are now suppressed unless `autoCheckEnabled` is
+  true; `isLineConsistent`'s real result stays used unconditionally for the per-number
+  anchored gray-out, a genuine deduction rather than a "you're wrong" signal. (2) Direct
+  request: "if I accidentally go further than I want, if I go back it should remove the
+  cell painted or X'd." `dragging` (`app.js`) gains `paintedPath`, a `"row,col" →
+  priorState` map of only this gesture's own sweep-painted cells; each `pointermove`, once
+  axis-locked, recomputes the valid span (start cell to current position, the same range
+  the live count badge already measures) and reverts any entry that's fallen outside it
+  back to its pre-drag state via the existing `paintCell` path (so it gets the same
+  auto-X-revert/lock handling a manual erase already has), dropping it from
+  `paintedPath`/`touched` so extending the drag forward over it again repaints fresh.
+  Symmetric for Eraser mode (restores a mark backtracked out of an erase-drag's span). A
+  cell painted then reverted within the same gesture nets to a no-op in `dragging.batch`
+  and is dropped rather than committed as a spurious history cell. Verified directly: a
+  Fill-mode drag overshoot-then-backtrack left exactly the intended span filled, both
+  mid-gesture and after release, with Undo/Redo still treating the whole trimmed gesture
+  as one unit; a parallel Eraser-mode test confirmed a backtracked-out cell came back
+  filled. All 874 tests pass. **Not investigated this round**: whether the Fill/X mode
+  toggle can itself occasionally fail to register a click (raised as color for why the
+  contradiction dinging felt unearned) — `setMode`'s click handlers read cleanly with no
+  obvious bug; if it recurs now that contradiction feedback is silent under Auto-check-off,
+  worth capturing with the existing `?debug=taps` diagnostic tool rather than guessing
+  further. See `TODO.md`'s Completed Tasks for the full writeup.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
