@@ -2878,6 +2878,22 @@ the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
     existing `?debug=taps` diagnostic tool (see the tap-mismatch investigation
     above) rather than guessing further.
 
+* **Mistake count now only charges what Auto-check or "Check my work" actually
+  surfaces — done, preview-verified; not yet real-device-confirmed.** Direct
+  report: got charged mistakes even with no red marks showing. Cause:
+  `computeCompletionStats` (`app.js`) derived "mistakes" from move history —
+  every cell ever written to a state disagreeing with the solution, checked or
+  not, and since `UNKNOWN` never equals the solution's FILLED/EMPTY it also
+  charged every plain erase. Replaced with a `mistakesFound` Set of "row,col"
+  keys, reset in `startPuzzle`, added to only by `onCellChanged` (Auto-check
+  flags a mark) and `runOnDemandCheck` (Check my work finds a wrong move/cell);
+  a Set so re-running Check on the same wrong cell doesn't double-charge.
+  Deliberately NOT charged: "Remove bad marks" (already counts as a hint use).
+  Still not carried across save/resume, same as the old history-derived count.
+  Verified in preview with network blocked so the completion writes couldn't
+  reach production: wrong-then-self-cleaned with Auto-check off → 0; wrong then
+  Check twice then cleaned → 1; wrong with Auto-check on → 1. All 874 tests pass.
+
 Current Objective (Focus Area)
 
 **No current objective is queued right now.**

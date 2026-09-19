@@ -527,6 +527,11 @@ writeup of all three.
   obvious bug; if it recurs now that contradiction feedback is silent under Auto-check-off,
   worth capturing with the existing `?debug=taps` diagnostic tool rather than guessing
   further. See `TODO.md`'s Completed Tasks for the full writeup.
+- **Mistake count now only charges what Auto-check or "Check my work" surfaces — done,
+  preview-verified.** It used to be derived from move history (every wrong or even merely
+  erased cell ever written, checked or not); now a `mistakesFound` Set in `app.js`, filled
+  only by `onCellChanged` (Auto-check) and `runOnDemandCheck`, deduped per cell. "Remove bad
+  marks" is deliberately not charged (it already counts as a hint). See `TODO.md`.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)

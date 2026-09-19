@@ -58,6 +58,12 @@ let puzzleCompleteShown = false;
 // always max(what history currently shows, this) — see runUndo/applyHintDeduction's call
 // sites and computeCompletionStats below.
 let hintsUsedFloor = 0;
+// Direct feedback: a mistake only counts once the player's own Auto-check or "Check my work"
+// actually surfaces it — never silently derived from history, so a wrong mark the player
+// notices and cleans up on their own (or an ordinary erase) costs nothing. A Set of "row,col"
+// keys so re-running Check on the same still-wrong cell doesn't charge it twice. Like the old
+// history-derived count, not carried across a save/resume.
+let mistakesFound = new Set();
 
 // Cells currently EMPTY *because* auto-X put them there when their line completed — as
 // opposed to a cell the player deliberately marked empty themselves. Line-locking needs
@@ -289,6 +295,7 @@ function startPuzzle(p) {
   highlightedCells = [];
   autoXCells = new Set();
   hintsUsedFloor = 0;
+  mistakesFound = new Set();
   activeElapsedMs = 0;
   activeSegmentStart = document.hidden ? 0 : Date.now();
   puzzleCompleteShown = false;
@@ -744,19 +751,15 @@ function resumeActiveTime() {
   if (!activeSegmentStart) activeSegmentStart = Date.now();
 }
 
-// Hints-used and mistakes-made are both derived from move history rather than tracked with
-// separate live counters — applyHintDeduction tags hint-originated moves with source:'hint',
-// and any cell ever written to a state that disagrees with the solution counts as a caught
-// mistake, whether or not the player ever ran Check my work.
+// Hints-used is derived from move history rather than a separate live counter —
+// applyHintDeduction tags hint-originated moves with source:'hint'. Mistakes are NOT derived
+// from history (that used to charge every wrong or even merely-erased cell the player ever
+// wrote, checked or not) — see mistakesFound.
 function computeCompletionStats() {
   let hintsUsed = 0;
-  let mistakes = 0;
+  const mistakes = mistakesFound.size;
   for (const move of board.history) {
     if (move.source === 'hint') hintsUsed++;
-    for (const cell of move.cells) {
-      const correct = puzzle.solution[cell.row][cell.col] ? FILLED : EMPTY;
-      if (cell.next !== correct) mistakes++;
-    }
   }
   // Undo button (Current Objective — see TODO.md): a used hint is permanent even if the move
   // it produced is later undone (confirmed with the project owner) — but undoLast() actually
@@ -1797,6 +1800,7 @@ function onCellChanged(r, c) {
   if (autoCheckEnabled && puzzle.solution) {
     const mistake = autoCheckMark(board, puzzle.solution, r, c);
     if (mistake) {
+      mistakesFound.add(`${r},${c}`);
       // Current Objective (TODO.md item 4): the actual signal this diagnostic tool exists to
       // catch — a mistake charged on a cell, tied back to whichever pointerdown/pointerup lines
       // immediately precede it in the same history log.
@@ -1877,6 +1881,7 @@ function runOnDemandCheck({ fromPopup = false } = {}) {
       setExplain('No mistakes found in your moves so far.');
       return;
     }
+    mistakesFound.add(`${result.cell.row},${result.cell.col}`);
     const container = document.createElement('div');
     const text = document.createElement('p');
     text.style.margin = '0';
@@ -1904,6 +1909,7 @@ function runOnDemandCheck({ fromPopup = false } = {}) {
       setExplain('No mistakes found.');
       return;
     }
+    for (const c of result.wrongCells) mistakesFound.add(`${c.row},${c.col}`);
     setExplain(
       `${result.wrongCells.length} cell(s) don't match the puzzle — highlighted on the board. ` +
       `This puzzle came from a scan with no move history, so there's no single point to undo to.`
