@@ -1524,7 +1524,7 @@ function attachPointerHandlers(grid) {
       cellEl.classList.toggle('filled', cell.next === FILLED);
       cellEl.classList.toggle('empty', cell.next === EMPTY);
     }
-    for (const cell of applied) onCellChanged(cell.row, cell.col);
+    for (const cell of applied) onCellChanged(cell.row, cell.col, !!cell.auto);
     return true;
   }
 
@@ -1796,11 +1796,13 @@ function attachPointerHandlers(grid) {
   grid.addEventListener('pointercancel', endDrag);
 }
 
-function onCellChanged(r, c) {
+function onCellChanged(r, c, isAuto = false) {
   if (autoCheckEnabled && puzzle.solution) {
     const mistake = autoCheckMark(board, puzzle.solution, r, c);
     if (mistake) {
-      mistakesFound.add(`${r},${c}`);
+      // An auto-X side effect still gets flagged below, but only marks the player placed
+      // themselves are charged as mistakes.
+      if (!isAuto) mistakesFound.add(`${r},${c}`);
       // Current Objective (TODO.md item 4): the actual signal this diagnostic tool exists to
       // catch — a mistake charged on a cell, tied back to whichever pointerdown/pointerup lines
       // immediately precede it in the same history log.
@@ -1881,7 +1883,7 @@ function runOnDemandCheck({ fromPopup = false } = {}) {
       setExplain('No mistakes found in your moves so far.');
       return;
     }
-    mistakesFound.add(`${result.cell.row},${result.cell.col}`);
+    if (!result.auto) mistakesFound.add(`${result.cell.row},${result.cell.col}`);
     const container = document.createElement('div');
     const text = document.createElement('p');
     text.style.margin = '0';
@@ -1927,14 +1929,19 @@ els.menuCheck.addEventListener('click', () => {
 els.menuRemoveBad.addEventListener('click', () => {
   closeHelpMenu();
   if (!puzzle.solution) return;
+  const autoBefore = autoXCells;
   const applied = removeBadMarks(board, puzzle.solution);
   // Undo button (Current Objective — see TODO.md): removeBadMarks batches every wrong cell
   // into one source:'hint' move (mistakes.js) — same "one floor bump per hint move" rule
   // applyMoveWithSound uses, kept in sync here since this path doesn't go through it.
   if (applied.length > 0) hintsUsedFloor++;
-  // Every cell it cleared was a wrong mark it just found, so each one is a mistake (see
-  // mistakesFound) on top of counting as a hint.
-  for (const cell of applied) mistakesFound.add(`${cell.row},${cell.col}`);
+  // Every cell it cleared was a wrong mark it just found, so each one the player placed
+  // themselves is a mistake (see mistakesFound) on top of counting as a hint. Auto-X marks that
+  // only exist because of one of those mistakes are cleared too but aren't charged separately.
+  for (const cell of applied) {
+    const key = `${cell.row},${cell.col}`;
+    if (!autoBefore.has(key)) mistakesFound.add(key);
+  }
   clearHighlights();
   setExplain(null);
   syncAllCellVisuals();

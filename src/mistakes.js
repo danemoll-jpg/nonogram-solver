@@ -51,6 +51,7 @@ export function checkForMistakes(board, solution) {
             cell: { row: cell.row, col: cell.col },
             markedAs: cell.next,
             shouldBe: correct,
+            auto: !!cell.auto, // an auto-X side effect, not a mark the player chose to place
           };
         }
       }
