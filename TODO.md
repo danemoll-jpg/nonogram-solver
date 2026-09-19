@@ -2888,7 +2888,7 @@ the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
   keys, reset in `startPuzzle`, added to only by `onCellChanged` (Auto-check
   flags a mark) and `runOnDemandCheck` (Check my work finds a wrong move/cell);
   a Set so re-running Check on the same wrong cell doesn't double-charge.
-  Deliberately NOT charged: "Remove bad marks" (already counts as a hint use).
+  "Remove bad marks" also charges every cell it clears (on top of counting as a hint).
   Still not carried across save/resume, same as the old history-derived count.
   Verified in preview with network blocked so the completion writes couldn't
   reach production: wrong-then-self-cleaned with Auto-check off → 0; wrong then

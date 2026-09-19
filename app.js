@@ -1932,6 +1932,9 @@ els.menuRemoveBad.addEventListener('click', () => {
   // into one source:'hint' move (mistakes.js) — same "one floor bump per hint move" rule
   // applyMoveWithSound uses, kept in sync here since this path doesn't go through it.
   if (applied.length > 0) hintsUsedFloor++;
+  // Every cell it cleared was a wrong mark it just found, so each one is a mistake (see
+  // mistakesFound) on top of counting as a hint.
+  for (const cell of applied) mistakesFound.add(`${cell.row},${cell.col}`);
   clearHighlights();
   setExplain(null);
   syncAllCellVisuals();

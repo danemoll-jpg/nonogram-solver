@@ -531,7 +531,7 @@ writeup of all three.
   preview-verified.** It used to be derived from move history (every wrong or even merely
   erased cell ever written, checked or not); now a `mistakesFound` Set in `app.js`, filled
   only by `onCellChanged` (Auto-check) and `runOnDemandCheck`, deduped per cell. "Remove bad
-  marks" is deliberately not charged (it already counts as a hint). See `TODO.md`.
+  marks" also charges every cell it clears, on top of counting as a hint. See `TODO.md`.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
