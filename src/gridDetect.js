@@ -404,6 +404,32 @@ export function sliceHorizontal(rect, n) {
   }));
 }
 
+// Fraction of a clue strip's own width/height a crop margin is allowed to reach, on top of
+// the flat `maxMarginPx` cap already in force. Exists because a flat pixel margin (fine
+// while cells are large) doesn't shrink along with the strip it's padding — confirmed
+// against a real 39x30 scan, where a flat 4px margin (harmless on every previously-tested
+// puzzle, all <=30 columns) reached past a shrunken row's own bottom edge into the next
+// row's clue text, and the same pattern applies to a shrunken COLUMN's left/right edges
+// too, just less visibly since column clues already stack vertically with more headroom.
+// See scanUI.js's cropStripCanvas, this function's only caller — kept here as a pure,
+// canvas-free calculation so it's directly unit-testable (see test/gridDetect.test.js)
+// without needing a DOM/Canvas the rest of that module requires.
+const STRIP_MARGIN_FRACTION = 0.15;
+
+// Given a clue strip's own un-padded width/height (in whatever pixel space the caller
+// works in) and the flat margin it would otherwise use everywhere, returns the actual
+// per-axis margin to apply: never more than `maxMarginPx` (so every strip at least as
+// large as before keeps the exact same margin it always had), but capped further to
+// STRIP_MARGIN_FRACTION of the strip's own size along that axis once the strip itself
+// shrinks below the point where the flat margin would safely fit — that's the "cross into
+// the next row/column" case this function exists to prevent.
+export function stripCropMargin(widthPx, heightPx, maxMarginPx) {
+  return {
+    marginX: Math.min(maxMarginPx, widthPx * STRIP_MARGIN_FRACTION),
+    marginY: Math.min(maxMarginPx, heightPx * STRIP_MARGIN_FRACTION),
+  };
+}
+
 // Slices the grid rect itself into a rows x cols grid of cell rectangles — the fill-state
 // detection objective's equivalent of sliceHorizontal/sliceVertical above, which slice the
 // CLUE bands. Same even-subdivision tradeoff as the rest of this file (see the file-level

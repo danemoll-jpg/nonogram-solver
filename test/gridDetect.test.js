@@ -10,6 +10,7 @@ import {
   computeClueBands,
   sliceHorizontal,
   sliceVertical,
+  stripCropMargin,
   findGridCandidates,
   detectBestGrid,
   adaptiveBinarize,
@@ -313,6 +314,42 @@ describe('sliceHorizontal / sliceVertical', () => {
     assertEqual(strips[0], { left: 0, right: 10, top: 0, bottom: 10 });
     assertEqual(strips[1], { left: 10, right: 20, top: 0, bottom: 10 });
     assertEqual(strips[2], { left: 20, right: 30, top: 0, bottom: 10 });
+  });
+});
+
+// Regression test for the 39x30-scan row/column-clue crop bleed bug: a flat, fixed-pixel
+// strip margin (scanUI.js's old STRIP_MARGIN_PX applied everywhere) doesn't shrink along
+// with the strip it pads, so once a puzzle has enough rows/columns to force a heavily
+// zoomed-out screenshot, the margin reaches past a row's own bottom edge (or a narrow
+// column's own left/right edges) into the next line's clue text — reported directly from a
+// real 39x30 scan (30-row puzzles with fewer columns, and thus bigger cells, had never
+// shown this). stripCropMargin is the fix's pure geometry half (the actual crop, in
+// scanUI.js's cropStripCanvas, needs a real canvas and isn't unit-testable here).
+describe('stripCropMargin', () => {
+  test('caps at maxMarginPx for a strip much bigger than the cap — no regression for large cells', () => {
+    // A generously-sized row strip (big cells, like every puzzle that scanned fine before).
+    const { marginX, marginY } = stripCropMargin(500, 60, 4);
+    assertEqual(marginX, 4);
+    assertEqual(marginY, 4);
+  });
+
+  test('shrinks below maxMarginPx once the strip itself is small — the actual fix', () => {
+    // A short row strip, e.g. a 39-column puzzle's zoomed-out row height in full-canvas px.
+    const { marginY } = stripCropMargin(500, 16, 4);
+    assert(marginY < 4, `expected a shrunk margin below the 4px cap, got ${marginY}`);
+    assert(marginY > 0, 'margin should never go all the way to zero');
+  });
+
+  test('is symmetric — a narrow column strip shrinks its horizontal margin the same way', () => {
+    // A narrow column strip, e.g. a 39-column puzzle's column width in full-canvas px.
+    const { marginX, marginY } = stripCropMargin(16, 500, 4);
+    assert(marginX < 4, `expected a shrunk horizontal margin, got ${marginX}`);
+    assertEqual(marginY, 4);
+  });
+
+  test('never exceeds the strip\'s own dimension — no margin bigger than the strip itself', () => {
+    const { marginX, marginY } = stripCropMargin(10, 10, 4);
+    assert(marginX <= 10 && marginY <= 10, `margin exceeded the strip's own size: ${marginX}, ${marginY}`);
   });
 });
 

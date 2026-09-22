@@ -40,6 +40,7 @@ import {
   sliceVertical,
   sliceGridCells,
   detectBestGrid,
+  stripCropMargin,
 } from './gridDetect.js';
 import { parseClueText, buildScannedPuzzle } from './scanPuzzle.js';
 import { savePuzzleToLibrary } from './puzzleLibrary.js';
@@ -612,6 +613,15 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   // more meaningful: genuine zero-margin (but otherwise correct) rendering no longer trips
   // it just from lack of padding, so a line still touching this WIDER edge is a stronger
   // signal that something (not just typography) is really being cut off.
+  //
+  // This is a CAP, not a flat amount actually applied everywhere — see gridDetect.js's
+  // stripCropMargin, used below. A real 39x30 scan (more columns than any previously-tested
+  // puzzle) showed this flat 4px genuinely bleeding into the NEXT row's clue text: the
+  // overall photo's zoom-out (needed to fit the extra columns on screen) shrank every row's
+  // own height in the source image, and a margin that stays fixed while the strip around it
+  // shrinks eventually reaches past that strip's own edge into its neighbor's ink — the same
+  // fixed-margin-vs-shrinking-cell mismatch already described above for CROP_PADDING, just
+  // not yet accounted for here.
   const STRIP_MARGIN_PX = 4;
 
   // Crops one analysis-space rect from the full-resolution canvas (scaling it up first),
@@ -621,13 +631,25 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
   function cropStripCanvas(rectAnalysis) {
     const s = state.scaleFullOverAnalysis;
     const { width: fullW, height: fullH } = state.fullCanvas;
-    // Extend by STRIP_MARGIN_PX on every side, then clamp to the full canvas's own bounds
-    // (drawImage would otherwise happily read negative/out-of-bounds source coordinates as
-    // transparent black, corrupting the binarization step's own light/dark read).
-    const sx = Math.max(0, rectAnalysis.left * s - STRIP_MARGIN_PX);
-    const sy = Math.max(0, rectAnalysis.top * s - STRIP_MARGIN_PX);
-    const sxEnd = Math.min(fullW, rectAnalysis.right * s + STRIP_MARGIN_PX);
-    const syEnd = Math.min(fullH, rectAnalysis.bottom * s + STRIP_MARGIN_PX);
+    // Un-padded bounds first, so the margin below can be sized relative to THIS strip's own
+    // width/height rather than a flat constant that ignores how small the strip already is.
+    const baseLeft = rectAnalysis.left * s;
+    const baseTop = rectAnalysis.top * s;
+    const baseRight = rectAnalysis.right * s;
+    const baseBottom = rectAnalysis.bottom * s;
+    const { marginX, marginY } = stripCropMargin(
+      baseRight - baseLeft,
+      baseBottom - baseTop,
+      STRIP_MARGIN_PX
+    );
+    // Extend by the (possibly-shrunk) margin on every side, then clamp to the full canvas's
+    // own bounds (drawImage would otherwise happily read negative/out-of-bounds source
+    // coordinates as transparent black, corrupting the binarization step's own light/dark
+    // read).
+    const sx = Math.max(0, baseLeft - marginX);
+    const sy = Math.max(0, baseTop - marginY);
+    const sxEnd = Math.min(fullW, baseRight + marginX);
+    const syEnd = Math.min(fullH, baseBottom + marginY);
     const sw = Math.max(1, sxEnd - sx);
     const sh = Math.max(1, syEnd - sy);
 

@@ -2894,9 +2894,56 @@ the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
   reach production: wrong-then-self-cleaned with Auto-check off → 0; wrong then
   Check twice then cleaned → 1; wrong with Auto-check on → 1. All 874 tests pass.
 
+* **Real bug found and fixed: the row/column clue-strip crop bled a partial extra line of
+  the NEXT row's (or column's) digits into the correction screen's OCR crop, on a real 39x30
+  scan** — the project owner's own working theory (correlates with cell pixel size, not row
+  count) was correct and pointed straight at the real cause. `cropStripCanvas`
+  (`src/scanUI.js`) extended every clue-strip crop by a flat `STRIP_MARGIN_PX` (4px, in
+  full-canvas pixel space) on all four sides regardless of the strip's own size — harmless
+  while cells render large enough that 4px is a small fraction of a row's own height, but a
+  39-column puzzle forces the whole photo to be zoomed out further to fit on screen (to show
+  the extra columns), shrinking every row's height in pixels too even though row COUNT (30)
+  matched other puzzles that scanned fine. Once a row's own height shrank close to the flat
+  margin's size, the fixed 4px extension reached past that row's bottom edge into the next
+  row's top-anchored ink — exactly the "correct clue on top, a second partial line of the
+  next row's digits underneath" symptom reported directly from the real crop thumbnails. New
+  pure `stripCropMargin(widthPx, heightPx, maxMarginPx)` (`src/gridDetect.js`, kept
+  canvas-free/unit-testable like this file's other geometry helpers) replaces the flat
+  constant with `Math.min(maxMarginPx, dimension * 0.15)` per axis — literally the project
+  owner's own suggested formula — so every strip at least as large as before (every
+  previously-working <=30-column puzzle) keeps the EXACT same 4px margin it always had (the
+  cap makes this a strict no-regression change, provable directly from the formula, not just
+  observed), while a strip small enough for the 15% term to bind gets a proportionally
+  smaller margin instead. Applies identically to both axes from the same crop function, so it
+  fixes the row-crop bleed (vertical/top-bottom) and the equivalent, less-visible
+  column-crop bleed (horizontal/left-right, per this round's item 4) in one change — confirmed
+  symmetric via a dedicated unit test. **Checked item 3 of this round's report directly and
+  ruled it out as a real bug**: `state.rows`/`state.cols` are set exactly once, from the
+  confirmed size-step input, and every downstream consumer (`sliceHorizontal`/
+  `sliceVertical` for clue-band slicing, `sliceGridCells` for fill-state, and the final
+  puzzle build) reads that same confirmed value directly — there is no earlier
+  un-overridden auto-detection pass feeding the crop-slicing path; `detectBestGrid`'s own
+  output is used only to position the grid rectangle, never to supply a row/col count. 4 new
+  unit tests (`test/gridDetect.test.js`) pin the margin-scaling formula itself (caps at the
+  old flat value for a large strip, shrinks below it for a small one, symmetric across both
+  axes, never exceeds the strip's own size); all 878 tests pass. **Not yet verified against
+  the real 39x30 screenshot** — per this item's own request and this project's standing
+  item-10 rule (prefer a real image over synthetic data), the actual photo was meant to be
+  attached for a live before/after check in browser preview, but no image file reached this
+  environment to test against; a synthetic canvas/text render (real DOM `fillText`, not
+  hand-picked pixels) confirmed the mechanism's shape — the old flat margin measurably bleeds
+  into a synthetically-placed "next row," and the new margin is provably always <= the old
+  one for any strip size — but exact real-world digit spacing/font-metric numbers are unknown
+  without the real photo, so this needs the project owner's own real-image check (the same
+  live browser-preview process used to verify every other OCR round) before being treated as
+  fully confirmed.
+
 Current Objective (Focus Area)
 
-**No current objective is queued right now.**
+**No current objective is queued right now — the row/column clue-strip crop bleed fix above
+still needs the project owner's own real-39x30-screenshot verification (no image file
+reached this environment to test against directly), per this item's own request and the
+project's standing item-10 practice.**
 
 Next Steps (Do Not Start Yet)
 

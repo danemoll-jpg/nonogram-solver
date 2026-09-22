@@ -532,6 +532,26 @@ writeup of all three.
   erased cell ever written, checked or not); now a `mistakesFound` Set in `app.js`, filled
   only by `onCellChanged` (Auto-check) and `runOnDemandCheck`, deduped per cell. "Remove bad
   marks" also charges the cells it clears, on top of counting as a hint. Only marks the player placed themselves are charged, never auto-X side effects. See `TODO.md`.
+- **Real bug found and fixed: row/column clue-strip OCR crops bled a partial line of the
+  NEXT row's (or column's) digits into the correction screen on a real 39x30 scan — done,
+  unit-tested; not yet verified against the real screenshot (none reached this
+  environment).** `cropStripCanvas` (`src/scanUI.js`) padded every clue-strip crop with a
+  flat `STRIP_MARGIN_PX` (4px, full-canvas pixel space) on all sides regardless of the
+  strip's own size — harmless at 30 columns, but a 39-column puzzle forces the whole photo
+  to be zoomed out further to fit on screen, shrinking every row's own pixel height too
+  even though row count (30) matched puzzles that scanned fine; once a row's height shrank
+  close to the flat margin's size, the margin reached past that row's own edge into the
+  next row's top-anchored ink. Fixed with new pure `stripCropMargin` (`src/gridDetect.js`):
+  `Math.min(maxMarginPx, dimension * 0.15)` per axis, the project owner's own suggested
+  formula — caps at the exact old 4px for every previously-working strip (provably no
+  regression) while shrinking proportionally once a strip gets small; applies identically
+  to both axes, so it fixes the row-crop bleed and the same-pattern, less-visible
+  column-crop bleed in one change. Also checked directly whether the confirmed row/col
+  count override could be bypassing an earlier un-overridden detection pass for this crop
+  path — it isn't: `state.rows`/`state.cols` are set once from the confirmed size step and
+  read directly by every downstream consumer, including this one. 4 new unit tests; all
+  878 tests pass. See `TODO.md` for the full writeup, including why real-image
+  verification couldn't happen this round.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
