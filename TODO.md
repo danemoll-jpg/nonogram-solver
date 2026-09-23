@@ -2982,6 +2982,76 @@ the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
     and that the fix is a genuine improvement here too, not just a fix for one case with
     unknown side effects elsewhere.
 
+* **New feature — pinch-to-zoom + zoom buttons on the board — built and preview-verified via
+  real dispatched multi-pointer events; not yet real-device-confirmed.** Direct trigger: a
+  real 30x30 puzzle with clues up to 10 numbers deep forced cells down to the app's minimum
+  legible size (`MIN_CELL_PX`) and the board STILL didn't fit the screen width — the player
+  could scroll `board-root` to see the cut-off last column, but asked instead to be able to
+  zoom in/out (a feature they'd wanted to add regardless of this specific report).
+  - **`fitBoardToViewport` (`app.js`) now computes and stores a `baseCellPx`/`baseClueFontPx`**
+    (exactly what it always computed — the size that fits the current viewport at zoom level
+    1) instead of writing those straight to the CSS vars/grid template itself. New
+    `applyZoom()` does that writing, off `baseCellPx * zoomLevel`/`baseClueFontPx * zoomLevel`
+    — so zoom is a multiplier on top of the existing fit-to-viewport size, not a competing
+    sizing system. `zoomLevel` ranges `[1, 4]` (`MIN_ZOOM`/`MAX_ZOOM`) — 1 is exactly today's
+    unzoomed behavior for every puzzle that already fit fine, so this is a strict addition,
+    not a resize of the existing feature.
+  - **`setZoom(newZoom, anchorClientX, anchorClientY)`** changes the level while keeping
+    whatever content point was under the anchor stationary on screen (the standard pinch/
+    zoom-button anchor trick), by adjusting `board-root.scrollLeft/scrollTop` — exact, not
+    approximate, since `applyZoom` scales every dimension (cells, clue margins) by the same
+    ratio, so a content point's pixel position under the current scroll offset scales by that
+    identical ratio too. Shared by both the pinch gesture and the zoom buttons, so they always
+    agree on what "zoom" means.
+  - **Zoom buttons** (`#btn-zoom-out`/`#btn-zoom-in`, in `.board-controls` after Eraser, with
+    the established icon-button + `src/tooltip.js` pattern) anchor on `board-root`'s own
+    current center. The explicit, discoverable path for anyone who doesn't think to pinch (or
+    is on a mouse/trackpad).
+  - **Pinch gesture**: a real integration challenge, not just new code alongside the old —
+    `attachPointerHandlers`'s existing single-pointer paint-drag logic (`dragging`) would
+    otherwise be corrupted by a second finger touching down (pointer events bubble regardless
+    of how many are active, so the grid's own `pointerdown` handler would start a SECOND,
+    independent `dragging` for that finger). Intercepted in a CAPTURE-phase listener on
+    `board-root` (an ancestor of the grid, so it always runs before the grid's own bubble-
+    phase handlers for the same event): once a 2nd pointer is down, `stopPropagation` keeps it
+    from ever reaching the grid's `pointerdown` at all, and any single-finger paint already in
+    progress is committed via the existing `endDrag()` first (whatever it painted so far
+    stands, same as if that finger had simply lifted there). `pointermove`/`pointerup`/
+    `pointercancel` for the gesture are tracked on `window` (capture phase) instead, filtered
+    to only pointers that started on `board-root` — robust to a finger moving outside
+    `board-root`'s bounds mid-gesture, which a pinch legitimately can do. Two-finger PAN
+    (translating the pinch's own midpoint) is applied in the same `pointermove` handler,
+    independent of and alongside the zoom-anchor adjustment — both are just scroll-position
+    deltas, safe to combine in one frame. A stray 3rd touch is ignored (tracked in
+    `activePointers` but doesn't start a second pinch) rather than corrupting the 2-finger
+    gesture already in progress.
+  - **`attachPointerHandlers` runs once per board render** (a fresh call for every new
+    puzzle), so the pinch listeners it installs on `board-root`/`window` are re-created every
+    time too — module-scoped `teardownPinchHandling` removes the PREVIOUS render's listeners
+    first, so they don't accumulate across puzzle switches (unlike listeners added directly to
+    the `grid` element itself, which are naturally discarded with the old grid — `board-root`
+    and `window` are stable, persistent targets that would otherwise leak one extra listener
+    set per puzzle switch).
+  - **`.board-root` gains `touch-action: none`** (previously deliberately NOT set, relying on
+    native `overflow: auto` scroll as `fitBoardToViewport`'s fallback for an imperfect fit) —
+    the new feature reimplements panning itself (two-finger drag, anchored the same way zoom
+    is), so leaving native touch scroll active on `board-root`'s own small padding strip too
+    would just race the JS version for the same gesture. Mouse/trackpad scrolling (wheel,
+    scrollbar drag) is untouched — `touch-action` only governs touch input.
+  - **Zoom resets to 1 on every `startPuzzle`** — it's about examining THIS board, not a
+    lasting preference, same reasoning as the other per-puzzle resets there (elapsed time,
+    mistakes found, etc.).
+  - **Verified with real dispatched multi-pointer `PointerEvent` sequences in browser
+    preview** (same established practice as this project's other pointer-gesture features):
+    a genuine two-finger spread-out gesture zoomed in and clamped correctly at `MAX_ZOOM` (4x);
+    zoom buttons stepped up/down and clamped at both bounds; zooming all the way back out via
+    the buttons returned to EXACTLY the original base size (no drift); a plain single-finger
+    tap-to-fill and a genuine two-cell axis-locked drag both worked identically to before,
+    confirming the pinch interception doesn't disturb ordinary single-finger interaction. Not
+    yet checked on a real touchscreen device — synthetic `PointerEvent`s with `pointerType:
+    'touch'` exercise the same code path but can't fully stand in for real multi-touch
+    hardware/OS gesture-recognition timing.
+
 Current Objective (Focus Area)
 
 **No current objective is queued right now.**

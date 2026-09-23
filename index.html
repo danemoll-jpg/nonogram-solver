@@ -145,6 +145,19 @@
               </g>
             </svg>
           </button>
+
+          <div class="board-controls__gap" aria-hidden="true"></div>
+
+          <!-- Zoom buttons (see TODO.md) — an explicit, discoverable alternative to the pinch
+               gesture app.js's attachPointerHandlers also implements, for a mouse/trackpad or
+               anyone who doesn't think to try pinching a dense puzzle's board. Real trigger: a
+               real 30x30 with clues up to 10 numbers deep forced cells down to the app's
+               minimum legible size and the board STILL didn't fit the screen — horizontal
+               scroll was the only way to see the last column. Each click anchors on
+               board-root's current center, same idea as a pinch anchoring on the fingers' own
+               midpoint (setZoom, shared by both paths). -->
+          <button id="btn-zoom-out" class="btn btn--icon" type="button" aria-label="Zoom out" data-tooltip="Zoom out">－</button>
+          <button id="btn-zoom-in" class="btn btn--icon" type="button" aria-label="Zoom in" data-tooltip="Zoom in">＋</button>
         </div>
 
         <p id="status-line" class="status-line" aria-live="polite"></p>

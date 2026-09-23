@@ -527,6 +527,17 @@ body {
   padding: 0.5rem;
   display: flex;
   justify-content: center;
+  /* Pinch-to-zoom/two-finger pan (see app.js's attachPointerHandlers) now owns every touch
+     gesture within the board area itself — including board-root's own small padding strip,
+     previously the one part of this container NOT covered by .nono-grid's own touch-action:
+     none below. Superseding that rule's old "deliberately NOT set here" reasoning: this used
+     to be relied on as a plain native-scroll fallback for a puzzle fitBoardToViewport's sizing
+     didn't fully fit, but the new feature reimplements panning itself (two-finger drag,
+     anchored the same way the zoom itself is), so leaving native touch scroll active here
+     too would just race the JS version for the same gesture. Mouse/trackpad scrolling
+     (wheel events, dragging a scrollbar) is untouched — touch-action only governs touch
+     input. */
+  touch-action: none;
 }
 
 .nono-grid {
@@ -541,9 +552,9 @@ body {
      own border/corner, or a .nono-clue label, none of which had any touch-action set, so
      the browser was free to start its own native pan gesture right there and "occasionally"
      hijack the drag. Setting it here on the whole grid closes every one of those seams at
-     once. Deliberately NOT set on .board-root (its ancestor, which owns `overflow: auto`)
-     — that's the fallback scroll path for a puzzle fitBoardToViewport's sizing math didn't
-     manage to fully fit on screen, and should keep working if that math is ever imperfect.
+     once. (Since superseded by .board-root's own touch-action: none above, added for the
+     pinch-to-zoom feature — kept here too regardless, since this element is the one that
+     actually needs it and shouldn't depend on an ancestor rule remaining in place.)
      Unrelated to the separate visualViewport/keyboard scroll saga elsewhere in this file. */
   touch-action: none;
 }

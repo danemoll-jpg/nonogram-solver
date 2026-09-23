@@ -572,6 +572,28 @@ writeup of all three.
   `STRIP_MARGIN_PX` with `Math.min(maxMarginPx, dimension * 0.15)` per axis, capping at the
   old value for every previously-working strip while shrinking proportionally once a strip
   genuinely is small. 5 new unit tests total; all 879 tests pass.
+- **New feature: pinch-to-zoom + zoom buttons on the board — done, preview-verified via real
+  dispatched multi-pointer events; not yet real-device-confirmed.** Direct trigger: a real
+  30x30 with clues up to 10 numbers deep forced `MIN_CELL_PX` and the board still didn't fit
+  the screen — scrolling worked, but the project owner wanted to zoom instead (a feature they
+  wanted anyway). `fitBoardToViewport` (`app.js`) now stores its computed size as
+  `baseCellPx`/`baseClueFontPx` rather than writing it straight to the DOM; new `applyZoom()`
+  writes `base * zoomLevel` (range `[1,4]`, 1 = today's exact unzoomed behavior) instead —
+  zoom is a multiplier on the existing fit-to-viewport size, not a competing system.
+  `setZoom(newZoom, anchorX, anchorY)` keeps whatever content point was under the anchor
+  stationary (adjusts `board-root` scroll), shared by both new zoom buttons
+  (`#btn-zoom-out`/`#btn-zoom-in`, anchored on board-root's center) and a real pinch gesture.
+  The pinch gesture required intercepting a 2nd finger's `pointerdown` in a capture-phase
+  listener on `board-root` (ahead of the grid's own bubble-phase handler) — otherwise it would
+  start a second, corrupting `dragging` state for single-cell painting; the in-progress
+  single-finger paint (if any) is committed via the existing `endDrag()` first, and two-finger
+  pan is applied alongside the zoom-anchor adjustment in the same `pointermove`. `.board-root`
+  gains `touch-action: none` (previously deliberately absent, relying on native scroll as a
+  fallback) since the feature now owns panning itself. Zoom resets to 1 on every
+  `startPuzzle`. Verified directly: a real two-finger spread gesture zoomed in and clamped at
+  4x; buttons stepped and clamped at both bounds and returned to exactly the original size at
+  zoom 1; plain single-finger tap and a two-cell axis-locked drag both worked identically to
+  before. Not yet checked on a real touchscreen device.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)

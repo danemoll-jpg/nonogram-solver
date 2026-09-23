@@ -100,6 +100,8 @@ const els = {
   modeFill: document.getElementById('mode-fill'),
   modeX: document.getElementById('mode-x'),
   modeErase: document.getElementById('mode-erase'),
+  btnZoomOut: document.getElementById('btn-zoom-out'),
+  btnZoomIn: document.getElementById('btn-zoom-in'),
   toggleAutocheck: document.getElementById('toggle-autocheck'),
   muteToggle: document.getElementById('mute-toggle'),
   autosaveCadenceSelect: document.getElementById('autosave-cadence-select'),
@@ -299,6 +301,9 @@ function startPuzzle(p) {
   activeElapsedMs = 0;
   activeSegmentStart = document.hidden ? 0 : Date.now();
   puzzleCompleteShown = false;
+  // Zoom is about examining THIS board, not a lasting preference — reset it whenever the
+  // player moves to a different puzzle, same reasoning as the other per-puzzle resets above.
+  zoomLevel = 1;
   setExplain(null);
   els.btnContradiction.classList.add('hidden');
   hideMistakePopup();
@@ -516,10 +521,75 @@ function fitBoardToViewport() {
     )
   );
 
+  // Pinch-to-zoom (see applyZoom below): everything above computes the "fits the viewport"
+  // size at zoom level 1 — the size a puzzle this dense (especially many-numbered clues, per
+  // the real report this responds to) can shrink cells/clue text down to just to avoid
+  // horizontal scroll. Stashing it as the BASE size, rather than writing it straight to the
+  // CSS vars/grid template here, is what lets applyZoom scale up from a stable reference point
+  // instead of compounding off whatever the previous zoom level happened to leave behind.
+  baseCellPx = cellPx;
+  baseClueFontPx = clueFontPx;
+  applyZoom();
+}
+
+// Multiplier applied on top of fitBoardToViewport's own base (zoom=1) size — see that
+// function's own comment. 1 is exactly what fitBoardToViewport already computed (unchanged
+// behavior for every puzzle that already fit fine); above 1 is the new pinch-to-zoom/zoom-
+// button feature, letting a player looking at a small-celled dense puzzle (this feature's own
+// motivating report: a real 30x30 with clues up to 10 numbers deep, forcing MIN_CELL_PX and
+// still not fitting on screen — see TODO.md) zoom into one section at a time rather than being
+// stuck at whatever size fits the WHOLE board on screen at once.
+let zoomLevel = 1;
+const MIN_ZOOM = 1; // never smaller than "fits the viewport" -- there's no reason to
+const MAX_ZOOM = 4;
+const ZOOM_BUTTON_STEP = 1.25;
+let baseCellPx = MIN_CELL_PX;
+let baseClueFontPx = MIN_CLUE_FONT_PX;
+
+// Re-renders the grid at baseCellPx/baseClueFontPx * zoomLevel — the only place either the
+// zoom level OR the base size actually gets written to the DOM (fitBoardToViewport calls this
+// once it's updated the base; setZoom calls it after changing the level). Cheap enough to call
+// on every pinch pointermove sample: it's the same handful of style writes
+// fitBoardToViewport's own tail end already did per full re-fit, just parameterized.
+function applyZoom() {
+  if (!puzzle) return;
+  const grid = els.boardRoot.querySelector('.nono-grid');
+  if (!grid) return;
+  const maxRowClueLen = Math.max(1, ...puzzle.rowClues.map((c) => c.length));
+  const maxColClueLen = Math.max(1, ...puzzle.colClues.map((c) => c.length));
+  const cellPx = Math.round(baseCellPx * zoomLevel);
+  const clueFontPx = baseClueFontPx * zoomLevel;
+  const clueColWidth = (maxRowClueLen * CLUE_DIGIT_PER_FONT + CLUE_BASE_PER_FONT) * clueFontPx;
+  const clueRowHeight = (maxColClueLen * CLUE_DIGIT_PER_FONT + CLUE_BASE_PER_FONT) * clueFontPx;
   document.documentElement.style.setProperty('--cell-size', `${cellPx}px`);
   document.documentElement.style.setProperty('--clue-font-size', `${clueFontPx}px`);
   grid.style.gridTemplateColumns = `${clueColWidth}px repeat(${puzzle.cols}, ${cellPx}px)`;
   grid.style.gridTemplateRows = `${clueRowHeight}px repeat(${puzzle.rows}, ${cellPx}px)`;
+}
+
+// Changes the zoom level while keeping whatever content point was under (anchorClientX,
+// anchorClientY) stationary on screen — the standard "pinch/zoom-button anchor" trick. Works
+// exactly (not just approximately) because applyZoom scales EVERY dimension (cells, clue
+// margins) by the same zoomLevel ratio, so a content point's pixel position under the current
+// scroll offset scales by that identical ratio too; no separate per-axis measurement needed.
+function setZoom(newZoomRaw, anchorClientX, anchorClientY) {
+  const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoomRaw));
+  if (newZoom === zoomLevel) return;
+  const rect = els.boardRoot.getBoundingClientRect();
+  const ratio = newZoom / zoomLevel;
+  const contentX = els.boardRoot.scrollLeft + (anchorClientX - rect.left);
+  const contentY = els.boardRoot.scrollTop + (anchorClientY - rect.top);
+  zoomLevel = newZoom;
+  applyZoom();
+  els.boardRoot.scrollLeft = contentX * ratio - (anchorClientX - rect.left);
+  els.boardRoot.scrollTop = contentY * ratio - (anchorClientY - rect.top);
+}
+
+// The zoom +/- buttons anchor on board-root's own current center, so repeated clicks zoom
+// toward whatever's already in the middle of view rather than drifting toward a corner.
+function zoomByStep(factor) {
+  const rect = els.boardRoot.getBoundingClientRect();
+  setZoom(zoomLevel * factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
 }
 
 // Bug fix (iOS scroll regression, "baseline" symptom — see TODO.md): body's own
@@ -1390,6 +1460,14 @@ function runRedo() {
 }
 els.btnRedo.addEventListener('click', runRedo);
 
+// ---- zoom buttons (Current Objective — see TODO.md) ----
+//
+// The explicit, discoverable counterpart to the pinch gesture (attachPointerHandlers, below) —
+// zoomByStep/setZoom (fitBoardToViewport's own section, above) are shared by both paths, so a
+// button click and a pinch always agree on what "zoom" means for this board.
+els.btnZoomOut.addEventListener('click', () => zoomByStep(1 / ZOOM_BUTTON_STEP));
+els.btnZoomIn.addEventListener('click', () => zoomByStep(ZOOM_BUTTON_STEP));
+
 // ---- live drag-fill cell counter (Current Objective — see TODO.md) ----
 //
 // A small floating badge that follows the pointer while the player is click-and-dragging a
@@ -1794,7 +1872,82 @@ function attachPointerHandlers(grid) {
   }
   grid.addEventListener('pointerup', endDrag);
   grid.addEventListener('pointercancel', endDrag);
+
+  // ---- pinch-to-zoom / two-finger pan (Current Objective — see TODO.md) ----
+  //
+  // A second finger touching down mid-gesture would otherwise reach this same function's own
+  // pointerdown handler (events bubble grid -> ... regardless of how many pointers are active)
+  // and start a SECOND, independent `dragging` for that finger, corrupting the first one's
+  // paint-drag. Intercepted here, in the CAPTURE phase on board-root (an ancestor of grid, so
+  // this always runs before grid's own bubble-phase listeners for the same event) — once a
+  // second pointer is down, stopPropagation keeps it from ever reaching grid's pointerdown at
+  // all, and any single-finger paint already in progress is committed via endDrag() first
+  // (whatever it painted so far stands, same as if the finger had simply lifted there).
+  //
+  // Re-created on every call (one per board render — see attachPointerHandlers' own call
+  // site) rather than once at module load, since it needs THIS render's own `dragging`/
+  // `endDrag` closures; teardownPinchHandling (module-scoped, persists across renders) removes
+  // the previous render's listeners first so they don't accumulate on every puzzle switch.
+  teardownPinchHandling?.();
+  const activePointers = new Map(); // pointerId -> {x, y}, only pointers that started on board-root
+  let pinch = null; // { lastDist, lastMid } | null, live only while 2 pointers are down
+
+  function pointDistance(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+  function pointMidpoint(a, b) {
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+
+  function onBoardPointerDownCapture(e) {
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activePointers.size < 2) return; // the first finger — behaves exactly as before
+    e.preventDefault();
+    e.stopPropagation(); // never let this pointerdown reach grid's own handler — see above
+    if (activePointers.size > 2) return; // a stray third touch — ignore it, keep tracking the pinch
+    if (dragging) endDrag();
+    const [p1, p2] = [...activePointers.values()];
+    pinch = { lastDist: pointDistance(p1, p2), lastMid: pointMidpoint(p1, p2) };
+  }
+
+  function onWindowPointerMoveCapture(e) {
+    if (!activePointers.has(e.pointerId)) return; // not part of this board's gesture
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activePointers.size !== 2 || !pinch) return;
+    const [p1, p2] = [...activePointers.values()];
+    const dist = pointDistance(p1, p2);
+    const mid = pointMidpoint(p1, p2);
+    if (pinch.lastDist > 0) setZoom(zoomLevel * (dist / pinch.lastDist), mid.x, mid.y);
+    // Two-finger pan: however much the pinch's own midpoint moved since the last sample, on
+    // top of whatever setZoom above already did to keep IT anchored — independent adjustments
+    // to the same scroll position, both safe to apply in the same frame.
+    els.boardRoot.scrollLeft -= mid.x - pinch.lastMid.x;
+    els.boardRoot.scrollTop -= mid.y - pinch.lastMid.y;
+    pinch.lastDist = dist;
+    pinch.lastMid = mid;
+  }
+
+  function onWindowPointerEndCapture(e) {
+    if (!activePointers.delete(e.pointerId)) return;
+    if (activePointers.size < 2) pinch = null;
+  }
+
+  els.boardRoot.addEventListener('pointerdown', onBoardPointerDownCapture, { capture: true });
+  window.addEventListener('pointermove', onWindowPointerMoveCapture, { capture: true });
+  window.addEventListener('pointerup', onWindowPointerEndCapture, { capture: true });
+  window.addEventListener('pointercancel', onWindowPointerEndCapture, { capture: true });
+  teardownPinchHandling = () => {
+    els.boardRoot.removeEventListener('pointerdown', onBoardPointerDownCapture, { capture: true });
+    window.removeEventListener('pointermove', onWindowPointerMoveCapture, { capture: true });
+    window.removeEventListener('pointerup', onWindowPointerEndCapture, { capture: true });
+    window.removeEventListener('pointercancel', onWindowPointerEndCapture, { capture: true });
+  };
 }
+
+// Persists across attachPointerHandlers calls (one per board render) purely so each new call
+// can tear down the previous render's pinch listeners before installing its own — see that
+// function's own comment.
+let teardownPinchHandling = null;
 
 function onCellChanged(r, c, isAuto = false) {
   if (autoCheckEnabled && puzzle.solution) {
