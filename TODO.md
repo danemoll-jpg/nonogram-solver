@@ -2967,6 +2967,20 @@ the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
     position the grid rectangle, never to supply a row/col count.
   - 5 new unit tests total (1 for the border-detection fix, 4 for the margin-scaling
     formula); all 879 tests pass.
+  - **Cross-checked against a second real 30x30 screenshot the project owner confirmed
+    scanned fine** (per their own direct report: "nearly every 30x30 has [scanned fine],
+    and I have done a lot"), to make sure the fix doesn't disturb an already-working case.
+    Ran the same real pipeline against it both pre- and post-fix: row/column crops came
+    back clean either way (no visible bleed before the fix, matching the report), BUT the
+    pre-fix code was still measurably overshooting on this image too — its LEFT edge came
+    out 12 analysis-px (~21 full-canvas px) further in than the fixed code gives, an
+    asymmetry invisible to the player because it only misplaced the row-clue margin's own
+    boundary and column slicing by a fraction of a column each, not enough to visibly bleed
+    into a neighboring line the way the deeper-clue-margin puzzle's ~37px (a full row) did.
+    Confirms this was a real, generally-present overshoot bug that most 30x30 puzzles
+    happen to have enough clearance to hide, not something specific to one unlucky image —
+    and that the fix is a genuine improvement here too, not just a fix for one case with
+    unknown side effects elsewhere.
 
 Current Objective (Focus Area)
 
