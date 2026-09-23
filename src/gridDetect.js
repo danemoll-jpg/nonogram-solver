@@ -282,13 +282,34 @@ export function snapRectToBorder(gray, width, height, rect, { searchPx = 15 } = 
 // comment), which is indistinguishable from border ink in a same-axis brightness profile. The
 // inward side, by contrast, is guaranteed to be genuine grid interior once the border ends,
 // so it's the only side that reliably answers "where does the border actually stop".
+// Consecutive non-dark samples required to conclude the border has genuinely ended, once at
+// least one dark (border) sample has been seen. Confirmed necessary against a real 30x30 scan
+// whose clue margins (many stacked column-clue numbers) left the grid itself squeezed into a
+// small fraction of the analysis canvas — small enough that a real internal grid line one full
+// row further in landed WITHIN maxBorderWidth's own search window. Without stopping at a
+// confirmed bright run, the old walk (see below) kept scanning the *entire* window regardless
+// and just remembered whichever position was last dark ANYWHERE in it — so a single thin,
+// unrelated line a whole row away got treated as "still the same border," dragging the
+// returned edge a full row's depth past the border's real end. A thick-but-genuinely-
+// CONTIGUOUS border (this function's original motivating case, no unrelated later feature
+// within the window) reaches a bright run immediately after its own true end either way, so
+// this doesn't change that case's result.
+const BRIGHT_RUN_TO_CONFIRM_BORDER_END = 2;
+
 function innerEdgeOfBorder(profile, pos, threshold, direction, maxWalk) {
   const p = Math.max(0, Math.min(profile.length - 1, Math.round(pos)));
   let lastDark = null;
+  let brightRun = 0;
   for (let step = 0; step <= maxWalk; step++) {
     const idx = p + direction * step;
     if (idx < 0 || idx >= profile.length) break;
-    if (profile[idx] <= threshold) lastDark = idx;
+    if (profile[idx] <= threshold) {
+      lastDark = idx;
+      brightRun = 0;
+    } else if (lastDark !== null) {
+      brightRun++;
+      if (brightRun >= BRIGHT_RUN_TO_CONFIRM_BORDER_END) break;
+    }
   }
   if (lastDark === null) return pos; // no dark border found within range -- leave the rough position alone
   return lastDark + direction * 0.5; // the half-pixel boundary just past the last dark sample

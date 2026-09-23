@@ -2894,56 +2894,83 @@ the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
   reach production: wrong-then-self-cleaned with Auto-check off → 0; wrong then
   Check twice then cleaned → 1; wrong with Auto-check on → 1. All 874 tests pass.
 
-* **Real bug found and fixed: the row/column clue-strip crop bled a partial extra line of
-  the NEXT row's (or column's) digits into the correction screen's OCR crop, on a real 39x30
-  scan** — the project owner's own working theory (correlates with cell pixel size, not row
-  count) was correct and pointed straight at the real cause. `cropStripCanvas`
-  (`src/scanUI.js`) extended every clue-strip crop by a flat `STRIP_MARGIN_PX` (4px, in
-  full-canvas pixel space) on all four sides regardless of the strip's own size — harmless
-  while cells render large enough that 4px is a small fraction of a row's own height, but a
-  39-column puzzle forces the whole photo to be zoomed out further to fit on screen (to show
-  the extra columns), shrinking every row's height in pixels too even though row COUNT (30)
-  matched other puzzles that scanned fine. Once a row's own height shrank close to the flat
-  margin's size, the fixed 4px extension reached past that row's bottom edge into the next
-  row's top-anchored ink — exactly the "correct clue on top, a second partial line of the
-  next row's digits underneath" symptom reported directly from the real crop thumbnails. New
-  pure `stripCropMargin(widthPx, heightPx, maxMarginPx)` (`src/gridDetect.js`, kept
-  canvas-free/unit-testable like this file's other geometry helpers) replaces the flat
-  constant with `Math.min(maxMarginPx, dimension * 0.15)` per axis — literally the project
-  owner's own suggested formula — so every strip at least as large as before (every
-  previously-working <=30-column puzzle) keeps the EXACT same 4px margin it always had (the
-  cap makes this a strict no-regression change, provable directly from the formula, not just
-  observed), while a strip small enough for the 15% term to bind gets a proportionally
-  smaller margin instead. Applies identically to both axes from the same crop function, so it
-  fixes the row-crop bleed (vertical/top-bottom) and the equivalent, less-visible
-  column-crop bleed (horizontal/left-right, per this round's item 4) in one change — confirmed
-  symmetric via a dedicated unit test. **Checked item 3 of this round's report directly and
-  ruled it out as a real bug**: `state.rows`/`state.cols` are set exactly once, from the
-  confirmed size-step input, and every downstream consumer (`sliceHorizontal`/
-  `sliceVertical` for clue-band slicing, `sliceGridCells` for fill-state, and the final
-  puzzle build) reads that same confirmed value directly — there is no earlier
-  un-overridden auto-detection pass feeding the crop-slicing path; `detectBestGrid`'s own
-  output is used only to position the grid rectangle, never to supply a row/col count. 4 new
-  unit tests (`test/gridDetect.test.js`) pin the margin-scaling formula itself (caps at the
-  old flat value for a large strip, shrinks below it for a small one, symmetric across both
-  axes, never exceeds the strip's own size); all 878 tests pass. **Not yet verified against
-  the real 39x30 screenshot** — per this item's own request and this project's standing
-  item-10 rule (prefer a real image over synthetic data), the actual photo was meant to be
-  attached for a live before/after check in browser preview, but no image file reached this
-  environment to test against; a synthetic canvas/text render (real DOM `fillText`, not
-  hand-picked pixels) confirmed the mechanism's shape — the old flat margin measurably bleeds
-  into a synthetically-placed "next row," and the new margin is provably always <= the old
-  one for any strip size — but exact real-world digit spacing/font-metric numbers are unknown
-  without the real photo, so this needs the project owner's own real-image check (the same
-  live browser-preview process used to verify every other OCR round) before being treated as
-  fully confirmed.
+* **Real bug found, root-caused, and fixed on an actual reported 30x30 scan — verified
+  end-to-end against the real screenshot itself, not synthetic data.** (An earlier pass at
+  this same report, before the real image was available, misstated the puzzle as 39x30 and
+  shipped a real-but-not-actually-causal margin fix in response — see below for what that
+  fix's own real role turned out to be. The puzzle is 30x30, the same size as puzzles that
+  scan fine, which is what made this report worth pinning down precisely.) The correction
+  screen showed exactly what was reported: each row's clue crop strip correctly showed that
+  row's own clue text on top, with a second, partial line of the NEXT row's digits bled in
+  underneath (e.g. row 9's crop showed "9 6 2 4" — correct — with row 10's "6 2 8 3 5"
+  partially visible below it).
+  - **Real root cause, found by loading the actual reported screenshot through the real
+    `gridDetect.js`/`scanUI.js` pipeline in a headless-browser preview and tracing the exact
+    numbers**: NOT the OCR crop's own margin (the project owner's working theory going in),
+    but the grid's own BORDER detection. `centerRectOnBorders`' `innerEdgeOfBorder` walk
+    (`src/gridDetect.js`) scans inward from the snapped border for up to `maxBorderWidth`
+    (20px, analysis space) looking for where the border's own ink ends — but the old
+    implementation scanned the ENTIRE window regardless and just remembered whichever
+    position was last dark ANYWHERE in it, rather than stopping once a confirmed run of
+    bright (non-border) samples showed the border had genuinely ended. Harmless when the
+    border is thick but otherwise isolated (the existing column-band-drift regression test
+    covers exactly that case) — but this specific image's clue margins are unusually deep
+    (many stacked column-clue numbers stacked above the grid), which squeezes the grid
+    itself down to ~20px cells in analysis space — right at `maxBorderWidth`'s own default.
+    So the inward walk reached the grid's own NEXT internal line, a full row further in, and
+    treated arriving there as "still the same border," dragging the confirmed rect's
+    top/bottom edges a full row's depth inward on each side. **Confirmed directly, not just
+    theorized**: the resulting rect's computed row height was 34.64px (full-canvas) while
+    its independently-detected column width was 37.13px — since a nonogram's cells are
+    always square, this asymmetry alone proved the row dimension was wrong before any visual
+    check. `sliceHorizontal`'s even-30-way subdivision of that undersized rect then
+    systematically lagged the puzzle's real row positions, the lag compounding row by row —
+    by row 9-10 the drift was already large enough that a row's own OCR crop pulled in a
+    real chunk of the next row's clue text, exactly the reported symptom.
+  - **The fix**: stop `innerEdgeOfBorder`'s walk after a short confirmed bright run once at
+    least one dark (border) sample has been seen, instead of always scanning the full
+    window. A thick-but-genuinely-contiguous border — the function's original motivating
+    case, no unrelated later feature within the window — reaches a bright run immediately
+    after its own true end either way, so that case's result is unchanged (confirmed: the
+    existing column-band-drift regression test still passes unmodified). New regression
+    test constructs the real failure shape directly (a thin border, then a genuinely
+    separate unrelated line well within `maxBorderWidth`'s reach) and confirms it no longer
+    overshoots — verified this test actually fails on the pre-fix code (reproduces the exact
+    overshoot number) before confirming it passes post-fix, not just written to pass.
+  - **Verified end-to-end against the real reported screenshot** (kept locally in the
+    gitignored `scratch-images/`, same convention as the project's other real ground-truth
+    images): loaded it through the real pipeline via a headless-browser preview, and with
+    the pre-fix code reproduced the bug pixel-for-pixel identically to the reported
+    screenshot (row 9's crop showing "9 6 2 4" with row 10's clue bled in underneath); with
+    the fix, every sampled row (including near the puzzle's last rows, where the old
+    compounding drift would have been worst) and column crop came back clean, matching the
+    photo's own visible ground truth exactly (e.g. row 29 → "4 4 2 6", column 6 →
+    "10 4 2 7 2"). Post-fix, both computed dimensions came back exactly equal — 37.13px for
+    both row height and column width — confirming genuinely-square cells were recovered.
+  - **The margin-scaling fix from the earlier, pre-real-image pass is kept — it's a real, no-
+    regression hardening, just not what actually fixed this particular image.** Measured
+    directly against the real image: with the border-detection bug still active, the row/
+    column dimensions (34.64/37.13px) were both already large enough that
+    `stripCropMargin`'s `Math.min(4, dimension * 0.15)` stayed capped at the original flat
+    4px either way — so for this specific report, the margin was never the binding
+    constraint; the border-detection fix above is what actually resolved it. The margin fix
+    (`src/gridDetect.js`'s `stripCropMargin`, replacing `cropStripCanvas`'s flat 4px
+    `STRIP_MARGIN_PX`) still stands as real, provably-no-regression protection for a
+    hypothetically even-smaller-celled image where the margin WOULD become the binding
+    constraint, per the project owner's own suggested formula.
+  - **Checked directly and ruled out as a real bug**: whether the confirmed row/col count
+    override could be bypassed by an earlier un-overridden auto-detection pass for this crop
+    path. It isn't — `state.rows`/`state.cols` are set exactly once, from the confirmed
+    size-step input, and every downstream consumer (`sliceHorizontal`/`sliceVertical` for
+    clue-band slicing, `sliceGridCells` for fill-state, and the final puzzle build) reads
+    that same confirmed value directly; `detectBestGrid`'s own output is used only to
+    position the grid rectangle, never to supply a row/col count.
+  - 5 new unit tests total (1 for the border-detection fix, 4 for the margin-scaling
+    formula); all 879 tests pass.
 
 Current Objective (Focus Area)
 
-**No current objective is queued right now — the row/column clue-strip crop bleed fix above
-still needs the project owner's own real-39x30-screenshot verification (no image file
-reached this environment to test against directly), per this item's own request and the
-project's standing item-10 practice.**
+**No current objective is queued right now.**
 
 Next Steps (Do Not Start Yet)
 

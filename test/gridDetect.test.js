@@ -420,3 +420,53 @@ describe('computeClueBands + centerRectOnBorders (column-band drift regression)'
       `border-centered rect should keep drift under 10% of a column width across all ${cols} columns (got ${centeredDrift}px vs a ${trueColWidth}px column)`);
   });
 });
+
+// Regression test for a real 30x30-scan bug found via a real reported screenshot (kept out of
+// this checkout per this project's usual scratch-images/ gitignore convention, but confirmed
+// directly against it): centerRectOnBorders' own inner-edge walk (innerEdgeOfBorder) used to
+// scan its ENTIRE maxBorderWidth window and just remember whichever position was last dark
+// ANYWHERE in it, rather than stopping once a confirmed bright run showed the border had
+// genuinely ended. That's harmless when the border is thick but otherwise isolated (this
+// file's own "column-band drift regression" test above), but on the real image this row
+// crossed an unrelated, later feature — the grid's own NEXT internal line, one full row
+// further in — because that image's deep clue margins (many stacked column-clue numbers)
+// squeezed the grid itself down to ~20px cells in analysis space, right at maxBorderWidth's
+// own default (20). The walk treated reaching that unrelated line as "still the same border"
+// and dragged the returned edge a full row's depth past the border's real end, which then
+// made sliceHorizontal's even-30-way subdivision of the resulting undersized rect
+// systematically lag the puzzle's real row positions — compounding row by row until, a few
+// rows in, a row's own OCR crop pulled in a large chunk of the NEXT row's clue text (the
+// "correct clue on top, a second partial line of the next row's digits underneath" bug
+// report). Fixed by stopping the walk after a short confirmed bright run once at least one
+// dark (border) sample has been seen.
+describe('centerRectOnBorders (inner-edge walk stops at a confirmed bright run)', () => {
+  test('does not overshoot past a thin border into an unrelated line further inside the search window', () => {
+    const width = 100, height = 100;
+    const gray = blankImage(width, height, 250);
+    // A thin (2px) border ring at [20,79] outer / true inner cell-grid edge at [22,77] --
+    // deliberately much thinner than the 12px border the drift-regression test above uses, to
+    // isolate this fix from that one.
+    for (let y = 20; y <= 79; y++) {
+      for (let x = 20; x <= 79; x++) gray[y * width + x] = 15;
+    }
+    for (let y = 22; y <= 77; y++) {
+      for (let x = 22; x <= 77; x++) gray[y * width + x] = 250;
+    }
+    // An unrelated, genuinely separate thin dark line 15px further inside each true inner
+    // edge -- comfortably within maxBorderWidth's default (20) reach from the rough/snapped
+    // edge, mimicking the real image's next-row internal grid line landing inside the same
+    // search window as the border itself.
+    for (let x = 20; x <= 79; x++) { gray[37 * width + x] = 15; gray[38 * width + x] = 15; }
+    for (let y = 20; y <= 79; y++) { gray[y * width + 37] = 15; gray[y * width + 38] = 15; }
+
+    const rough = { left: 18, top: 18, right: 81, bottom: 81 };
+    const centered = centerRectOnBorders(gray, width, height, rough, { searchPx: 15 });
+
+    // Should land on the border's own true inner edge (~21.5/77.5), not walk another ~15px
+    // further to the unrelated line at 37/38.
+    assert(Math.abs(centered.top - 21.5) <= 2, `top overshot past the border into the unrelated line: ${centered.top}`);
+    assert(Math.abs(centered.left - 21.5) <= 2, `left overshot past the border into the unrelated line: ${centered.left}`);
+    assert(Math.abs(centered.bottom - 77.5) <= 2, `bottom overshot past the border into the unrelated line: ${centered.bottom}`);
+    assert(Math.abs(centered.right - 77.5) <= 2, `right overshot past the border into the unrelated line: ${centered.right}`);
+  });
+});

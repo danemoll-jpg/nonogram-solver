@@ -532,26 +532,46 @@ writeup of all three.
   erased cell ever written, checked or not); now a `mistakesFound` Set in `app.js`, filled
   only by `onCellChanged` (Auto-check) and `runOnDemandCheck`, deduped per cell. "Remove bad
   marks" also charges the cells it clears, on top of counting as a hint. Only marks the player placed themselves are charged, never auto-X side effects. See `TODO.md`.
-- **Real bug found and fixed: row/column clue-strip OCR crops bled a partial line of the
-  NEXT row's (or column's) digits into the correction screen on a real 39x30 scan — done,
-  unit-tested; not yet verified against the real screenshot (none reached this
-  environment).** `cropStripCanvas` (`src/scanUI.js`) padded every clue-strip crop with a
-  flat `STRIP_MARGIN_PX` (4px, full-canvas pixel space) on all sides regardless of the
-  strip's own size — harmless at 30 columns, but a 39-column puzzle forces the whole photo
-  to be zoomed out further to fit on screen, shrinking every row's own pixel height too
-  even though row count (30) matched puzzles that scanned fine; once a row's height shrank
-  close to the flat margin's size, the margin reached past that row's own edge into the
-  next row's top-anchored ink. Fixed with new pure `stripCropMargin` (`src/gridDetect.js`):
-  `Math.min(maxMarginPx, dimension * 0.15)` per axis, the project owner's own suggested
-  formula — caps at the exact old 4px for every previously-working strip (provably no
-  regression) while shrinking proportionally once a strip gets small; applies identically
-  to both axes, so it fixes the row-crop bleed and the same-pattern, less-visible
-  column-crop bleed in one change. Also checked directly whether the confirmed row/col
-  count override could be bypassing an earlier un-overridden detection pass for this crop
-  path — it isn't: `state.rows`/`state.cols` are set once from the confirmed size step and
-  read directly by every downstream consumer, including this one. 4 new unit tests; all
-  878 tests pass. See `TODO.md` for the full writeup, including why real-image
-  verification couldn't happen this round.
+- **Real bug found and fixed on an actual reported 30x30 scan (not 39x30 — an earlier
+  round of this same investigation misstated the puzzle's size before the real screenshot
+  was available; corrected here) — root-caused and verified end-to-end against the real
+  image, not synthetic data.** Row (and column) clue-strip OCR crops bled a partial line of
+  the NEXT row's/column's digits into the correction screen. The real cause turned out to
+  be in grid-BORDER detection, not the OCR crop's own margin: `centerRectOnBorders`'
+  `innerEdgeOfBorder` walk (`src/gridDetect.js`) scanned its whole `maxBorderWidth` (20px,
+  analysis space) window inward from the snapped border and just remembered whichever
+  position was last dark ANYWHERE in it, rather than stopping once a confirmed bright run
+  showed the border had genuinely ended. Harmless when the border is thick but otherwise
+  isolated — but this specific image's clue margins are unusually deep (many stacked
+  column-clue numbers), squeezing the grid itself down to ~20px cells in analysis space,
+  right at `maxBorderWidth`'s own default — so the walk reached the grid's own NEXT
+  internal line, a full row further in, and treated it as "still the same border,"
+  dragging the confirmed grid rect's top/bottom edges a full row's depth inward on each
+  side (confirmed directly: computed row height was 34.64px full-canvas while the
+  independently-detected column width was 37.13px — cells must be square, so this
+  asymmetry alone proved the row dimension was wrong). `sliceHorizontal`'s even-30-way
+  subdivision of that undersized rect then systematically lagged the puzzle's real row
+  positions, compounding row by row until a row's OCR crop pulled in a chunk of the next
+  row's clue text — exactly the reported symptom. Fixed by stopping
+  `innerEdgeOfBorder`'s walk after a short confirmed bright run once at least one dark
+  (border) sample has been seen — a thick-but-contiguous border (the original motivating
+  case, no unrelated later feature in the window) reaches a bright run immediately after
+  its own end either way, so that case is unaffected. **Verified end-to-end against the
+  real reported screenshot**: loaded it through the actual `gridDetect.js`/`scanUI.js`
+  pipeline in a real headless-browser preview (not guessed pixel data), reproduced the
+  exact bug from the report (row 9's crop showing "9 6 2 4" with row 10's "6 2 8 3 5"
+  bled in underneath) on the pre-fix code, then confirmed clean, correctly-isolated crops
+  post-fix all the way to the puzzle's last rows (where the old compounding drift would
+  have been worst) and columns. Also checked directly whether the confirmed row/col count
+  override could be bypassing an earlier un-overridden detection pass — it isn't:
+  `state.rows`/`state.cols` are set once from the confirmed size step and read directly by
+  every downstream consumer. Also landed, from the same investigation and still worth
+  keeping (a real, no-regression hardening, per the project owner's own suggested
+  formula, even though it turned out not to be what fixed this particular image): new pure
+  `stripCropMargin` (`src/gridDetect.js`) replaces `cropStripCanvas`'s flat 4px
+  `STRIP_MARGIN_PX` with `Math.min(maxMarginPx, dimension * 0.15)` per axis, capping at the
+  old value for every previously-working strip while shrinking proportionally once a strip
+  genuinely is small. 5 new unit tests total; all 879 tests pass.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
