@@ -3052,6 +3052,33 @@ the underlying WebKit issue itself were abandoned in favor of trigger-avoidance
     'touch'` exercise the same code path but can't fully stand in for real multi-touch
     hardware/OS gesture-recognition timing.
 
+* **Real bug found and fixed in the zoom feature above, per direct follow-up: zooming out
+  still couldn't reveal the entire board for the dense puzzle that motivated the feature in
+  the first place — done, preview-verified.** `MIN_ZOOM` was a flat constant of 1, on the
+  assumption that "fits the viewport" (zoom level 1, `fitBoardToViewport`'s own computed
+  size) always means the whole board is already visible — true for an ordinary puzzle, but
+  exactly backwards for the dense one this feature was built for: `MIN_CELL_PX`'s legibility
+  floor forces `cellPx` to stay bigger than the viewport can actually fit, so zoom level 1
+  ITSELF already overflows, and capping zoom-out at 1 meant it could never zoom out far
+  enough to undo that overflow. Fixed by making the floor dynamic: `fitBoardToViewport` now
+  also computes `minZoom` as the real ratio between what's available and what zoom=1 actually
+  renders at — exactly 1 whenever the legibility floor isn't binding (every puzzle that
+  already fit fine keeps today's identical "can't zoom out past normal" behavior, a strict
+  no-regression case), and genuinely below 1 whenever it is, so zooming all the way out now
+  reaches a state where the whole board actually fits with nothing cut off. A second, smaller
+  bug surfaced while verifying this against an artificially extreme test case (a puzzle/
+  viewport combination dense enough that the "whole board fits" ratio alone would shrink
+  cells to 0px, rounding away to nothing): added `ABSOLUTE_MIN_ZOOM_CELL_PX` (4px) as a hard
+  floor on top of the fit-ratio one, so a pathological combination trades a small residual
+  overflow for cells that are still visibly there, rather than disappearing entirely — a real,
+  if unlikely-in-practice, edge case worth guarding regardless. Verified directly: forced a
+  real overflow with a tiny viewport, confirmed zooming out via the button now reaches a
+  state where the grid's own `scrollWidth` no longer exceeds `board-root`'s visible width
+  (the whole board genuinely fits), and confirmed repeated zoom-out clicks past that point
+  are stable no-ops at the 4px floor rather than continuing to shrink toward 0. All 879 tests
+  pass (pure `app.js` change, no new automated tests — same "DOM/pointer features are
+  browser-preview-verified" precedent as the rest of this feature).
+
 Current Objective (Focus Area)
 
 **No current objective is queued right now.**

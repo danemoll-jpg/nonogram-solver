@@ -529,6 +529,25 @@ function fitBoardToViewport() {
   // instead of compounding off whatever the previous zoom level happened to leave behind.
   baseCellPx = cellPx;
   baseClueFontPx = clueFontPx;
+  // Bug fix (direct report): zoom was capped at a flat 1 (never smaller), on the assumption
+  // that "fits the viewport" always means the whole board is already visible — wrong for a
+  // puzzle dense enough that MIN_CELL_PX's own legibility floor (just above) forces cellPx to
+  // stay bigger than availableWidth/availableHeight can actually fit, exactly the report's
+  // own repro case. minZoom is instead the real ratio between what's available and what
+  // zoom=1 actually renders at — 1 whenever the floor isn't binding (every puzzle that
+  // already fit fine keeps its old "can't zoom out past normal" behavior unchanged), and
+  // genuinely below 1 whenever it is, so zooming all the way out actually reaches "the whole
+  // board fits with nothing cut off" instead of stopping short of it.
+  const renderedWidth = clueColWidth + cellPx * puzzle.cols;
+  const renderedHeight = clueRowHeight + cellPx * puzzle.rows;
+  const fitZoom = Math.min(1, availableWidth / renderedWidth, availableHeight / renderedHeight);
+  // Absolute floor regardless of how extreme the puzzle/viewport combination is: below this,
+  // cells round to a couple of px or less and stop reading as a grid at all (an all-zeros
+  // Math.round away from disappearing completely) — seeing the WHOLE board at a glance is
+  // only useful if there's still a board to see. A real, sane viewport/puzzle combination
+  // should essentially never actually hit this; it only matters for pathological cases.
+  const ABSOLUTE_MIN_ZOOM_CELL_PX = 4;
+  minZoom = Math.max(fitZoom, ABSOLUTE_MIN_ZOOM_CELL_PX / baseCellPx);
   applyZoom();
 }
 
@@ -538,9 +557,11 @@ function fitBoardToViewport() {
 // button feature, letting a player looking at a small-celled dense puzzle (this feature's own
 // motivating report: a real 30x30 with clues up to 10 numbers deep, forcing MIN_CELL_PX and
 // still not fitting on screen — see TODO.md) zoom into one section at a time rather than being
-// stuck at whatever size fits the WHOLE board on screen at once.
+// stuck at whatever size fits the WHOLE board on screen at once. Below 1 is the same feature's
+// other direction — zooming OUT past the legibility floor to see the whole board at a glance —
+// see minZoom's own comment (set in fitBoardToViewport) for why that floor isn't just 1.
 let zoomLevel = 1;
-const MIN_ZOOM = 1; // never smaller than "fits the viewport" -- there's no reason to
+let minZoom = 1; // recomputed per-puzzle in fitBoardToViewport — see that assignment's comment
 const MAX_ZOOM = 4;
 const ZOOM_BUTTON_STEP = 1.25;
 let baseCellPx = MIN_CELL_PX;
@@ -573,7 +594,7 @@ function applyZoom() {
 // margins) by the same zoomLevel ratio, so a content point's pixel position under the current
 // scroll offset scales by that identical ratio too; no separate per-axis measurement needed.
 function setZoom(newZoomRaw, anchorClientX, anchorClientY) {
-  const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoomRaw));
+  const newZoom = Math.max(minZoom, Math.min(MAX_ZOOM, newZoomRaw));
   if (newZoom === zoomLevel) return;
   const rect = els.boardRoot.getBoundingClientRect();
   const ratio = newZoom / zoomLevel;

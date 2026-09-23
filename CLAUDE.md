@@ -594,6 +594,21 @@ writeup of all three.
   4x; buttons stepped and clamped at both bounds and returned to exactly the original size at
   zoom 1; plain single-finger tap and a two-cell axis-locked drag both worked identically to
   before. Not yet checked on a real touchscreen device.
+- **Real bug found and fixed in the zoom feature, per direct follow-up: zooming out still
+  didn't reveal the entire board — done, preview-verified.** `MIN_ZOOM` was a flat `1`, on
+  the wrong assumption that zoom level 1 (`fitBoardToViewport`'s own computed size) always
+  means the whole board is visible — backwards for the dense puzzle the feature was built
+  for, where `MIN_CELL_PX`'s legibility floor makes zoom=1 ITSELF already overflow, so
+  capping zoom-out at 1 could never undo that. Fixed with a dynamic `minZoom`, computed in
+  `fitBoardToViewport` as the real ratio between available space and what zoom=1 actually
+  renders — exactly 1 (no regression) whenever the floor isn't binding, genuinely below 1
+  when it is, so zooming all the way out now reaches a state where nothing is cut off. Also
+  added `ABSOLUTE_MIN_ZOOM_CELL_PX` (4px) as a hard floor on top, found while verifying
+  against an artificially extreme case where the pure fit-ratio would round cells to 0px —
+  trades a small residual overflow for cells that are still visibly there. Verified directly:
+  forced overflow with a tiny test viewport, confirmed zoom-out now reaches a genuinely
+  non-overflowing state and stays stable there (no further shrink toward 0) on repeated
+  clicks. All 879 tests pass.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
