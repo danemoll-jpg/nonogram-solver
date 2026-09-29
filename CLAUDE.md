@@ -610,6 +610,13 @@ writeup of all three.
   non-overflowing state and stays stable there (no further shrink toward 0) on repeated
   clicks. All 879 tests pass.
 
+- **Real bug found and fixed: a device that REDEEMED a pairing code silently lost the pairing
+  on its next cold launch** — `ensureSignedIn` let `signInAnonymously` replace the restored
+  custom-token (non-anonymous) user with a fresh anonymous uid. Not iOS storage eviction.
+  Fixed via `resolveSignedInUser` (`src/firebase.js`, waits on `authStateReady`, keeps any
+  restored user), plus a localStorage paired-uid guard that warns and offers re-pairing on a
+  mismatch. SDK-level-verified; not yet real-device-confirmed. See `TODO.md`.
+
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
 - Build: none — it's static files, nothing to build

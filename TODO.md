@@ -10,6 +10,30 @@ Completed Tasks
 * Full playable UI — click/right-click/drag marking, clue graying, hint highlighting (`index.html`, `app.js`, `styles.css`)
 * 425-test suite, incl. a brute-force differential test of the line solver
 * `CLAUDE.md` project context file
+* **Cross-device pairing lost on the redeeming device's next cold launch — root-caused (NOT
+  iOS storage eviction), fixed, SDK-level-verified; not yet real-device-confirmed.** Report:
+  web + iPad Home Screen app paired Sep 28, iPad showed a totally blank stats table Sep 29.
+  Real cause, deterministic on every platform: `ensureSignedIn` (`src/firebase.js`) checked
+  `auth.currentUser` synchronously (always null on a cold launch, since the SDK restores the
+  persisted user asynchronously) and then called `signInAnonymously`, which only reuses a
+  restored user if `isAnonymous` — but the redeeming device is signed in via
+  `signInWithCustomToken`, whose user is never anonymous (and @firebase/auth never flips it
+  back). So the first relaunch after pairing signed up a brand-new anonymous uid over the
+  paired one. Reproduced against the real @firebase/auth 10.14.1 (Node, network mocked, a
+  shared persisted store across simulated launches): old code -> relaunch resolved the
+  paired uid but `auth.currentUser` silently became a new anon uid, and every launch after
+  that was the new uid; fixed code -> paired uid held across 3 launches, and an unpaired
+  device and a wiped store both still behave correctly. Fix: new `resolveSignedInUser`
+  waits on `auth.authStateReady()`, keeps ANY restored user, and signs in anonymously only
+  when there's none. Also added a paired-identity guard: a device that paired remembers the
+  uid in localStorage (`nonogram.pairedUid`, outside Firebase Auth's own storage), and on
+  boot a mismatch opens Stats & pairing with a warning plus the code input ("Keep this
+  device separate" dismisses it for good). A small "Stats ID" line in that modal shows which
+  identity a device is on. Honest limit: a genuine full iOS eviction wipes localStorage along
+  with IndexedDB, so no on-device marker can detect that case. The merged stats were never
+  lost server-side — they're still on the web device's uid; re-pairing the iPad recovers
+  them. 7 new tests (`test/pairing.test.js`); UI verified in headless Chromium with stubbed
+  Firebase modules. All 886 tests pass.
 * Item 7 — puzzle UI refinement pass (mode toggle, 5×5 chunking, solver-based auto-X,
   auto-check mistake pop-up, puzzle-complete modal, real LLM-backed hint phrasing via
   Firebase Cloud Function). Long-settled.

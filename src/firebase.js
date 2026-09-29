@@ -120,30 +120,30 @@ export async function ensureSignedIn() {
   if (!signedInUserPromise) {
     signedInUserPromise = (async () => {
       const { auth, mod } = await getAuthClient();
-      if (auth.currentUser) return auth.currentUser;
-      const signInAttempt = new Promise((resolve, reject) => {
-        const unsubscribe = mod.onAuthStateChanged(
-          auth,
-          (user) => {
-            if (user) {
-              unsubscribe();
-              resolve(user);
-            }
-          },
-          (err) => {
-            unsubscribe();
-            reject(err);
-          }
-        );
-        mod.signInAnonymously(auth).catch((err) => {
-          unsubscribe();
-          reject(err);
-        });
-      });
-      return withTimeout(signInAttempt, NETWORK_TIMEOUT_MS, 'Anonymous sign-in');
+      return withTimeout(resolveSignedInUser(auth, mod), NETWORK_TIMEOUT_MS, 'Sign-in');
     })().catch((err) => { signedInUserPromise = null; throw err; });
   }
   return signedInUserPromise;
+}
+
+// Bug fix (real-device report: a paired iPad came up with a totally blank stats table the
+// next morning): this used to check `auth.currentUser` synchronously, which is always null
+// right after getAuth() on a cold launch (the SDK restores the persisted user asynchronously),
+// and then fall through to signInAnonymously(). That call does wait for the restore — but it
+// only reuses the restored user if `user.isAnonymous`, and a device that REDEEMED a pairing
+// code is signed in via signInWithCustomToken, whose user is never anonymous (and the SDK
+// deliberately never flips a non-anonymous user back — see @firebase/auth's
+// _reloadWithoutSaving). So the first cold launch after pairing silently signed up a brand-new
+// anonymous uid over the paired one, every time. Not a storage eviction — deterministic.
+//
+// Fix: wait for the persisted user to be restored, keep ANY restored user (anonymous or
+// paired), and only create a new anonymous identity when there genuinely is none. Exported
+// (auth/mod injected) so test/firebaseAuth.test.js can exercise it without the CDN.
+export async function resolveSignedInUser(auth, mod) {
+  await auth.authStateReady();
+  if (auth.currentUser) return auth.currentUser;
+  const cred = await mod.signInAnonymously(auth);
+  return cred.user;
 }
 
 // After redeemPairingCode's Cloud Function mints a custom token for the *other* device's

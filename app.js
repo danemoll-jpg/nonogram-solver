@@ -11,7 +11,15 @@ import { phraseDeduction } from './src/hintPhrasing.js';
 import { autoCheckMark, checkForMistakes, removeBadMarks } from './src/mistakes.js';
 import { SAMPLE_PUZZLES } from './src/puzzles.js';
 import { playSound, isMuted, toggleMuted } from './src/sounds.js';
-import { recordCompletion, fetchAllStats, generatePairingCode, redeemPairingCode } from './src/stats.js';
+import {
+  recordCompletion,
+  fetchAllStats,
+  generatePairingCode,
+  redeemPairingCode,
+  rememberPairedUid,
+  getRememberedPairedUid,
+  hasLostPairedIdentity,
+} from './src/stats.js';
 import { initScanWizard } from './src/scanUI.js';
 import { initDrawWizard } from './src/drawUI.js';
 import {
@@ -142,6 +150,9 @@ const els = {
   pairingCodeInput: document.getElementById('pairing-code-input'),
   btnRedeemCode: document.getElementById('btn-redeem-code'),
   pairingStatus: document.getElementById('pairing-status'),
+  identityWarning: document.getElementById('identity-warning'),
+  btnIdentityKeepSeparate: document.getElementById('btn-identity-keep-separate'),
+  deviceId: document.getElementById('device-id'),
   btnStatsClose: document.getElementById('btn-stats-close'),
   scanModal: document.getElementById('scan-modal'),
   scanStepSize: document.getElementById('scan-step-size'),
@@ -2778,12 +2789,52 @@ async function refreshStatsTable() {
   }
 }
 
-els.btnOpenStats.addEventListener('click', () => {
+// Short, readable form of the current Firebase uid — lets the player (or a debugging session)
+// see at a glance which identity a device is on, e.g. to confirm two devices really are paired.
+async function refreshDeviceId() {
+  try {
+    const user = await ensureSignedIn();
+    els.deviceId.textContent = `Stats ID: ${user.uid.slice(0, 8)}`;
+  } catch {
+    els.deviceId.textContent = '';
+  }
+}
+
+function openStatsModal() {
   els.pairingCodeDisplay.classList.add('hidden');
   els.pairingCodeInput.value = '';
   els.pairingStatus.textContent = '';
   els.statsModal.classList.remove('hidden');
   refreshStatsTable();
+  refreshDeviceId();
+}
+
+els.btnOpenStats.addEventListener('click', openStatsModal);
+
+// Paired-identity guard (see src/stats.js): on boot, a device that paired before but is now
+// signed in as someone else gets the stats modal opened with a warning and the code input
+// right there, instead of silently showing an empty table as if its history were gone.
+async function checkPairedIdentityOnBoot() {
+  const remembered = getRememberedPairedUid();
+  if (!remembered) return; // never paired — nothing to guard, and no need to sign in early
+  let user;
+  try {
+    user = await ensureSignedIn();
+  } catch {
+    return; // offline/blocked — can't tell, so don't cry wolf
+  }
+  if (!hasLostPairedIdentity(remembered, user.uid)) return;
+  els.identityWarning.classList.remove('hidden');
+  openStatsModal();
+}
+
+els.btnIdentityKeepSeparate.addEventListener('click', async () => {
+  try {
+    rememberPairedUid((await ensureSignedIn()).uid);
+  } catch {
+    // leave the marker; the warning will simply come back next launch
+  }
+  els.identityWarning.classList.add('hidden');
 });
 
 els.btnStatsClose.addEventListener('click', () => {
@@ -2812,6 +2863,8 @@ els.btnRedeemCode.addEventListener('click', async () => {
   els.pairingStatus.textContent = 'Linking…';
   try {
     await redeemPairingCode(code);
+    els.identityWarning.classList.add('hidden');
+    refreshDeviceId();
     els.pairingCodeInput.value = '';
     els.pairingStatus.textContent = 'Linked! Your stats are now combined with the other device.';
     refreshStatsTable();
@@ -2827,6 +2880,7 @@ els.btnRedeemCode.addEventListener('click', async () => {
 setMode('fill');
 syncMuteButton();
 startPuzzle(SAMPLE_PUZZLES[0]);
+checkPairedIdentityOnBoot();
 // Current Objective (see TODO.md): the app-wide "screen moves up and down for no reason on
 // iOS" report turned out NOT to be about extra scrollable space (the scrollbar itself was
 // fine whenever real content needed one, per the project owner directly) — it's iOS Safari's

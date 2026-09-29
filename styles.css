@@ -1010,6 +1010,24 @@ body {
   letter-spacing: 0.03em;
 }
 
+.identity-warning {
+  border: 1px solid #d99a2b;
+  background: rgba(217, 154, 43, 0.12);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.8rem;
+}
+
+.identity-warning p {
+  margin: 0 0 0.5rem;
+}
+
+.device-id {
+  font-size: 0.75rem;
+  opacity: 0.6;
+  margin: 0.6rem 0 0;
+}
+
 .pairing-block {
   margin-bottom: 1rem;
 }

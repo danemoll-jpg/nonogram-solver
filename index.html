@@ -245,6 +245,15 @@
     <div class="modal-card modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="stats-title">
       <h2 id="stats-title" class="modal-card__title">Stats & pairing</h2>
       <div class="modal-card__body">
+        <!-- Shown only when this device paired before but is now signed in as a different
+             identity (see src/stats.js's paired-identity guard) — warns instead of letting an
+             empty stats table silently read as "your progress is gone". -->
+        <div id="identity-warning" class="identity-warning hidden" role="alert">
+          <p><strong>This device lost its link to your stats.</strong> It's signed in as a new,
+            empty identity. Your stats are safe on your other device — generate a code there and
+            enter it below to reconnect.</p>
+          <button id="btn-identity-keep-separate" class="btn" type="button">Keep this device separate</button>
+        </div>
         <h3>Your stats</h3>
         <p id="stats-status" class="stats-status">Loading…</p>
         <table id="stats-table" class="stats-table hidden">
@@ -273,6 +282,7 @@
           </label>
         </div>
         <p id="pairing-status" class="stats-status" aria-live="polite"></p>
+        <p id="device-id" class="device-id"></p>
       </div>
       <button id="btn-stats-close" class="btn btn--primary" type="button">Close</button>
     </div>

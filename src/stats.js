@@ -75,6 +75,9 @@ export async function fetchAllStats() {
 export async function generatePairingCode() {
   const createPairingCode = await getCallable('createPairingCode');
   const { data } = await createPairingCode();
+  // This device's identity is now (about to be) shared — losing it would orphan the other
+  // device's view too, so it's worth guarding the same way a redeeming device is.
+  ensureSignedIn().then((user) => rememberPairedUid(user.uid)).catch(() => {});
   return data;
 }
 
@@ -85,6 +88,46 @@ export async function generatePairingCode() {
 export async function redeemPairingCode(code) {
   const redeem = await getCallable('redeemPairingCode');
   const { data } = await redeem({ code });
-  await signInWithPairingToken(data.customToken);
+  const user = await signInWithPairingToken(data.customToken);
+  rememberPairedUid(user.uid);
   return true;
+}
+
+// ---- Paired-identity guard ----
+//
+// Real-device report: a paired iPad silently came back as a brand-new, empty identity (root
+// cause was ensureSignedIn replacing the paired user — see src/firebase.js's
+// resolveSignedInUser). Pairing leaves no record of "this device was paired" anywhere but
+// Firebase Auth's own persisted user, so when that got replaced the app had no way to notice
+// and just showed an empty stats table as if the player's history were gone.
+//
+// So a device that has paired remembers the uid it paired as, in localStorage — deliberately
+// NOT in Firebase Auth's own storage, so it survives anything that replaces or clears just
+// the auth user. On boot, a different current uid means the device lost its paired identity;
+// app.js then warns and offers to re-enter a code right there.
+//
+// Honest limit: a full iOS storage eviction wipes localStorage together with IndexedDB, so
+// this cannot detect that case — nothing stored on the device can. It does catch this bug's
+// class (auth identity replaced while the rest of storage survives) and a partial clear.
+const PAIRED_UID_STORAGE_KEY = 'nonogram.pairedUid';
+
+export function rememberPairedUid(uid) {
+  try {
+    localStorage.setItem(PAIRED_UID_STORAGE_KEY, uid);
+  } catch {
+    // localStorage unavailable (private mode) — the guard just can't run on this device
+  }
+}
+
+export function getRememberedPairedUid() {
+  try {
+    return localStorage.getItem(PAIRED_UID_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+// Pure: true only when this device has paired before and is now signed in as someone else.
+export function hasLostPairedIdentity(rememberedUid, currentUid) {
+  return Boolean(rememberedUid && currentUid && rememberedUid !== currentUid);
 }

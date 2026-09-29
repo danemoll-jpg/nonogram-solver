@@ -10,5 +10,6 @@ import './scanPuzzle.test.js';
 import './drawPuzzle.test.js';
 import './ocrSegment.test.js';
 import './cellStateDetect.test.js';
+import './pairing.test.js';
 
 await runAll();
