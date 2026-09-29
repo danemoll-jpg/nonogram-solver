@@ -14,6 +14,7 @@
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
+const logger = require('firebase-functions/logger');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
@@ -245,6 +246,26 @@ exports.redeemPairingCode = onCall(async (request) => {
     throw new HttpsError('deadline-exceeded', 'That code has expired — generate a new one.');
   }
 
+  // Mint the custom token BEFORE any destructive write below. This is the one step in the
+  // whole pairing flow that needs more than Firestore access: with no service-account key
+  // file, the Admin SDK signs the token by calling the IAM Credentials API's signBlob on the
+  // function's runtime service account, which needs the "Service Account Token Creator" role
+  // (iam.serviceAccounts.signBlob) on that account plus iamcredentials.googleapis.com
+  // enabled — neither of which a Firestore-only callable like createPairingCode exercises.
+  // It used to run last, after the merge batch had already committed, so a signing failure
+  // surfaced to the player as a bare "INTERNAL" while having ALREADY consumed the code and
+  // moved this device's stats onto the other UID. Minting first means a failure here leaves
+  // everything untouched and retryable once the permission is fixed.
+  let customToken;
+  try {
+    customToken = await getAuth().createCustomToken(toUid);
+  } catch (err) {
+    logger.error('redeemPairingCode: createCustomToken failed', {
+      code: err?.code, message: err?.message, toUid,
+    });
+    throw new HttpsError('internal', "Server couldn't finish linking (token signing failed) — nothing was changed, try again later.");
+  }
+
   if (toUid !== fromUid) {
     // Merge fromUid's existing stats into toUid's, then drop fromUid's copies so they can
     // never be double-counted (e.g. if this ever ran twice for the same pair of devices).
@@ -262,7 +283,6 @@ exports.redeemPairingCode = onCall(async (request) => {
     await codeRef.delete(); // redeeming your own code — nothing to merge, just clean up
   }
 
-  const customToken = await getAuth().createCustomToken(toUid);
   return { customToken };
 });
 
