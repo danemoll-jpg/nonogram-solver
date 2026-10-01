@@ -283,6 +283,13 @@
         </div>
         <p id="pairing-status" class="stats-status" aria-live="polite"></p>
         <p id="device-id" class="device-id"></p>
+        <!-- Pairing breadcrumb log (src/pairingLog.js) — only shown once a link attempt has
+             been made, so a failed attempt on a real device can be read off directly. -->
+        <details id="pairing-log" class="pairing-log hidden">
+          <summary>Link log</summary>
+          <pre id="pairing-log-text" class="pairing-log__text"></pre>
+          <button id="btn-pairing-log-clear" class="btn" type="button">Clear log</button>
+        </details>
       </div>
       <button id="btn-stats-close" class="btn btn--primary" type="button">Close</button>
     </div>

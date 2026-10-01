@@ -1022,6 +1022,19 @@ body {
   margin: 0 0 0.5rem;
 }
 
+.pairing-log {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+}
+
+.pairing-log__text {
+  white-space: pre-wrap;
+  font-size: 0.75rem;
+  max-height: 12rem;
+  overflow-y: auto;
+  margin: 0.4rem 0;
+}
+
 .device-id {
   font-size: 0.75rem;
   opacity: 0.6;

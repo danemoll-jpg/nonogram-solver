@@ -20,6 +20,7 @@ import {
   getRememberedPairedUid,
   hasLostPairedIdentity,
 } from './src/stats.js';
+import { logPairingStep, readPairingLog, clearPairingLog, formatPairingLog } from './src/pairingLog.js';
 import { initScanWizard } from './src/scanUI.js';
 import { initDrawWizard } from './src/drawUI.js';
 import {
@@ -153,6 +154,9 @@ const els = {
   identityWarning: document.getElementById('identity-warning'),
   btnIdentityKeepSeparate: document.getElementById('btn-identity-keep-separate'),
   deviceId: document.getElementById('device-id'),
+  pairingLog: document.getElementById('pairing-log'),
+  pairingLogText: document.getElementById('pairing-log-text'),
+  btnPairingLogClear: document.getElementById('btn-pairing-log-clear'),
   btnStatsClose: document.getElementById('btn-stats-close'),
   scanModal: document.getElementById('scan-modal'),
   scanStepSize: document.getElementById('scan-step-size'),
@@ -2800,7 +2804,19 @@ async function refreshDeviceId() {
   }
 }
 
+function renderPairingLog() {
+  const entries = readPairingLog();
+  els.pairingLog.classList.toggle('hidden', entries.length === 0);
+  els.pairingLogText.textContent = formatPairingLog(entries);
+}
+
+els.btnPairingLogClear.addEventListener('click', () => {
+  clearPairingLog();
+  renderPairingLog();
+});
+
 function openStatsModal() {
+  renderPairingLog();
   els.pairingCodeDisplay.classList.add('hidden');
   els.pairingCodeInput.value = '';
   els.pairingStatus.textContent = '';
@@ -2857,21 +2873,32 @@ els.btnGenerateCode.addEventListener('click', async () => {
   }
 });
 
+// Pairing-log breadcrumbs (see src/pairingLog.js): pointerdown is logged separately from
+// click so the log can tell "the tap never reached the button" apart from "the handler ran
+// and something after it failed or restarted the app".
+els.btnRedeemCode.addEventListener('pointerdown', () => logPairingStep('Link: button pressed'));
+els.pairingCodeInput.addEventListener('blur', () => logPairingStep('Link: code box lost focus (keyboard closing)'));
+
 els.btnRedeemCode.addEventListener('click', async () => {
   const code = els.pairingCodeInput.value.trim();
+  logPairingStep(`Link: tap received, code length ${code.length}`);
   if (!code) return;
   els.pairingStatus.textContent = 'Linking…';
   try {
     await redeemPairingCode(code);
+    logPairingStep('Link: done');
     els.identityWarning.classList.add('hidden');
     refreshDeviceId();
     els.pairingCodeInput.value = '';
     els.pairingStatus.textContent = 'Linked! Your stats are now combined with the other device.';
     refreshStatsTable();
+    renderPairingLog();
   } catch (err) {
     console.warn('redeemPairingCode failed:', err);
+    logPairingStep(`Link: failed — ${err?.code || ''} ${err?.message || err}`);
     const message = err?.message || 'That code is invalid or already used.';
     els.pairingStatus.textContent = `Couldn't link: ${message}`;
+    renderPairingLog();
   }
 });
 
@@ -2881,6 +2908,13 @@ setMode('fill');
 syncMuteButton();
 startPuzzle(SAMPLE_PUZZLES[0]);
 checkPairedIdentityOnBoot();
+// Only worth a breadcrumb when a pairing log already exists: an "app started" right after a
+// "Link: …" step with no "done"/"failed" in between is the signature of the app restarting
+// mid-attempt. pagehide distinguishes a normal unload (logged) from a crash (not logged).
+if (readPairingLog().length > 0) logPairingStep('App started');
+window.addEventListener('pagehide', () => {
+  if (readPairingLog().length > 0) logPairingStep('App closing/reloading (pagehide)');
+});
 // Current Objective (see TODO.md): the app-wide "screen moves up and down for no reason on
 // iOS" report turned out NOT to be about extra scrollable space (the scrollbar itself was
 // fine whenever real content needed one, per the project owner directly) — it's iOS Safari's

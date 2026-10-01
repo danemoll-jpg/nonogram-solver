@@ -14,6 +14,7 @@
 
 import { ensureSignedIn, getFirestoreClient, getCallable, signInWithPairingToken } from './firebase.js';
 import { hasUnstableId } from './model.js';
+import { logPairingStep } from './pairingLog.js';
 
 function sizeKey(rows, cols) {
   return `${rows}x${cols}`;
@@ -87,8 +88,11 @@ export async function generatePairingCode() {
 // player-facing message otherwise (bad/expired code, offline, not deployed).
 export async function redeemPairingCode(code) {
   const redeem = await getCallable('redeemPairingCode');
+  logPairingStep('Link: Firebase loaded, sending code to server');
   const { data } = await redeem({ code });
+  logPairingStep('Link: server accepted code, signing in');
   const user = await signInWithPairingToken(data.customToken);
+  logPairingStep(`Link: signed in as ${user.uid.slice(0, 8)}`);
   rememberPairedUid(user.uid);
   return true;
 }
