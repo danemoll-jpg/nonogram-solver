@@ -2853,9 +2853,21 @@ els.btnIdentityKeepSeparate.addEventListener('click', async () => {
   els.identityWarning.classList.add('hidden');
 });
 
+els.btnStatsClose.addEventListener('pointerdown', () => logPairingStep('Close button pressed'));
 els.btnStatsClose.addEventListener('click', () => {
   els.statsModal.classList.add('hidden');
 });
+
+// Real-device report: the window "closed" on tapping Link with no reload (a board mark
+// survived). The Close handler is the only code that hides it, so log every actual hide —
+// together with the line above, that separates "the tap landed on Close" from "still open,
+// just pushed off-screen" (no hide logged at all).
+new MutationObserver(() => {
+  if (els.statsModal.classList.contains('hidden') && readPairingLog().length > 0) {
+    const vv = window.visualViewport;
+    logPairingStep(`Stats window hidden (viewport ${Math.round(vv?.height ?? 0)}px, pan ${Math.round(vv?.offsetTop ?? 0)}px)`);
+  }
+}).observe(els.statsModal, { attributes: true, attributeFilter: ['class'] });
 
 els.btnGenerateCode.addEventListener('click', async () => {
   els.pairingCodeDisplay.classList.add('hidden');
