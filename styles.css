@@ -717,14 +717,13 @@ body {
    counting cells by eye afterward. position:fixed + JS-set left/top (clientX/Y) rather than
    anchored to the swept cell, so it reads as "attached to your finger/cursor," not to the
    board; pointer-events:none so it can never itself intercept the drag's own hit-testing
-   (app.js's cellAt uses elementFromPoint at the same coordinates). Offset up-and-centered by
-   the transform below rather than sitting directly on the coordinate, so a touch drag doesn't
-   hide the badge under the player's own finger. */
+   (app.js's cellAt uses elementFromPoint at the same coordinates). Placement relative to the
+   pointer (well clear of a finger on touch, beside it on a vertical drag) is computed in
+   app.js's showDragCountBadge, which needs the badge's measured size to keep it on screen. */
 .drag-count-badge {
   position: fixed;
   z-index: 15;
   pointer-events: none;
-  transform: translate(-50%, calc(-100% - 14px));
   background: var(--gold);
   color: #241a04;
   font-weight: 800;
@@ -733,6 +732,11 @@ body {
   padding: 0.3rem 0.6rem;
   border-radius: 999px;
   box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.35);
+}
+/* Touch: larger, since it sits farther from the eye's focus point (the fingertip). */
+.drag-count-badge--touch {
+  font-size: 1.35rem;
+  padding: 0.4rem 0.8rem;
 }
 
 .status-line {

@@ -1529,12 +1529,48 @@ function dragCountBadge() {
   }
   return dragCountBadgeEl;
 }
-function showDragCountBadge(x, y, count) {
+// How far the badge sits from the pointer. A mouse cursor hides almost nothing, so a small
+// gap is enough; a fingertip (plus the rest of the finger and hand trailing behind it) covers
+// a much bigger area, so a touch drag needs the badge pushed well clear of the contact point —
+// the old shared 14px offset left it under the finger, especially on an upward drag where the
+// finger travels straight into the spot the badge was sitting in (direct feedback).
+const DRAG_BADGE_GAP_MOUSE_PX = 14;
+const DRAG_BADGE_GAP_TOUCH_PX = 56;
+const DRAG_BADGE_EDGE_PAD_PX = 6;
+
+// Places the badge relative to the pointer based on input type and drag axis:
+// - horizontal drag ('row'): above the pointer — the finger moves sideways, never into it.
+// - vertical drag ('col') or not yet axis-locked, on touch: beside the pointer (left, flipping
+//   right near the screen edge) rather than above, since an upward drag would otherwise slide
+//   the finger right over it. Left first because a right hand reaches in from the lower right.
+// Positioned in JS from the badge's measured size (not a CSS transform) so it can be clamped
+// to stay fully on screen.
+function showDragCountBadge(e, count, lockAxis) {
   const el = dragCountBadge();
   el.textContent = String(count);
-  el.style.left = `${x}px`;
-  el.style.top = `${y}px`;
+  const isTouch = e.pointerType === 'touch' || e.pointerType === 'pen';
+  el.classList.toggle('drag-count-badge--touch', isTouch);
   el.classList.remove('hidden');
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  const gap = isTouch ? DRAG_BADGE_GAP_TOUCH_PX : DRAG_BADGE_GAP_MOUSE_PX;
+  const x = e.clientX;
+  const y = e.clientY;
+  let left;
+  let top;
+  if (isTouch && lockAxis !== 'row') {
+    left = x - gap - w;
+    if (left < DRAG_BADGE_EDGE_PAD_PX) left = x + gap; // no room on the left — flip right
+    top = y - h - gap / 2; // a little above the fingertip too, clear of the finger pad itself
+  } else {
+    left = x - w / 2;
+    top = y - h - gap;
+    if (top < DRAG_BADGE_EDGE_PAD_PX) top = y + gap; // no room above — flip below
+  }
+  const maxLeft = window.innerWidth - w - DRAG_BADGE_EDGE_PAD_PX;
+  const maxTop = window.innerHeight - h - DRAG_BADGE_EDGE_PAD_PX;
+  el.style.left = `${Math.max(DRAG_BADGE_EDGE_PAD_PX, Math.min(left, maxLeft))}px`;
+  el.style.top = `${Math.max(DRAG_BADGE_EDGE_PAD_PX, Math.min(top, maxTop))}px`;
 }
 function hideDragCountBadge() {
   dragCountBadgeEl?.classList.add('hidden');
@@ -1753,7 +1789,7 @@ function attachPointerHandlers(grid) {
     // section's header comment).
     if (changed && newState !== UNKNOWN) {
       dragging.count = 1;
-      showDragCountBadge(e.clientX, e.clientY, dragging.count);
+      showDragCountBadge(e, dragging.count, dragging.lockAxis);
     }
     syncAllCellVisuals();
   });
@@ -1763,7 +1799,7 @@ function attachPointerHandlers(grid) {
     if (dragging.paintState !== UNKNOWN) {
       // Keep the badge glued to the pointer between cell boundaries too, not just on a new
       // cell — the whole point is glanceable feedback right where the player is looking.
-      if (dragging.count > 0) showDragCountBadge(e.clientX, e.clientY, dragging.count);
+      if (dragging.count > 0) showDragCountBadge(e, dragging.count, dragging.lockAxis);
     }
     const el = cellAt(e.clientX, e.clientY);
     if (!el) return;
@@ -1866,7 +1902,7 @@ function attachPointerHandlers(grid) {
       dragging.count = dragging.lockAxis === 'row'
         ? Math.abs(c1 - dragging.startCol) + 1
         : Math.abs(r1 - dragging.startRow) + 1;
-      showDragCountBadge(e.clientX, e.clientY, dragging.count);
+      showDragCountBadge(e, dragging.count, dragging.lockAxis);
     }
     syncAllCellVisuals();
   });
