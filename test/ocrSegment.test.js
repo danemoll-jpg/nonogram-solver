@@ -466,4 +466,32 @@ describe('suggestOversizedClueSplit', () => {
       candidates: [{ parts: [1, 2345] }, { parts: [12, 345] }, { parts: [123, 45] }],
     });
   });
+
+  // Real 30x30 scan: row "1, 10124" offered both "10, 1, 24" and "10, 12, 4". With the line's
+  // other number (the leading 1) counted, 1+10+1+24 + 3 gaps = 39 > 30 — only "10, 12, 4"
+  // (exactly 30) fits, so it resolves to a single certain candidate.
+  test('rules out splits whose whole line (other clues + gaps) overflows the line length', () => {
+    assertEqual(suggestOversizedClueSplit('10124', undefined, 30), {
+      candidates: [{ parts: [10, 1, 24] }, { parts: [10, 12, 4] }],
+    });
+    assertEqual(suggestOversizedClueSplit('10124', undefined, 30, [1]), { candidates: [{ parts: [10, 12, 4] }] });
+  });
+
+  test('whole-line filter can push an all-overflowing 2-way tier through to 3-way', () => {
+    // "1110" in a 14-line: 2-way "11, 10" needs 22 cells (dropped); 3-way "1, 1, 10" needs
+    // exactly 14 (fits); every other split has a leading zero or a 0 part.
+    assertEqual(suggestOversizedClueSplit('1110', undefined, 14, []), { candidates: [{ parts: [1, 1, 10] }] });
+  });
+
+  test('falls back to per-part legality when no split fits the whole line', () => {
+    // "1220" in a 25-line alongside a 3: "12, 20" needs 37 cells, "1, 2, 20" needs 29 — nothing
+    // fits, which means something else on the line is misread too, so keep the old answer.
+    assertEqual(suggestOversizedClueSplit('1220', undefined, 25, [3]), { candidates: [{ parts: [12, 20] }] });
+  });
+
+  test('skips the whole-line filter when another clue number is itself oversized', () => {
+    assertEqual(suggestOversizedClueSplit('10124', undefined, 30, [99]), {
+      candidates: [{ parts: [10, 1, 24] }, { parts: [10, 12, 4] }],
+    });
+  });
 });

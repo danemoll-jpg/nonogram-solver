@@ -1248,7 +1248,8 @@ export function initScanWizard({ els, onPuzzleReady, onClose, onOpen }) {
       if (clue.length !== originalClue.length) return null;
       if (clue[oversized.index] !== originalClue[oversized.index]) return null;
       const gaps = numberGeoms[oversized.index];
-      return suggestOversizedClueSplit(String(oversized.value), gaps, oversized.lineLength);
+      const otherClues = clue.filter((_, i) => i !== oversized.index);
+      return suggestOversizedClueSplit(String(oversized.value), gaps, oversized.lineLength, otherClues);
     }
 
     input.addEventListener('input', refreshFlag);

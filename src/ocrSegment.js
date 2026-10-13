@@ -392,15 +392,45 @@ function generateSplitCandidates(valueText, cutCount, hasLineLength, lineLength)
 
 const MAX_SPLIT_CANDIDATES = 3;
 
-export function suggestOversizedClueSplit(valueText, gaps, lineLength) {
+// Whole-line feasibility (a real 30x30 scan: "1, 10124" offered both "10, 1, 24" and "10, 12, 4"
+// — but 1, 10, 1, 24 needs at least 1+10+1+24 + 3 gaps = 39 cells, impossible in a 30-wide
+// line, while 1, 10, 12, 4 fills exactly 30). Each part being individually legal isn't enough:
+// the line's OTHER clue numbers plus the split parts plus one mandatory gap between every pair
+// of runs must still fit. `otherClues` is the line's remaining numbers (excluding the one being
+// split); only trusted when every one of them is itself legal (≤ lineLength) — if another number
+// is ALSO misread/oversized, its value says nothing reliable about how much room is left, so the
+// filter is skipped rather than wrongly rejecting every candidate.
+function wholeLineFilter(otherClues, hasLineLength, lineLength) {
+  if (!hasLineLength || !Array.isArray(otherClues)) return null;
+  if (!otherClues.every((n) => Number.isInteger(n) && n >= 1 && n <= lineLength)) return null;
+  const otherSum = otherClues.reduce((a, b) => a + b, 0);
+  return (parts) => {
+    const runs = otherClues.length + parts.length;
+    return otherSum + parts.reduce((a, b) => a + b, 0) + (runs - 1) <= lineLength;
+  };
+}
+
+function tieredCandidates(valueText, hasLineLength, lineLength, fits) {
+  const keep = (list) => (fits ? list.filter((c) => fits(c.parts)) : list);
+  const twoWay = keep(generateSplitCandidates(valueText, 1, hasLineLength, lineLength));
+  if (twoWay.length > 0) return twoWay;
+  return keep(generateSplitCandidates(valueText, 2, hasLineLength, lineLength));
+}
+
+export function suggestOversizedClueSplit(valueText, gaps, lineLength, otherClues) {
   const digits = valueText.length;
   if (digits < 2) return null;
 
   const hasLineLength = Number.isInteger(lineLength) && lineLength > 0;
+  const fits = wholeLineFilter(otherClues, hasLineLength, lineLength);
 
-  let candidates = generateSplitCandidates(valueText, 1, hasLineLength, lineLength);
-  if (candidates.length === 0) {
-    candidates = generateSplitCandidates(valueText, 2, hasLineLength, lineLength);
+  // Feasibility participates in tiering itself: a 2-way tier whose every candidate overflows the
+  // line falls through to 3-way, the same as an empty 2-way tier. If the whole-line filter rules
+  // out EVERYTHING, something else on the line is misread too — fall back to per-part legality
+  // alone (the pre-existing behavior) rather than offering nothing.
+  let candidates = tieredCandidates(valueText, hasLineLength, lineLength, fits);
+  if (candidates.length === 0 && fits) {
+    candidates = tieredCandidates(valueText, hasLineLength, lineLength, null);
   }
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return { candidates: [{ parts: candidates[0].parts }] };
