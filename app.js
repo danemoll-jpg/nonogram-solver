@@ -264,10 +264,14 @@ function setExplain(content) {
   } else {
     els.explainBody.appendChild(content);
   }
-  // The explain panel's height can change with its content (e.g. a "Back up to..." button
-  // appearing) — re-fit the board since that panel eats into fitBoardToViewport's available
-  // height budget.
-  fitBoardToViewport();
+  // Deliberately NOT re-fitting the board here any more (direct report: "the UI keeps
+  // shrinking"): every hint/explanation changed this panel's height, and re-fitting on each one
+  // resized the whole board area and jumped the controls row around. fitBoardToViewport now
+  // reserves a fixed allowance for this panel instead (see EXPLAIN_PANEL_RESERVE_PX), so a
+  // typical explanation fits without moving anything. Only the body's reserved bottom padding
+  // still tracks the panel's real height, so an unusually long one leaves the page scrollable
+  // rather than covering the controls for good.
+  syncExplainPanelSpace();
 }
 
 // ---- puzzle lifecycle ----
@@ -432,6 +436,10 @@ const MIN_CLUE_FONT_PX = 13;
 const CLUE_DIGIT_PER_FONT = 1.1 / 0.78;
 const CLUE_BASE_PER_FONT = 0.3 / 0.78;
 
+// Room fitBoardToViewport always sets aside for the fixed explain panel — roughly a four-line
+// hint. See setExplain for why this is fixed rather than the panel's live height.
+const EXPLAIN_PANEL_RESERVE_PX = 144;
+
 // Last viewport height fitBoardToViewport actually computed against — see
 // handleViewportResize below for why this is tracked.
 let lastFitViewportHeight = null;
@@ -487,7 +495,10 @@ function fitBoardToViewport() {
     parseFloat(panelStyle.paddingBottom) +
     parseFloat(panelStyle.borderBottomWidth) +
     pagePaddingBottom;
-  const explainPanelHeight = document.getElementById('explain-panel').offsetHeight;
+  // A fixed allowance rather than the panel's current height, so the board area doesn't change
+  // size every time a hint's text changes the panel's height (see setExplain). Sized for a
+  // typical few-line hint; never less than what the panel actually occupies right now.
+  const explainPanelHeight = Math.max(document.getElementById('explain-panel').offsetHeight, EXPLAIN_PANEL_RESERVE_PX);
   const BUFFER_PX = 16;
   // visualViewport.height, not window.innerHeight, when available: innerHeight reflects the
   // LAYOUT viewport, which iOS Safari does not shrink when the on-screen keyboard opens —

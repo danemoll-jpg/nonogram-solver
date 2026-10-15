@@ -633,6 +633,11 @@ writeup of all three.
   collapse around the grid on zoom-out and drag the controls row up); `.nono-grid` uses
   `margin: auto` to center both ways. Verified the box and controls row stay put across every
   zoom level and puzzle size.
+  Second follow-up ("the UI keeps shrinking"): the real cause was `setExplain` re-fitting the
+  board on every hint, since each hint changed the fixed explain panel's height. It now only
+  syncs the body padding; `fitBoardToViewport` reserves a fixed `EXPLAIN_PANEL_RESERVE_PX`
+  (144px, ~4-line hint) instead of the panel's live height. Verified the board area and
+  controls stay put across hints of increasing length.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
