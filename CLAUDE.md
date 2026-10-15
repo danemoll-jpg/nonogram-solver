@@ -637,7 +637,18 @@ writeup of all three.
   board on every hint, since each hint changed the fixed explain panel's height. It now only
   syncs the body padding; `fitBoardToViewport` reserves a fixed `EXPLAIN_PANEL_RESERVE_PX`
   (144px, ~4-line hint) instead of the panel's live height. Verified the board area and
-  controls stay put across hints of increasing length.
+  controls stay put across hints of increasing length. **Superseded by round 3** below.
+  Round 3 (real iPad screenshots: page still zooming, board "wastes far too much space" vs.
+  another app's near-full-screen 30x30): (a) the "shrinking UI" was iOS natively pinch-zooming
+  the whole PAGE alongside the board's own pinch — blocked via `gesturestart/change/end`
+  preventDefault (`app.js`), `touch-action: pan-x pan-y` on `body`, and `maximum-scale=1,
+  user-scalable=no` in the viewport meta; this deliberately drops page pinch-zoom as an
+  accessibility aid since the board has its own zoom now. (b) `#explain-panel` is now a fixed
+  height (6.5rem, 7.5rem narrow) that scrolls internally, replacing the 144px reserve. (c) Page/
+  panel/header/toolbar/status spacing trimmed. (d) Each puzzle opens zoomed to fit
+  (`zoomToFitPending` → `minZoom`), and `#board-root`'s fixed height hugs the zoom-1 grid when
+  smaller. Verified with the user's real 30x30 clues at 820x1180: whole board visible, 18px
+  cells, no overflow, nothing moves on a long hint. Not yet real-device-confirmed.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)

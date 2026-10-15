@@ -265,12 +265,9 @@ function setExplain(content) {
     els.explainBody.appendChild(content);
   }
   // Deliberately NOT re-fitting the board here any more (direct report: "the UI keeps
-  // shrinking"): every hint/explanation changed this panel's height, and re-fitting on each one
-  // resized the whole board area and jumped the controls row around. fitBoardToViewport now
-  // reserves a fixed allowance for this panel instead (see EXPLAIN_PANEL_RESERVE_PX), so a
-  // typical explanation fits without moving anything. Only the body's reserved bottom padding
-  // still tracks the panel's real height, so an unusually long one leaves the page scrollable
-  // rather than covering the controls for good.
+  // shrinking"): every hint used to change this panel's height, and re-fitting on each one
+  // resized the whole board area. The panel is now a fixed height (styles.css) that scrolls
+  // internally, so there's nothing to re-fit for.
   syncExplainPanelSpace();
 }
 
@@ -325,7 +322,7 @@ function startPuzzle(p) {
   puzzleCompleteShown = false;
   // Zoom is about examining THIS board, not a lasting preference — reset it whenever the
   // player moves to a different puzzle, same reasoning as the other per-puzzle resets above.
-  zoomLevel = 1;
+  zoomToFitPending = true; // fitBoardToViewport (via renderBoard below) opens it zoomed to fit
   setExplain(null);
   els.btnContradiction.classList.add('hidden');
   hideMistakePopup();
@@ -436,10 +433,6 @@ const MIN_CLUE_FONT_PX = 13;
 const CLUE_DIGIT_PER_FONT = 1.1 / 0.78;
 const CLUE_BASE_PER_FONT = 0.3 / 0.78;
 
-// Room fitBoardToViewport always sets aside for the fixed explain panel — roughly a four-line
-// hint. See setExplain for why this is fixed rather than the panel's live height.
-const EXPLAIN_PANEL_RESERVE_PX = 144;
-
 // Last viewport height fitBoardToViewport actually computed against — see
 // handleViewportResize below for why this is tracked.
 let lastFitViewportHeight = null;
@@ -495,10 +488,8 @@ function fitBoardToViewport() {
     parseFloat(panelStyle.paddingBottom) +
     parseFloat(panelStyle.borderBottomWidth) +
     pagePaddingBottom;
-  // A fixed allowance rather than the panel's current height, so the board area doesn't change
-  // size every time a hint's text changes the panel's height (see setExplain). Sized for a
-  // typical few-line hint; never less than what the panel actually occupies right now.
-  const explainPanelHeight = Math.max(document.getElementById('explain-panel').offsetHeight, EXPLAIN_PANEL_RESERVE_PX);
+  // Constant now that the panel has a fixed height — see setExplain.
+  const explainPanelHeight = document.getElementById('explain-panel').offsetHeight;
   const BUFFER_PX = 16;
   // visualViewport.height, not window.innerHeight, when available: innerHeight reflects the
   // LAYOUT viewport, which iOS Safari does not shrink when the on-screen keyboard opens —
@@ -602,7 +593,17 @@ function fitBoardToViewport() {
   // zooming out used to collapse board-root around the shrinking grid, dragging the controls row
   // and panel up with it. Floored so an unreliable viewport reading (see the visualViewport saga
   // in TODO.md) can never squash the board to nothing.
-  els.boardRoot.style.height = `${Math.max(240, availableHeight + rootVerticalPadding)}px`;
+  // Hugs the grid's zoom-1 size when that's smaller than the room available (a small puzzle
+  // doesn't get a big empty box), but is still fixed for as long as this puzzle is open —
+  // zooming only ever changes the grid inside it.
+  const boxContentHeight = Math.min(Math.max(240, availableHeight), renderedHeight + fixedHeight);
+  els.boardRoot.style.height = `${boxContentHeight + rootVerticalPadding}px`;
+  // Each new puzzle opens zoomed to show the WHOLE board (direct ask: match another app that
+  // shows an entire 30x30 at once) — minZoom is exactly that fit, and it's 1 whenever the
+  // board already fits at its normal size. A re-fit mid-puzzle (rotation, real resize) keeps
+  // the player's own zoom, just re-clamped to the new bounds.
+  zoomLevel = zoomToFitPending ? minZoom : Math.max(minZoom, Math.min(MAX_ZOOM, zoomLevel));
+  zoomToFitPending = false;
   applyZoom();
 }
 
@@ -616,6 +617,7 @@ function fitBoardToViewport() {
 // other direction — zooming OUT past the legibility floor to see the whole board at a glance —
 // see minZoom's own comment (set in fitBoardToViewport) for why that floor isn't just 1.
 let zoomLevel = 1;
+let zoomToFitPending = false;
 let minZoom = 1; // recomputed per-puzzle in fitBoardToViewport — see that assignment's comment
 const MAX_ZOOM = 4;
 const GRID_BORDER_PX = 2; // .nono-grid's own border width (styles.css) — see fitBoardToViewport
@@ -2265,6 +2267,13 @@ els.libraryBtnDraw.addEventListener('click', () => {
 // Undo, Save progress — see their own `data-tooltip` attributes in index.html). Called once,
 // after all the toolbar markup above is guaranteed to exist.
 initTooltips();
+// iOS Safari ignores user-scalable=no in the viewport meta and can still pinch-zoom the whole
+// PAGE (direct report: pinching the board zoomed the entire UI too). Its proprietary gesture
+// events are the reliable way to stop that; pointer events — which the board's own pinch-zoom
+// uses — still fire normally.
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+}
 updateBoardScrollbars = attachBoardScrollbars(els.boardRoot, els.boardScrollbarH, els.boardScrollbarV);
 
 // ---- puzzle library browse (library-consolidation round — see TODO.md; started as item

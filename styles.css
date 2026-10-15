@@ -48,6 +48,9 @@ html {
 }
 
 body {
+  /* Blocks iOS's own pinch-zoom of the whole PAGE (direct report: pinching the board zoomed
+     the entire UI too) while keeping ordinary scrolling — the board has its own zoom now. */
+  touch-action: pan-x pan-y;
   margin: 0;
   height: 100%;
   /* iOS scroll regression fix (see TODO.md): 100vh is the LAYOUT viewport, which does not
@@ -75,7 +78,9 @@ body {
   /* Trimmed from 2.5rem (space-for-puzzles round — see TODO.md): the top padding plus the
      header's own margin-bottom below were pure whitespace above the actual puzzle, at a
      premium on any viewport short on vertical room. */
-  padding: 1.25rem 1.5rem 2rem;
+  /* Trimmed again (direct report: the board "wastes far too much space" next to another
+     nonogram app's near-full-screen grid) — every rem here comes straight out of the board. */
+  padding: 0.75rem 0.75rem 0.75rem;
   /* #page-root is the one scrolling region during normal play (see the html/body comment
      above) — fills body's now-fixed height exactly, and scrolls internally if its own content
      (rare — fitBoardToViewport already sizes the board to avoid this in the common case) ever
@@ -103,12 +108,12 @@ body {
   text-align: center;
   /* Trimmed from 2rem (space-for-puzzles round — see TODO.md and .page's own padding-top
      comment right above): the title doesn't need this much air above the toolbar/puzzle. */
-  margin-bottom: 0.85rem;
+  margin-bottom: 0.4rem;
 }
 
 .header__title {
   margin: 0 0 0.25rem;
-  font-size: clamp(1.7rem, 4vw, 2.4rem);
+  font-size: clamp(1.4rem, 3vw, 1.9rem);
   font-weight: 800;
   color: var(--gold);
   letter-spacing: -0.01em;
@@ -133,7 +138,7 @@ body {
   background: var(--panel-bg);
   border: 2px solid rgba(230, 183, 63, 0.18);
   border-radius: 1rem;
-  padding: 1.25rem;
+  padding: 0.75rem; /* was 1.25rem — see .page's padding comment */
   box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.25);
   position: relative;
 }
@@ -152,7 +157,7 @@ body {
      per-button padding value in this section was trimmed the same round, for the same
      reason — see each rule's own comment below. */
   gap: 0.45rem;
-  margin-bottom: 1.25rem;
+  margin-bottom: 0.5rem;
 }
 
 /* Toolbar cleanup (see TODO.md): a plain spacer, not a divider line — separates the first
@@ -506,7 +511,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.45rem; /* matches .toolbar's own gap for visual consistency between the two rows */
-  margin-top: 0.6rem;
+  margin-top: 0.4rem;
 }
 
 /* Mirrors .toolbar__gap — a plain spacer (not a divider line) separating Undo/Redo from
@@ -818,7 +823,7 @@ body {
   text-align: center;
   color: var(--text-dim);
   min-height: 1.4em;
-  margin: 0.75rem 0 0;
+  margin: 0.3rem 0 0;
 }
 
 /* Auto-check mistake pop-up: anchored to the board panel itself (not the side panel) so it
@@ -999,7 +1004,10 @@ body {
   right: 0;
   bottom: 0;
   z-index: 30;
-  min-height: 4.5rem;
+  /* A FIXED height (direct report: "the UI keeps shrinking"): this panel used to grow with each
+     hint's text, and since fitBoardToViewport budgets around it, every hint resized the board.
+     Now a constant ~3.5 lines; a longer explanation scrolls inside the panel instead. */
+  height: 6.5rem;
   max-height: 40vh;
   /* See body's min-height comment — same keyboard-resize reasoning applies to this fixed
      panel's own cap. */
@@ -1015,7 +1023,17 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
-  justify-content: center;
+}
+
+/* Vertically centers the panel's content without justify-content: center, which would push an
+   overflowing explanation's first lines above the panel's scrollable top edge — auto margins
+   collapse to 0 once the content overflows, so all of it stays reachable. */
+.explain-panel > :first-child {
+  margin-top: auto;
+}
+
+.explain-panel > :last-child {
+  margin-bottom: auto;
 }
 
 .explain-panel__body {
@@ -1043,7 +1061,7 @@ body {
 
 @media (max-width: 30rem) {
   .page {
-    padding: 2rem 1rem 1.5rem;
+    padding: 0.75rem 0.5rem;
   }
 
   /* Cell sizing on narrow screens is handled dynamically by app.js's fitBoardToViewport
@@ -1056,7 +1074,7 @@ body {
      needed here any more (see body's own comment) — --explain-panel-space tracks whatever
      height this rule (or the panel's actual content) produces automatically. */
   .explain-panel {
-    min-height: 5.5rem;
+    height: 7.5rem;
   }
 }
 
