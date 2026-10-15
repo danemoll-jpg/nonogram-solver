@@ -522,11 +522,22 @@ body {
   margin-top: 0;
 }
 
+.board-viewport {
+  position: relative;
+}
+
 .board-root {
   overflow: auto;
   padding: 0.5rem;
   display: flex;
-  justify-content: center;
+  /* No justify-content: center here — centering an overflowing flex item pushes its left edge
+     to a negative offset that scrolling can never reach (the first columns of a zoomed-in or
+     very wide board were simply cut off). .nono-grid's own margin-inline: auto centers it
+     instead: auto margins collapse to 0 once the grid overflows, so it starts flush left and
+     every column stays scrollable. */
+  /* Native scroll bars hidden — src/boardScrollbars.js draws always-visible, draggable ones
+     instead (iOS never shows native ones persistently); desktop would otherwise show both. */
+  scrollbar-width: none;
   /* Pinch-to-zoom/two-finger pan (see app.js's attachPointerHandlers) now owns every touch
      gesture within the board area itself — including board-root's own small padding strip,
      previously the one part of this container NOT covered by .nono-grid's own touch-action:
@@ -540,8 +551,69 @@ body {
   touch-action: none;
 }
 
+.board-root::-webkit-scrollbar {
+  display: none;
+}
+
+/* Custom board scroll bars — see src/boardScrollbars.js for why these aren't native. Sit over
+   board-root's own 0.5rem padding strip along the bottom/right edges. */
+.board-scrollbar {
+  position: absolute;
+  touch-action: none;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.board-scrollbar[hidden] {
+  display: none;
+}
+
+.board-scrollbar--h {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 14px;
+}
+
+.board-scrollbar--v {
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 14px;
+}
+
+.board-scrollbar--h.board-scrollbar--with-corner {
+  right: 14px;
+}
+
+.board-scrollbar--v.board-scrollbar--with-corner {
+  bottom: 14px;
+}
+
+.board-scrollbar__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  border-radius: 4px;
+  background: rgba(230, 183, 63, 0.55);
+}
+
+.board-scrollbar--h .board-scrollbar__thumb {
+  height: 8px;
+}
+
+.board-scrollbar--v .board-scrollbar__thumb {
+  width: 8px;
+}
+
+.board-scrollbar:hover .board-scrollbar__thumb,
+.board-scrollbar--active .board-scrollbar__thumb {
+  background: rgba(230, 183, 63, 0.9);
+}
+
 .nono-grid {
   display: grid;
+  margin-inline: auto;
   gap: 1px;
   background: var(--grid-line);
   border: 2px solid var(--grid-line-strong);

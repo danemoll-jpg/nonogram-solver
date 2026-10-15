@@ -89,7 +89,13 @@
           </div>
         </div>
 
-        <div id="board-root" class="board-root"></div>
+        <!-- Wrapper exists only to position the custom scroll bars over board-root's edges as
+             siblings, outside the scroll container itself — see src/boardScrollbars.js. -->
+        <div class="board-viewport">
+          <div id="board-root" class="board-root"></div>
+          <div id="board-scrollbar-h" class="board-scrollbar board-scrollbar--h" hidden aria-hidden="true"><div class="board-scrollbar__thumb"></div></div>
+          <div id="board-scrollbar-v" class="board-scrollbar board-scrollbar--v" hidden aria-hidden="true"><div class="board-scrollbar__thumb"></div></div>
+        </div>
 
         <!-- New: Undo/Redo/Eraser moved here from the main toolbar (see TODO.md) — direct
              ergonomic ask, sitting right below the grid so reaching for any of them doesn't

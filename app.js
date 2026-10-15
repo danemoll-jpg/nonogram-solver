@@ -42,6 +42,7 @@ import {
 import { ensureSignedIn } from './src/firebase.js';
 import { cellsOnLine } from './src/geometry.js';
 import { initTooltips, attachTooltip } from './src/tooltip.js';
+import { attachBoardScrollbars } from './src/boardScrollbars.js';
 
 let puzzle = null;
 let board = null;
@@ -104,6 +105,8 @@ const els = {
   btnUndo: document.getElementById('btn-undo'),
   btnRedo: document.getElementById('btn-redo'),
   boardRoot: document.getElementById('board-root'),
+  boardScrollbarH: document.getElementById('board-scrollbar-h'),
+  boardScrollbarV: document.getElementById('board-scrollbar-v'),
   boardControls: document.getElementById('board-controls'),
   statusLine: document.getElementById('status-line'),
   modeFill: document.getElementById('mode-fill'),
@@ -528,11 +531,22 @@ function fitBoardToViewport() {
   // active.
   const clueColWidth = (maxRowClueLen * CLUE_DIGIT_PER_FONT + CLUE_BASE_PER_FONT) * clueFontPx;
   const clueRowHeight = (maxColClueLen * CLUE_DIGIT_PER_FONT + CLUE_BASE_PER_FONT) * clueFontPx;
+  // Bug fix (direct report: "let me zoom out further so I can see the whole thing"): .nono-grid's
+  // 1px gap between every track plus its 2px border on each side never scale with zoom and were
+  // never subtracted here — a 30-wide board rendered ~34px wider than the room measured for it,
+  // so even "fully zoomed out" (minZoom below) still clipped the edges. Subtracted as fixed px.
+  const fixedWidth = puzzle.cols + GRID_BORDER_PX * 2;
+  const fixedHeight = puzzle.rows + GRID_BORDER_PX * 2;
   const cellPx = Math.max(
     MIN_CELL_PX,
     Math.min(
       MAX_CELL_PX,
-      Math.floor(Math.min((availableWidth - clueColWidth) / puzzle.cols, (availableHeight - clueRowHeight) / puzzle.rows))
+      Math.floor(
+        Math.min(
+          (availableWidth - clueColWidth - fixedWidth) / puzzle.cols,
+          (availableHeight - clueRowHeight - fixedHeight) / puzzle.rows
+        )
+      )
     )
   );
 
@@ -553,9 +567,15 @@ function fitBoardToViewport() {
   // already fit fine keeps its old "can't zoom out past normal" behavior unchanged), and
   // genuinely below 1 whenever it is, so zooming all the way out actually reaches "the whole
   // board fits with nothing cut off" instead of stopping short of it.
+  // Only the cells/clue margins scale with zoom (the gaps/border above don't), so the fit ratio
+  // is over the scalable part alone.
   const renderedWidth = clueColWidth + cellPx * puzzle.cols;
   const renderedHeight = clueRowHeight + cellPx * puzzle.rows;
-  const fitZoom = Math.min(1, availableWidth / renderedWidth, availableHeight / renderedHeight);
+  const fitZoom = Math.min(
+    1,
+    (availableWidth - fixedWidth) / renderedWidth,
+    (availableHeight - fixedHeight) / renderedHeight
+  );
   // Absolute floor regardless of how extreme the puzzle/viewport combination is: below this,
   // cells round to a couple of px or less and stop reading as a grid at all (an all-zeros
   // Math.round away from disappearing completely) — seeing the WHOLE board at a glance is
@@ -563,6 +583,12 @@ function fitBoardToViewport() {
   // should essentially never actually hit this; it only matters for pathological cases.
   const ABSOLUTE_MIN_ZOOM_CELL_PX = 4;
   minZoom = Math.max(fitZoom, ABSOLUTE_MIN_ZOOM_CELL_PX / baseCellPx);
+  // Scroll bars (direct ask): bound board-root's own height to the room just measured, so a
+  // board taller than that (zoomed in, or a dense puzzle at the legibility floor) scrolls INSIDE
+  // board-root — where src/boardScrollbars.js's bars can drive it — instead of growing the whole
+  // page and pushing the controls row below the fold. Floored so an unreliable viewport reading
+  // (see the visualViewport saga in TODO.md) can never squash the board to nothing.
+  els.boardRoot.style.maxHeight = `${Math.max(240, availableHeight + rootVerticalPadding)}px`;
   applyZoom();
 }
 
@@ -578,6 +604,8 @@ function fitBoardToViewport() {
 let zoomLevel = 1;
 let minZoom = 1; // recomputed per-puzzle in fitBoardToViewport — see that assignment's comment
 const MAX_ZOOM = 4;
+const GRID_BORDER_PX = 2; // .nono-grid's own border width (styles.css) — see fitBoardToViewport
+let updateBoardScrollbars = () => {};
 const ZOOM_BUTTON_STEP = 1.25;
 let baseCellPx = MIN_CELL_PX;
 let baseClueFontPx = MIN_CLUE_FONT_PX;
@@ -593,7 +621,9 @@ function applyZoom() {
   if (!grid) return;
   const maxRowClueLen = Math.max(1, ...puzzle.rowClues.map((c) => c.length));
   const maxColClueLen = Math.max(1, ...puzzle.colClues.map((c) => c.length));
-  const cellPx = Math.round(baseCellPx * zoomLevel);
+  // floor, not round: rounding up by up to half a px per cell adds up across 30 cells and could
+  // push a fully-zoomed-out board back over the edge it was sized to fit.
+  const cellPx = Math.floor(baseCellPx * zoomLevel);
   const clueFontPx = baseClueFontPx * zoomLevel;
   const clueColWidth = (maxRowClueLen * CLUE_DIGIT_PER_FONT + CLUE_BASE_PER_FONT) * clueFontPx;
   const clueRowHeight = (maxColClueLen * CLUE_DIGIT_PER_FONT + CLUE_BASE_PER_FONT) * clueFontPx;
@@ -601,6 +631,7 @@ function applyZoom() {
   document.documentElement.style.setProperty('--clue-font-size', `${clueFontPx}px`);
   grid.style.gridTemplateColumns = `${clueColWidth}px repeat(${puzzle.cols}, ${cellPx}px)`;
   grid.style.gridTemplateRows = `${clueRowHeight}px repeat(${puzzle.rows}, ${cellPx}px)`;
+  updateBoardScrollbars();
 }
 
 // Changes the zoom level while keeping whatever content point was under (anchorClientX,
@@ -2220,6 +2251,7 @@ els.libraryBtnDraw.addEventListener('click', () => {
 // Undo, Save progress — see their own `data-tooltip` attributes in index.html). Called once,
 // after all the toolbar markup above is guaranteed to exist.
 initTooltips();
+updateBoardScrollbars = attachBoardScrollbars(els.boardRoot, els.boardScrollbarH, els.boardScrollbarV);
 
 // ---- puzzle library browse (library-consolidation round — see TODO.md; started as item
 // 9's save-to-library slice) ----

@@ -617,6 +617,18 @@ writeup of all three.
   restored user), plus a localStorage paired-uid guard that warns and offers re-pairing on a
   mismatch. SDK-level-verified; not yet real-device-confirmed. See `TODO.md`.
 
+- **Board scroll bars + zoom-out fix — done, preview-verified (768x1024 iPad-portrait
+  viewport, random 30x30); not yet real-device-confirmed.** New `src/boardScrollbars.js` draws
+  always-visible, draggable custom scroll bars (siblings of `#board-root` inside a new
+  `.board-viewport` wrapper) — native ones are hidden, since iOS only shows non-draggable
+  overlay bars and `.board-root`'s `touch-action: none` blocks one-finger native scroll anyway.
+  `fitBoardToViewport` now caps `#board-root`'s `max-height` to the measured available height,
+  so a big/zoomed board scrolls inside the board instead of growing the page. Two real bugs
+  fixed: `.board-root`'s `justify-content: center` made the left edge of an overflowing board
+  unreachable (replaced by `margin-inline: auto` on `.nono-grid`), and the fit/minZoom math
+  ignored the grid's unscaled 1px gaps + 2px border (~34px on a 30-wide board), so full zoom-out
+  still clipped — verified a fully-zoomed-out 30x30 now fits with zero overflow.
+
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
 - Build: none — it's static files, nothing to build
