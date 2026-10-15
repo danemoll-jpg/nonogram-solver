@@ -613,7 +613,10 @@ body {
 
 .nono-grid {
   display: grid;
-  margin-inline: auto;
+  /* margin: auto centers the grid both ways inside board-root's now fixed-size box (see
+     fitBoardToViewport) — and, unlike flex centering, collapses to 0 on an axis where the grid
+     overflows, so every edge stays reachable by scrolling. */
+  margin: auto;
   gap: 1px;
   background: var(--grid-line);
   border: 2px solid var(--grid-line-strong);

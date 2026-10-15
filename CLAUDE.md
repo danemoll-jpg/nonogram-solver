@@ -628,6 +628,11 @@ writeup of all three.
   unreachable (replaced by `margin-inline: auto` on `.nono-grid`), and the fit/minZoom math
   ignored the grid's unscaled 1px gaps + 2px border (~34px on a 30-wide board), so full zoom-out
   still clipped — verified a fully-zoomed-out 30x30 now fits with zero overflow.
+  Follow-up per direct feedback ("keep the window always the same size, only shrink and zoom
+  the grid"): `#board-root` now gets a fixed `height` (was `max-height`, which let the box
+  collapse around the grid on zoom-out and drag the controls row up); `.nono-grid` uses
+  `margin: auto` to center both ways. Verified the box and controls row stay put across every
+  zoom level and puzzle size.
 
 ## Commands
 - Test: `npm test` (or `node test/run.js`)

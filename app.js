@@ -583,12 +583,15 @@ function fitBoardToViewport() {
   // should essentially never actually hit this; it only matters for pathological cases.
   const ABSOLUTE_MIN_ZOOM_CELL_PX = 4;
   minZoom = Math.max(fitZoom, ABSOLUTE_MIN_ZOOM_CELL_PX / baseCellPx);
-  // Scroll bars (direct ask): bound board-root's own height to the room just measured, so a
+  // Scroll bars (direct ask): fix board-root's own height to the room just measured, so a
   // board taller than that (zoomed in, or a dense puzzle at the legibility floor) scrolls INSIDE
   // board-root — where src/boardScrollbars.js's bars can drive it — instead of growing the whole
-  // page and pushing the controls row below the fold. Floored so an unreliable viewport reading
-  // (see the visualViewport saga in TODO.md) can never squash the board to nothing.
-  els.boardRoot.style.maxHeight = `${Math.max(240, availableHeight + rootVerticalPadding)}px`;
+  // page and pushing the controls row below the fold. A fixed `height`, not `max-height`: per
+  // direct follow-up ("keep the window always the same size, only shrink and zoom the grid"),
+  // zooming out used to collapse board-root around the shrinking grid, dragging the controls row
+  // and panel up with it. Floored so an unreliable viewport reading (see the visualViewport saga
+  // in TODO.md) can never squash the board to nothing.
+  els.boardRoot.style.height = `${Math.max(240, availableHeight + rootVerticalPadding)}px`;
   applyZoom();
 }
 
