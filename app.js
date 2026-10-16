@@ -357,6 +357,7 @@ function renderBoard() {
   for (let c = 0; c < puzzle.cols; c++) {
     const el = document.createElement('div');
     el.className = 'nono-clue nono-clue--col';
+    el.dataset.col = String(c); // lets a tap on the clue itself select its column (attachPointerHandlers)
     el.innerHTML = clueHtml(puzzle.colClues[c]);
     grid.appendChild(el);
     colClueEls.push(el);
@@ -365,6 +366,7 @@ function renderBoard() {
   for (let r = 0; r < puzzle.rows; r++) {
     const rc = document.createElement('div');
     rc.className = 'nono-clue nono-clue--row';
+    rc.dataset.row = String(r);
     rc.innerHTML = clueHtml(puzzle.rowClues[r]);
     grid.appendChild(rc);
     rowClueEls.push(rc);
@@ -1739,13 +1741,30 @@ function attachPointerHandlers(grid) {
   // cleared on every pointerdown; this one tracks raw pointer position instead, live during
   // the interaction. Local to attachPointerHandlers (like `dragging`) so it naturally resets
   // on every renderBoard rather than needing separate cleanup when cellEls is rebuilt.
+  //
+  // Direct follow-up ask ("when I click on a column or a row, enlarge the numbers and highlight
+  // that line"): the highlight now STAYS on the last row/column touched after the finger lifts,
+  // instead of clearing on release, and that line's clue numbers are enlarged
+  // (.nono-clue--focus) so they're easy to read against the line on a dense puzzle. Tapping a
+  // clue label itself selects just that one line; tapping the same clue again clears it.
+  // Either of row/col may be null (a clue tap selects only one line).
   let crosshair = null; // { row, col } | null
+
+  function toggleCrosshairClasses(on) {
+    const { row, col } = crosshair;
+    if (row !== null) {
+      for (let c = 0; c < puzzle.cols; c++) cellEls.get(`${row},${c}`)?.classList.toggle('nono-cell--crosshair', on);
+      rowClueEls[row]?.classList.toggle('nono-clue--focus', on);
+    }
+    if (col !== null) {
+      for (let r = 0; r < puzzle.rows; r++) cellEls.get(`${r},${col}`)?.classList.toggle('nono-cell--crosshair', on);
+      colClueEls[col]?.classList.toggle('nono-clue--focus', on);
+    }
+  }
 
   function clearCrosshairHighlight() {
     if (!crosshair) return;
-    const { row, col } = crosshair;
-    for (let c = 0; c < puzzle.cols; c++) cellEls.get(`${row},${c}`)?.classList.remove('nono-cell--crosshair');
-    for (let r = 0; r < puzzle.rows; r++) cellEls.get(`${r},${col}`)?.classList.remove('nono-cell--crosshair');
+    toggleCrosshairClasses(false);
     crosshair = null;
   }
 
@@ -1753,12 +1772,19 @@ function attachPointerHandlers(grid) {
     if (crosshair && crosshair.row === row && crosshair.col === col) return;
     clearCrosshairHighlight();
     crosshair = { row, col };
-    for (let c = 0; c < puzzle.cols; c++) cellEls.get(`${row},${c}`)?.classList.add('nono-cell--crosshair');
-    for (let r = 0; r < puzzle.rows; r++) cellEls.get(`${r},${col}`)?.classList.add('nono-cell--crosshair');
+    toggleCrosshairClasses(true);
   }
 
   grid.addEventListener('pointerdown', (e) => {
     const el = e.target.closest('.nono-cell');
+    const clueEl = el ? null : e.target.closest('.nono-clue');
+    if (clueEl) {
+      // A tap on a clue label selects that line (see the crosshair section's comment above).
+      const row = clueEl.dataset.row !== undefined ? Number(clueEl.dataset.row) : null;
+      const col = clueEl.dataset.col !== undefined ? Number(clueEl.dataset.col) : null;
+      if (crosshair && crosshair.row === row && crosshair.col === col) clearCrosshairHighlight();
+      else setCrosshairHighlight(row, col);
+    }
     // Current Objective (TODO.md item 4) — logged BEFORE the early return below, specifically
     // to catch the "touch-target imprecision" hypothesis: a tap that misses every .nono-cell
     // entirely (lands on a grid line, border, or clue label) produces no mark and no mistake,
@@ -1986,7 +2012,8 @@ function attachPointerHandlers(grid) {
     }
     dragging = null;
     hideDragCountBadge(); // transient in-stroke feedback only — see this section's header comment
-    clearCrosshairHighlight();
+    // The crosshair is deliberately NOT cleared here any more — it stays on the last line
+    // touched (see the crosshair section's comment).
     syncAllCellVisuals();
   }
   grid.addEventListener('pointerup', endDrag);

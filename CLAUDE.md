@@ -650,6 +650,16 @@ writeup of all three.
   smaller. Verified with the user's real 30x30 clues at 820x1180: whole board visible, 18px
   cells, no overflow, nothing moves on a long hint. Not yet real-device-confirmed.
 
+- **Selected row/column highlight + enlarged clue numbers — done, preview-verified with the
+  user's real 30x30 clues at 820x1180; not yet real-device-confirmed.** Direct ask: "when I
+  click on a column or a row, enlarge the numbers and highlight that line." The existing
+  press-time crosshair (`app.js`) now persists after release on the last cell touched, and
+  that row's/column's clue gets `.nono-clue--focus` (1.3x font, gold outline, raised above
+  neighbours). Tapping a clue label selects just that line; tapping it again clears it (clue
+  elements now carry `data-row`/`data-col`). Row clues deliberately keep their normal 0.4em
+  gap when enlarged — a tighter gap made "1 2 3 5 4 1 1 1" read as "12354111" (the old
+  clue-number-spacing bug). Crosshair overlay strength 0.13 → 0.2.
+
 ## Commands
 - Test: `npm test` (or `node test/run.js`)
 - Build: none — it's static files, nothing to build

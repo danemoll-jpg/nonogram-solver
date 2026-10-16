@@ -16,7 +16,7 @@
   /* Row/column interaction highlight (Current Objective — see TODO.md) — deliberately a
      neutral off-white tint, not blue/gold, so it never reads as a hint/mistake signal like
      .reasoning/.result above. */
-  --crosshair-highlight: rgba(242, 236, 221, 0.13);
+  --crosshair-highlight: rgba(242, 236, 221, 0.2);
   --danger: #e0654f;
   --warn: #d99a3c;
 }
@@ -695,6 +695,27 @@ body {
 
 .nono-clue.satisfied {
   color: rgba(242, 236, 221, 0.25);
+}
+
+/* The selected row/column's clue (direct ask: "enlarge the numbers and highlight that line" —
+   see app.js's crosshair section). Enlarged in place rather than in a popup so the numbers stay
+   lined up with their own line. A row keeps its normal 0.4em gap (tightening it made
+   "1 2 3" read as "123" — the clue-number-spacing bug again); a column's stacked numbers can
+   lose theirs safely. z-index + a solid background let any overflow sit cleanly on top of the
+   neighbouring clues instead of colliding with them. */
+.nono-clue--focus {
+  position: relative;
+  z-index: 2;
+  overflow: visible;
+  font-size: calc(var(--clue-font-size, 0.78rem) * 1.3);
+  color: var(--text);
+  background: #3a3a22;
+  box-shadow: inset 0 0 0 2px var(--gold);
+}
+
+.nono-clue--col.nono-clue--focus {
+  gap: 0;
+  line-height: 1.05;
 }
 
 /* Current Objective (per-number clue gray-out — see TODO.md and app.js's applyAnchoredClasses):
